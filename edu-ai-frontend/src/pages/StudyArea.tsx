@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { BookOpen, Target, FileText, LayoutDashboard, ChevronRight } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DraftBoard } from "@/components/DraftBoard";
 
 export default function StudyArea() {
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -62,11 +62,11 @@ export default function StudyArea() {
             </div>
             
             {/* Content Area */}
-            <div className="flex-1 overflow-hidden flex flex-col pt-4 px-6 md:pt-6 md:px-8">
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                <BookOpen className="w-12 h-12 text-slate-300 mb-4" />
-                <p>欢迎来到学习区，您的学习内容将在这里展示。</p>
-              </div>
+            <div className="flex-1 overflow-hidden flex flex-col pt-4 px-6 md:pt-6 md:px-8 pb-4">
+               <div className="w-full h-full flex flex-col">
+                  {/* <h2 className="text-xl font-bold mb-4">草稿纸 画板功能测试</h2> */}
+                  <DraftBoard />
+               </div>
             </div>
           </div>
 
