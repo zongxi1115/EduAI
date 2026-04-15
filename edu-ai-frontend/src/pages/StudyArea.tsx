@@ -4,7 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { DraftBoard } from "@/components/DraftBoard";
+import { SingleChoiceQuestion } from "@/components/SingleChoiceQuestion";
+import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
 
 export default function StudyArea() {
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -62,12 +63,43 @@ export default function StudyArea() {
             </div>
             
             {/* Content Area */}
-            <div className="flex-1 overflow-hidden flex flex-col pt-4 px-6 md:pt-6 md:px-8 pb-4">
-               <div className="w-full h-full flex flex-col">
-                  {/* <h2 className="text-xl font-bold mb-4">草稿纸 画板功能测试</h2> */}
-                  <DraftBoard 
-                    questionContent="已知函数 $f(x) = \frac{\ln x}{x} + ax$ ($a \in \mathbb{R}$)。\n\n1. 若 $a = -1$, 求 $f(x)$ 的单调区间;\n2. 证明：若 $a > 0$, 则 $f(x) > 0$"
-                  />
+            <div className="flex-1 overflow-hidden flex flex-col pt-4 px-6 md:pt-6 md:px-8 pb-8">
+               <div className="w-full h-full flex flex-col gap-10 overflow-y-auto pr-4">
+                  {/* 单选题测试 */}
+                  <div>
+                    <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">一、单选题测试</h2>
+                    <SingleChoiceQuestion
+                       questionContent={String.raw`已知复数 $z = \frac{1+i}{1-i}$，则 $|z|$ 的值为：`}
+                       options={[
+                          { id: "A", content: String.raw`$\frac{1}{2}$` },
+                          { id: "B", content: String.raw`$1$` },
+                          { id: "C", content: String.raw`$\sqrt{2}$` },
+                          { id: "D", content: String.raw`$2$` }
+                       ]}
+                    />
+                  </div>
+
+                  {/* 编程题测试 */}
+                  <div>
+                    <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">二、编程题测试</h2>
+                    <ProgrammingQuestion
+                       questionContent={String.raw`### 两数之和
+
+给定一个整数数组 $nums$ 和一个整数目标值 $target$，请你在该数组中找出 **和为目标值** $target$ 的那 **两个** 整数，并返回它们的数组下标。
+
+你可以假设每种输入只会对应一个答案。但是，数组中同一个元素在答案里不能重复出现。
+
+你可以按任意顺序返回答案。
+
+**示例 1：**
+> **输入：** $nums = [2,7,11,15]$, $target = 9$  
+> **输出：** $[0,1]$  
+> **解释：** 因为 $nums[0] + nums[1] == 9$ ，返回 $[0, 1]$ 。
+`}
+                       language="javascript"
+                       initialCode={`/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number[]}\n */\nvar twoSum = function(nums, target) {\n    \n};`}
+                    />
+                  </div>
                </div>
             </div>
           </div>

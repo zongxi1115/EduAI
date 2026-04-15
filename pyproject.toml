@@ -9,15 +9,18 @@ description = "LangGraph teaching preparation multi-agent workflow"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "fastapi>=0.115.0",
   "langgraph>=0.2.0",
   "langchain-core>=0.3.0",
   "langchain-openai>=0.2.0",
   "pydantic>=2.7.0",
   "python-dotenv>=1.0.1",
+  "uvicorn>=0.30.0",
 ]
 
 [project.scripts]
 edu-prep = "edu_multi_agent.main:main"
+edu-prep-api = "edu_multi_agent.api:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
