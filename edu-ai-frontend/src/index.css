@@ -1,0 +1,18 @@
+html,
+body,
+#root {
+    min-height: 100%;
+}
+
+body {
+    min-width: 320px;
+}
+
+button {
+    font: inherit;
+}
+
+img {
+    display: block;
+    max-width: 100%;
+}
