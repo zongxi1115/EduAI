@@ -17,6 +17,7 @@
     "clsx": "^2.1.1",
     "katex": "^0.16.45",
     "lucide-react": "^1.8.0",
+    "mathlive": "^0.109.1",
     "perfect-freehand": "^1.2.3",
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",

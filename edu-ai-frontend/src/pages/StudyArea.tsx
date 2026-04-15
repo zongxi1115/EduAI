@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SingleChoiceQuestion } from "@/components/SingleChoiceQuestion";
 import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
+import { FillInTheBlanksQuestion } from "@/components/FillInTheBlanksQuestion";
 
 export default function StudyArea() {
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -98,6 +99,16 @@ export default function StudyArea() {
 `}
                        language="javascript"
                        initialCode={`/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number[]}\n */\nvar twoSum = function(nums, target) {\n    \n};`}
+                       initialRunnerCode={`return twoSum([2, 7, 11, 15], 9);`}
+                    />
+                  </div>
+                  {/* 填空题测试 */}
+                  <div>
+                    <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">三、填空题测试</h2>
+                    <FillInTheBlanksQuestion
+                       questionContent={String.raw`世界上最高的山峰是 ___，它的海拔高度大约是 ___ 米。
+
+已知的相对论质能方程为： ___，由物理学家 ___ 提出。请在下方写下你的计算思路，如：求 $\sqrt{16}$ 的结果是 \_\_\_。`}
                     />
                   </div>
                </div>
