@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Copy, Quote, Sparkles, X } from "lucide-react";
+import { Copy, Sparkles, X } from "lucide-react";
 import { Message, MessageAvatar, MessageContent, MessageActions, MessageAction } from "@/components/ui/message";
 
 type ChatMessage = {
@@ -317,13 +317,13 @@ export function AIChatDrawer({
             className="fixed inset-0 z-[240] bg-black/20 backdrop-blur-sm"
             onClick={onClose}
           />
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[250] flex max-h-screen justify-center px-4 pb-4 pt-12 sm:px-6 sm:pb-6">
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[250] flex max-h-screen pt-12">
             <motion.section
               initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 100, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 100, scale: 0.95 }}
               transition={reduceMotion ? { duration: 0 } : SHEET_SPRING}
-              className="pointer-events-auto flex h-[min(82vh,48rem)] w-full max-w-4xl flex-col overflow-hidden rounded-t-[2.5rem] sm:rounded-[2.5rem] border border-border/40 bg-background/95 shadow-2xl backdrop-blur-2xl"
+              className="pointer-events-auto flex h-[min(82vh,48rem)] w-full flex-col overflow-hidden border border-x-0 border-b-0 border-border/40 bg-background/95 shadow-2xl backdrop-blur-2xl"
             >
               {/* Drag Handle (Visual only) */}
               <div className="flex w-full justify-center pt-4 pb-1">
@@ -345,21 +345,6 @@ export function AIChatDrawer({
                         AI 正结合你选中的内容，为你提供专属的知识讲解。
                       </p>
                     </div>
-
-                    {selectionContext.trim() && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.1 }}
-                        className="mt-4 max-w-2xl rounded-2xl border border-border/40 bg-muted/40 px-5 py-4 text-sm text-muted-foreground"
-                      >
-                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                          <Quote className="h-3.5 w-3.5 text-primary/70" />
-                          选中的内容
-                        </div>
-                        <p className="line-clamp-3 leading-relaxed text-foreground/75">{selectionContext}</p>
-                      </motion.div>
-                    )}
                   </div>
 
                   <button

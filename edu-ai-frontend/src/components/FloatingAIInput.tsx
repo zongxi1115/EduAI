@@ -32,6 +32,19 @@ const BLOCK_TAGS = new Set([
   "TH",
 ]);
 
+const IGNORED_TAGS = new Set([
+  "BUTTON",
+  "DIALOG",
+  "INPUT",
+  "MATH-FIELD",
+  "NOSCRIPT",
+  "PATH",
+  "SCRIPT",
+  "STYLE",
+  "SVG",
+  "TEXTAREA",
+]);
+
 function normalizeText(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -77,13 +90,98 @@ function getClosestBlockElement(node: Node | null) {
   return null;
 }
 
+function getElementFromNode(node: Node | null) {
+  return node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+}
+
+function getKatexRoot(node: Node | null) {
+  return getElementFromNode(node)?.closest(".katex");
+}
+
+function expandRangeAroundKatex(range: Range) {
+  const expandedRange = range.cloneRange();
+  const startKatex = getKatexRoot(expandedRange.startContainer);
+  const endKatex = getKatexRoot(expandedRange.endContainer);
+
+  if (startKatex) {
+    expandedRange.setStartBefore(startKatex);
+  }
+
+  if (endKatex) {
+    expandedRange.setEndAfter(endKatex);
+  }
+
+  return expandedRange;
+}
+
+function getKatexText(element: Element) {
+  const annotation =
+    element.querySelector("annotation[encoding='application/x-tex']") ??
+    element.querySelector("annotation");
+
+  const rawText = normalizeText(annotation?.textContent ?? "");
+  return rawText ? `$${rawText}$` : "";
+}
+
+function serializeNodeText(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? "";
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+    return "";
+  }
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const element = node as Element;
+
+    if (element.classList.contains("katex")) {
+      const katexText = getKatexText(element);
+      return katexText ? ` ${katexText} ` : "";
+    }
+
+    if (
+      element.classList.contains("katex-html") ||
+      element.classList.contains("katex-mathml") ||
+      element.getAttribute("aria-hidden") === "true" ||
+      IGNORED_TAGS.has(element.tagName)
+    ) {
+      return "";
+    }
+
+    if (element.tagName === "BR") {
+      return "\n";
+    }
+  }
+
+  let result = "";
+  node.childNodes.forEach((childNode) => {
+    result += serializeNodeText(childNode);
+  });
+
+  if (node.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has((node as Element).tagName)) {
+    result += "\n";
+  }
+
+  return result;
+}
+
+function getSelectionText(selection: Selection) {
+  if (selection.rangeCount === 0) {
+    return "";
+  }
+
+  const safeRange = expandRangeAroundKatex(selection.getRangeAt(0));
+  return normalizeText(serializeNodeText(safeRange.cloneContents()));
+}
+
 function extractContextFromSelection(selection: Selection, fallbackText: string) {
-  const range = selection.getRangeAt(0);
+  const range = expandRangeAroundKatex(selection.getRangeAt(0));
   const normalizedSelection = normalizeText(fallbackText);
   let currentElement = getClosestBlockElement(range.commonAncestorContainer);
 
   while (currentElement) {
-    const candidate = normalizeText(currentElement.textContent ?? "");
+    const candidate = normalizeText(serializeNodeText(currentElement.cloneNode(true)));
     if (candidate) {
       return sliceContextWindow(candidate, normalizedSelection);
     }
@@ -185,9 +283,9 @@ export function FloatingAIInput() {
         return;
       }
 
-      const text = selection.toString().trim();
+      const text = getSelectionText(selection);
       if (text.length > 0) {
-        const range = selection.getRangeAt(0);
+        const range = expandRangeAroundKatex(selection.getRangeAt(0));
         const rect = range.getBoundingClientRect();
         setPosition(resolveFloatingPosition(rect));
         setSelectionSnapshot({
@@ -207,7 +305,7 @@ export function FloatingAIInput() {
       }
 
       const selection = window.getSelection();
-      if (!selection || selection.toString().trim().length === 0) {
+      if (!selection || getSelectionText(selection).length === 0) {
         if (!isInteracting.current) {
           setHasSelection(false);
           setSelectionSnapshot({ selection: "", context: "" });
