@@ -7,6 +7,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/study" replace />} />
         <Route path="/study" element={<StudyArea />} />
+        <Route path="/study/:runId" element={<StudyArea />} />
       </Routes>
     </BrowserRouter>
   );

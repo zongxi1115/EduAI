@@ -7,6 +7,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 @dataclass(slots=True)
 class Settings:
     base_url: str
@@ -23,7 +26,12 @@ class Settings:
         base_url = os.getenv("BASE_URL", "").strip()
         api_key = os.getenv("API_KEY", "").strip()
         model_name = os.getenv("MODEL_NAME", "").strip()
-        output_root = Path(os.getenv("OUTPUT_ROOT", "outputs")).resolve()
+        output_root_raw = os.getenv("OUTPUT_ROOT", "outputs").strip() or "outputs"
+        output_root_path = Path(output_root_raw)
+        if output_root_path.is_absolute():
+            output_root = output_root_path.resolve()
+        else:
+            output_root = (PROJECT_ROOT / output_root_path).resolve()
         temperature = float(os.getenv("TEMPERATURE", "0.2"))
         request_timeout_seconds = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "180"))
 

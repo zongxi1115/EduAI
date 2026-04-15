@@ -58,12 +58,39 @@ class RunStatusResponse(BaseModel):
         default=None,
         description="创建任务时提交的原始请求体。",
     )
+    plan_summary: str | None = Field(
+        default=None,
+        description="任务规划阶段产出的高层摘要。",
+    )
+    required_materials: list[str] = Field(
+        default_factory=list,
+        description="规划阶段整理出的必备材料清单。",
+    )
+    teacher_checklist: list[str] = Field(
+        default_factory=list,
+        description="教师执行前可参考的准备检查项。",
+    )
+    teaching_focus: list[str] = Field(
+        default_factory=list,
+        description="课程目标与核心教学关注点。",
+    )
+    quality_bar: list[str] = Field(
+        default_factory=list,
+        description="本次任务产出的质量要求。",
+    )
     artifact_count: int = Field(description="当前已知的生成产物数量。")
     error: str | None = Field(
         default=None,
         description="任务失败时的错误信息。",
     )
     links: RunLinks = Field(description="该任务相关接口的快捷链接。")
+
+
+class RunListResponse(BaseModel):
+    """课前准备任务列表响应。"""
+
+    total: int = Field(description="符合筛选条件的任务总数。")
+    items: list[RunStatusResponse] = Field(description="任务状态列表。")
 
 
 class FileDescriptor(BaseModel):

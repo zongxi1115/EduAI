@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
+from edu_multi_agent.config import Settings
 from .app import create_app
 
 
@@ -35,6 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
+    settings = Settings.from_env()
+    project_root = Path(__file__).resolve().parents[2]
+    source_root = Path(__file__).resolve().parents[1]
 
     import uvicorn
 
@@ -43,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        reload_dirs=[str(source_root)] if args.reload else None,
+        reload_excludes=[str(settings.output_root), str(project_root / "edu-ai-frontend" / "dist")]
+        if args.reload
+        else None,
     )
     return 0
 

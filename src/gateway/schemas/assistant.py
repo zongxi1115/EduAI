@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SelectionQuestionMessage(BaseModel):
@@ -41,16 +41,6 @@ class SelectionQuestionRequest(BaseModel):
         default_factory=list,
         description="同一选区问答抽屉中之前的历史消息，按时间顺序排列。",
     )
-
-    @model_validator(mode="after")
-    def validate_question_sources(self) -> "SelectionQuestionRequest":
-        has_selection = bool((self.selection or "").strip())
-        has_history = any(message.content.strip() for message in self.history)
-
-        if not has_selection and not has_history:
-            raise ValueError("Either selection or history must be provided.")
-
-        return self
 
     model_config = ConfigDict(
         json_schema_extra={

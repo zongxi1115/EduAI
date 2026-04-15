@@ -108,6 +108,11 @@ class RunRegistry:
         with self._lock:
             return self._sessions.get(run_id)
 
+    def list_session_ids(self) -> list[str]:
+        """Return all run identifiers that are currently tracked in memory."""
+        with self._lock:
+            return list(self._sessions.keys())
+
     def resolve_run_dir(self, run_id: str) -> Path:
         """Resolve the output directory for a run from memory or persisted outputs."""
         session = self.get_session(run_id)

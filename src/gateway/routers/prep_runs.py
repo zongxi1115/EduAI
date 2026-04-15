@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Path as ApiPath, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path as ApiPath, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from edu_multi_agent.config import Settings
@@ -18,14 +18,17 @@ from ..dependencies import get_run_registry, get_settings
 from ..schemas.prep_runs import (
     ArtifactListResponse,
     RunCreatedResponse,
+    RunListResponse,
     RunStatus,
     RunStatusResponse,
 )
 from ..services.prep_runs import (
     build_artifacts_response,
     build_links,
+    build_run_list_response,
     build_status_response,
     encode_sse,
+    list_run_views,
     load_run_view,
     load_stored_events,
     safe_path_within,
@@ -56,6 +59,33 @@ data: {"index":15,"timestamp":"2026-04-16T10:30:22+08:00","event":"workflow_comp
 """
 
 
+def _parse_optional_run_status(raw_status: str | None) -> RunStatus | None:
+    """Parse an optional run status filter, treating blank strings as None."""
+    if raw_status is None:
+        return None
+
+    normalized = raw_status.strip()
+    if not normalized:
+        return None
+
+    try:
+        return RunStatus(normalized)
+    except ValueError as exc:
+        expected = ", ".join(f"'{status.value}'" for status in RunStatus)
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {
+                    "type": "enum",
+                    "loc": ["query", "status"],
+                    "msg": f"Input should be {expected}",
+                    "input": raw_status,
+                    "ctx": {"expected": expected},
+                }
+            ],
+        ) from exc
+
+
 @router.post(
     "",
     response_model=RunCreatedResponse,
@@ -78,6 +108,46 @@ def create_prep_run(
         created_at=session.created_at,
         output_dir=str(session.output_dir),
         links=build_links(session.run_id),
+    )
+
+
+@router.get(
+    "",
+    response_model=RunListResponse,
+    summary="获取课前准备任务列表",
+    description=(
+        "返回当前系统中可见的课前准备任务列表，包含运行中任务和已落盘的历史任务。"
+        "可选按状态筛选，并限制返回条数。"
+    ),
+    response_description="课前准备任务的状态列表。",
+)
+def list_prep_runs(
+    registry: RunRegistryDep,
+    settings: SettingsDep,
+    status: str | None = Query(
+        None,
+        description="按任务状态过滤，例如 queued、running、succeeded、failed。留空时表示不过滤。",
+    ),
+    limit: int = Query(
+        100,
+        ge=1,
+        le=500,
+        description="最多返回的任务条数。",
+    ),
+) -> RunListResponse:
+    """列出所有可见的课前准备任务。"""
+    parsed_status = _parse_optional_run_status(status)
+    views = list_run_views(registry, settings, status=parsed_status)
+    return build_run_list_response(views[:limit], total=len(views))
+
+
+@router.get("/events", include_in_schema=False)
+@router.get("//events", include_in_schema=False)
+def missing_run_id_events() -> None:
+    """Provide a clearer error when the caller forgot to supply run_id."""
+    raise HTTPException(
+        status_code=400,
+        detail="Missing run_id. Use /api/v1/prep-runs/{run_id}/events.",
     )
 
 

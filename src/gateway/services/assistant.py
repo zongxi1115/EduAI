@@ -9,8 +9,8 @@ Answer the user's question about the selected content.
 
 Grounding rules:
 - If selected text is provided for this turn, treat it as the primary source.
-- If selected text is not provided for this turn, use the conversation history as the primary source.
-- Use the optional surrounding context only when it is provided for this turn.
+- If selected text is not provided for this turn but conversation history exists, use the conversation history as the primary source.
+- If neither selected text nor conversation history is provided, use the optional surrounding context when available.
 - If the provided text is insufficient, say so directly and explain what is missing.
 - Do not invent facts, references, or quotes that are not supported by the provided text.
 
@@ -37,17 +37,28 @@ def build_selection_qa_prompts(request: SelectionQuestionRequest) -> tuple[str, 
     context = (request.context or "").strip()
     selection = (request.selection or "").strip()
     has_selection = bool(selection)
+    has_history = any(message.content.strip() for message in request.history)
+    has_context = bool(context)
     context_block = context if context else "(No additional context provided.)"
     history_block = _format_history(request)
     selection_block = selection if selection else "(No selected content provided for this turn.)"
-    turn_guidance = (
-        "For this turn, answer primarily from the selected content and use the optional context only as support."
-        if has_selection
-        else (
+    if has_selection:
+        turn_guidance = (
+            "For this turn, answer primarily from the selected content and use the optional context only as support."
+        )
+    elif has_history:
+        turn_guidance = (
             "For this turn, do not assume you still have direct access to the original selected content. "
             "Answer from the conversation history and the user's current follow-up."
         )
-    )
+    elif has_context:
+        turn_guidance = (
+            "For this turn, answer from the optional surrounding context because no selected content or conversation history was provided."
+        )
+    else:
+        turn_guidance = (
+            "For this turn, only the user's current question is available. If the question lacks enough information, say so directly."
+        )
 
     user_prompt = f"""
 Answer the user's follow-up question based on the provided material.

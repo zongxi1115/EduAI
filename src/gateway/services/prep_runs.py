@@ -17,6 +17,7 @@ from ..schemas.prep_runs import (
     ArtifactListResponse,
     FileDescriptor,
     RunLinks,
+    RunListResponse,
     RunStatus,
     RunStatusResponse,
 )
@@ -138,6 +139,7 @@ def run_view_from_session(session: RunSession) -> dict[str, Any]:
         "finished_at": session.finished_at,
         "output_dir": str(session.output_dir),
         "request": session.request,
+        "plan": session.latest_plan,
         "artifacts": artifacts,
         "plan_path": session.plan_path,
         "report_path": session.report_path,
@@ -199,6 +201,7 @@ def run_view_from_disk(settings: Settings, run_id: str) -> dict[str, Any]:
         "finished_at": completed_event.get("timestamp") if completed_event else None,
         "output_dir": str(output_dir),
         "request": request,
+        "plan": final_state.get("plan") if isinstance(final_state.get("plan"), dict) else None,
         "artifacts": artifacts,
         "plan_path": final_state.get("plan_path") or (
             str(output_dir / "00_supervisor" / "preparation_plan.md")
@@ -231,8 +234,40 @@ def load_run_view(registry: RunRegistry, settings: Settings, run_id: str) -> dic
     return run_view_from_disk(settings, run_id)
 
 
+def list_run_views(
+    registry: RunRegistry,
+    settings: Settings,
+    *,
+    status: RunStatus | None = None,
+) -> list[dict[str, Any]]:
+    """List all known runs from memory and disk, optionally filtered by status."""
+    run_ids = set(registry.list_session_ids())
+    if settings.output_root.is_dir():
+        run_ids.update(path.name for path in settings.output_root.iterdir() if path.is_dir())
+
+    views: list[dict[str, Any]] = []
+    for run_id in run_ids:
+        try:
+            view = load_run_view(registry, settings, run_id)
+        except HTTPException:
+            continue
+        if status is not None and view.get("status") != status:
+            continue
+        views.append(view)
+
+    views.sort(
+        key=lambda view: (
+            view.get("created_at") or "",
+            view.get("run_id") or "",
+        ),
+        reverse=True,
+    )
+    return views
+
+
 def build_status_response(view: dict[str, Any]) -> RunStatusResponse:
     """Convert an internal run view into the status response schema."""
+    plan = view.get("plan") if isinstance(view.get("plan"), dict) else {}
     return RunStatusResponse(
         run_id=view["run_id"],
         status=view["status"],
@@ -241,10 +276,25 @@ def build_status_response(view: dict[str, Any]) -> RunStatusResponse:
         finished_at=view.get("finished_at"),
         output_dir=view["output_dir"],
         request=view.get("request"),
+        plan_summary=plan.get("plan_summary"),
+        required_materials=list(plan.get("required_materials") or []),
+        teacher_checklist=list(plan.get("teacher_checklist") or []),
+        teaching_focus=list(plan.get("teaching_focus") or []),
+        quality_bar=list(plan.get("quality_bar") or []),
         artifact_count=len(view.get("artifacts", [])),
         error=view.get("error"),
         links=build_links(view["run_id"]),
     )
+
+
+def build_run_list_response(
+    views: list[dict[str, Any]],
+    *,
+    total: int | None = None,
+) -> RunListResponse:
+    """Convert multiple internal run views into a list response schema."""
+    items = [build_status_response(view) for view in views]
+    return RunListResponse(total=total if total is not None else len(items), items=items)
 
 
 def build_artifacts_response(view: dict[str, Any]) -> ArtifactListResponse:
