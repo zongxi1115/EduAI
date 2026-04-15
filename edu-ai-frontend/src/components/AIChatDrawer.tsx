@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Copy, Sparkles, X } from "lucide-react";
+import { Copy, LoaderCircle, SendHorizontal, Sparkles, X } from "lucide-react";
 import { Message, MessageAvatar, MessageContent, MessageActions, MessageAction } from "@/components/ui/message";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  requestContent: string;
   streaming?: boolean;
+};
+
+type SelectionQuestionHistoryItem = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 const STREAM_ENDPOINT = "/api/v1/assistant/selection-qa/stream";
@@ -76,6 +84,15 @@ function parseSseBlock(block: string) {
   }
 }
 
+function buildHistoryPayload(messages: ChatMessage[]): SelectionQuestionHistoryItem[] {
+  return messages
+    .filter((message) => !message.streaming && message.requestContent.trim())
+    .map((message) => ({
+      role: message.role,
+      content: message.requestContent.trim(),
+    }));
+}
+
 function AssistantBubble({
   content,
   streaming = false,
@@ -108,33 +125,31 @@ export function AIChatDrawer({
   initialQuery,
 }: AIChatDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draftQuestion, setDraftQuestion] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const initialRequestKeyRef = useRef("");
   const reduceMotion = useReducedMotion();
+  const isStreaming = messages.some((message) => message.role === "assistant" && message.streaming);
 
   useEffect(() => {
-    if (!isOpen) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      setMessages([]);
-      return;
-    }
-    const question = initialQuery.trim();
-    const selectedText = selectionContext.trim();
+    messagesRef.current = messages;
+  }, [messages]);
 
-    if (!question || !selectedText) {
-      setMessages(
-        question
-          ? [
-              {
-                id: `assistant-validation-${Date.now()}`,
-                role: "assistant",
-                content: "没有获取到有效的选中文本，请重新选中内容后再问 AI。",
-              },
-            ]
-          : []
-      );
+  const streamQuestion = async (
+    questionText: string,
+    options?: {
+      replaceMessages?: boolean;
+      historyOverride?: SelectionQuestionHistoryItem[];
+      includeSelection?: boolean;
+    }
+  ) => {
+    const question = questionText.trim();
+    const selectedText = selectionContext.trim();
+    const includeSelection = options?.includeSelection ?? false;
+
+    if (!question || (includeSelection && !selectedText)) {
       return;
     }
 
@@ -145,122 +160,207 @@ export function AIChatDrawer({
     const userMessage: ChatMessage = {
       id: `user-${startedAt}`,
       role: "user",
-      content: formatUserMessage(selectedText, question),
+      content: includeSelection ? formatUserMessage(selectedText, question) : question,
+      requestContent: question,
     };
     const assistantMessage: ChatMessage = {
       id: `assistant-${startedAt}`,
       role: "assistant",
       content: "",
+      requestContent: "",
       streaming: true,
     };
 
-    setMessages([userMessage, assistantMessage]);
+    const existingMessages = options?.replaceMessages ? [] : messagesRef.current;
+    const nextMessages = [...existingMessages, userMessage, assistantMessage];
+    const historyPayload = options?.historyOverride ?? buildHistoryPayload(existingMessages);
 
-    const runChat = async () => {
-      let currentAssistantText = "";
-      let buffer = "";
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    setDraftQuestion("");
 
-      try {
-        const response = await fetch(STREAM_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            context: contextContent.trim() || null,
-            question,
-            selection: selectedText,
-          }),
-          signal: controller.signal,
-        });
+    let currentAssistantText = "";
+    let buffer = "";
 
-        if (!response.ok || !response.body) {
-          throw new Error(`请求失败（${response.status}）`);
-        }
+    try {
+      const response = await fetch(STREAM_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: includeSelection ? contextContent.trim() || null : null,
+          question,
+          selection: includeSelection ? selectedText : null,
+          history: historyPayload,
+        }),
+        signal: controller.signal,
+      });
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
+      if (!response.ok || !response.body) {
+        throw new Error(`请求失败（${response.status}）`);
+      }
 
-        const handleEventBlock = (block: string) => {
-          const parsed = parseSseBlock(block);
-          if (!parsed) {
-            return;
-          }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
 
-          if (parsed.eventType === "delta") {
-            currentAssistantText += typeof parsed.payload?.delta === "string" ? parsed.payload.delta : "";
-            setMessages((prev) =>
-              updateLastAssistantMessage(prev, (message) => ({
-                ...message,
-                content: currentAssistantText,
-                streaming: true,
-              }))
-            );
-            return;
-          }
-
-          if (parsed.eventType === "completed") {
-            if (typeof parsed.payload?.answer === "string") {
-              currentAssistantText = parsed.payload.answer;
-            }
-
-            setMessages((prev) =>
-              updateLastAssistantMessage(prev, (message) => ({
-                ...message,
-                content: currentAssistantText,
-                streaming: false,
-              }))
-            );
-          }
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-          const blocks = buffer.split(/\r?\n\r?\n/);
-          buffer = blocks.pop() ?? "";
-          blocks.forEach(handleEventBlock);
-
-          if (done) {
-            break;
-          }
-        }
-
-        if (buffer.trim()) {
-          handleEventBlock(buffer);
-        }
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
+      const handleEventBlock = (block: string) => {
+        const parsed = parseSseBlock(block);
+        if (!parsed) {
           return;
         }
 
-        const errorMessage =
-          error instanceof Error ? error.message : "请求出错，请稍后重试。";
+        if (parsed.eventType === "delta") {
+          currentAssistantText += typeof parsed.payload?.delta === "string" ? parsed.payload.delta : "";
+          setMessages((prev) =>
+            updateLastAssistantMessage(prev, (message) => ({
+              ...message,
+              content: currentAssistantText,
+              requestContent: currentAssistantText,
+              streaming: true,
+            }))
+          );
+          return;
+        }
 
-        setMessages((prev) =>
-          updateLastAssistantMessage(prev, (message) => ({
-            ...message,
-            content: message.content
-              ? `${message.content}\n\n请求出错：${errorMessage}`
-              : `请求出错：${errorMessage}`,
-            streaming: false,
-          }))
-        );
-      } finally {
-        setMessages((prev) =>
-          updateLastAssistantMessage(prev, (message) => ({
-            ...message,
-            streaming: false,
-          }))
-        );
+        if (parsed.eventType === "completed") {
+          if (typeof parsed.payload?.answer === "string") {
+            currentAssistantText = parsed.payload.answer;
+          }
+
+          setMessages((prev) =>
+            updateLastAssistantMessage(prev, (message) => ({
+              ...message,
+              content: currentAssistantText,
+              requestContent: currentAssistantText,
+              streaming: false,
+            }))
+          );
+          return;
+        }
+
+        if (parsed.eventType === "error") {
+          const errorText =
+            typeof parsed.payload?.error === "string"
+              ? parsed.payload.error
+              : "请求出错，请稍后重试。";
+
+          setMessages((prev) =>
+            updateLastAssistantMessage(prev, (message) => ({
+              ...message,
+              content: currentAssistantText
+                ? `${currentAssistantText}\n\n请求出错：${errorText}`
+                : `请求出错：${errorText}`,
+              requestContent: currentAssistantText,
+              streaming: false,
+            }))
+          );
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() ?? "";
+        blocks.forEach(handleEventBlock);
+
+        if (done) {
+          break;
+        }
       }
-    };
 
-    void runChat();
+      if (buffer.trim()) {
+        handleEventBlock(buffer);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
 
-    return () => {
-      controller.abort();
-    };
+      const errorMessage =
+        error instanceof Error ? error.message : "请求出错，请稍后重试。";
+
+      setMessages((prev) =>
+        updateLastAssistantMessage(prev, (message) => ({
+          ...message,
+          content: message.content
+            ? `${message.content}\n\n请求出错：${errorMessage}`
+            : `请求出错：${errorMessage}`,
+          requestContent: message.requestContent,
+          streaming: false,
+        }))
+      );
+    } finally {
+      setMessages((prev) =>
+        updateLastAssistantMessage(prev, (message) => ({
+          ...message,
+          requestContent: message.requestContent || message.content,
+          streaming: false,
+        }))
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      setMessages([]);
+      messagesRef.current = [];
+      setDraftQuestion("");
+      initialRequestKeyRef.current = "";
+      return;
+    }
+
+    const question = initialQuery.trim();
+    const selectedText = selectionContext.trim();
+    const initialRequestKey = `${selectedText}::${question}`;
+
+    if (initialRequestKeyRef.current === initialRequestKey) {
+      return;
+    }
+
+    if (!question || !selectedText) {
+      const validationMessages = question
+        ? [
+            {
+              id: `assistant-validation-${Date.now()}`,
+              role: "assistant" as const,
+              content: "没有获取到有效的选中文本，请重新选中内容后再问 AI。",
+              requestContent: "没有获取到有效的选中文本，请重新选中内容后再问 AI。",
+            },
+          ]
+        : [];
+      setMessages(validationMessages);
+      messagesRef.current = validationMessages;
+      return;
+    }
+
+    initialRequestKeyRef.current = initialRequestKey;
+    void streamQuestion(question, {
+      replaceMessages: true,
+      historyOverride: [],
+      includeSelection: true,
+    });
   }, [contextContent, initialQuery, isOpen, selectionContext]);
+
+  const handleFollowUpSubmit = () => {
+    if (isStreaming || !draftQuestion.trim()) {
+      return;
+    }
+
+    void streamQuestion(draftQuestion, { includeSelection: false });
+  };
+
+  const handleFollowUpKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    event.preventDefault();
+    handleFollowUpSubmit();
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -405,6 +505,45 @@ export function AIChatDrawer({
                       )}
                     </Message>
                   ))}
+                </div>
+              </div>
+
+              <div className="border-t border-border/30 px-6 py-4 sm:px-8">
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                  <Textarea
+                    value={draftQuestion}
+                    onChange={(event) => setDraftQuestion(event.target.value)}
+                    onKeyDown={handleFollowUpKeyDown}
+                    placeholder="继续追问这段内容，按 Enter 发送，Shift + Enter 换行"
+                    disabled={isStreaming}
+                    spellCheck={false}
+                    className="min-h-24 resize-none bg-background/70 px-4 py-3 text-sm"
+                  />
+
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">
+                      追问会继续基于当前选中内容和已完成的对话历史。
+                    </p>
+
+                    <Button
+                      type="button"
+                      onClick={handleFollowUpSubmit}
+                      disabled={isStreaming || !draftQuestion.trim()}
+                      className="gap-2"
+                    >
+                      {isStreaming ? (
+                        <>
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                          回答中
+                        </>
+                      ) : (
+                        <>
+                          <SendHorizontal className="h-4 w-4" />
+                          发送追问
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </motion.section>
