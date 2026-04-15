@@ -9,6 +9,7 @@ import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
 import { FillInTheBlanksQuestion } from "@/components/FillInTheBlanksQuestion";
 import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
 import { DrawingQuestion } from "@/components/DrawingQuestion";
+import { FloatingAIInput } from "@/components/FloatingAIInput";
 
 export default function StudyArea() {
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -45,6 +46,7 @@ export default function StudyArea() {
   return (
     <TooltipProvider>
       <div className="flex flex-col h-screen bg-background">
+        <FloatingAIInput />
         {/* Banner */}
         <header className="h-14 border-b bg-card flex items-center px-6 shrink-0 shadow-sm">
           <div className="flex items-center gap-2 font-semibold text-lg">

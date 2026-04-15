@@ -63,6 +63,25 @@ conda run -n base python run_edu_multi_agent.py ^
   --notes "Focus on pre-class preparation assets only"
 ```
 
+## API Gateway
+
+The FastAPI backend now lives in [`src/gateway`](./src/gateway) and is separated from the
+LangGraph workflow package in [`src/edu_multi_agent`](./src/edu_multi_agent).
+
+Run the API locally with either command:
+
+```bash
+conda run -n base edu-prep-api --host 127.0.0.1 --port 8000
+```
+
+```bash
+conda run -n base uvicorn gateway.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Interactive API docs:
+
+- `http://127.0.0.1:8000/api/docs`
+
 ## Output
 
 Each run creates a timestamped folder under `outputs/`, for example:

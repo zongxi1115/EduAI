@@ -20,7 +20,7 @@ dependencies = [
 
 [project.scripts]
 edu-prep = "edu_multi_agent.main:main"
-edu-prep-api = "edu_multi_agent.api:main"
+edu-prep-api = "gateway.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

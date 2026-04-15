@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, TypeVar
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,9 +15,14 @@ from .file_io import ParsedBundle, parse_tagged_bundle
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
-def _flatten_content(content: Any) -> str:
+def _flatten_content(
+    content: Any,
+    *,
+    strip: bool = True,
+    separator: str = "\n",
+) -> str:
     if isinstance(content, str):
-        return content.strip()
+        return content.strip() if strip else content
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
@@ -27,8 +33,11 @@ def _flatten_content(content: Any) -> str:
                 text = item.get("text") or item.get("content") or ""
                 if text:
                     parts.append(str(text))
-        return "\n".join(part.strip() for part in parts if part).strip()
-    return str(content).strip()
+        if strip:
+            return separator.join(part.strip() for part in parts if part).strip()
+        return separator.join(part for part in parts if part)
+    text = str(content)
+    return text.strip() if strip else text
 
 
 def _extract_json(raw_text: str) -> str:
@@ -60,6 +69,20 @@ class LLMClient:
             [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
         )
         return _flatten_content(response.content)
+
+    async def stream_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> AsyncIterator[str]:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        async for chunk in self.model.astream(messages):
+            text = _flatten_content(chunk.content, strip=False, separator="")
+            if text:
+                yield text
 
     def invoke_json(
         self,

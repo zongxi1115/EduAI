@@ -128,3 +128,22 @@
     @apply font-sans;
     }
 }
+@layer components {
+  .streaming-mode .prose > *:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 1.1em;
+    background-color: hsl(var(--primary) / 0.8);
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+    margin-left: 2px;
+    border-radius: 9999px;
+  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+

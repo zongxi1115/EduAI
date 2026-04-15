@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+
+from edu_multi_agent.config import Settings
+from edu_multi_agent.llm import LLMClient
+
+from .routers.assistant import router as assistant_router
+from .routers.health import router as health_router
+from .routers.prep_runs import router as prep_runs_router
+from .services.run_registry import RunRegistry
+
+
+OPENAPI_TAGS = [
+    {
+        "name": "系统",
+        "description": "系统级接口，例如健康检查。",
+    },
+    {
+        "name": "课前准备任务",
+        "description": (
+            "用于创建课前准备任务、查看任务状态、通过 SSE 观察实时进度，以及下载生成结果。"
+        ),
+    },
+    {
+        "name": "选区问答",
+        "description": (
+            "用于前端选中内容后的即时问答。该类接口通常直接调用大模型并流式返回结果，不创建后台任务。"
+        ),
+    },
+]
+
+SWAGGER_UI_PARAMETERS = {
+    "defaultModelsExpandDepth": -1,
+    "displayRequestDuration": True,
+    "docExpansion": "list",
+    "deepLinking": True,
+    "filter": True,
+}
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Create and configure the FastAPI gateway application."""
+    resolved_settings = settings or Settings.from_env()
+    registry = RunRegistry(resolved_settings)
+    llm_client = LLMClient(resolved_settings)
+
+    app = FastAPI(
+        title="Edu 多智能体网关 API",
+        version="0.2.0",
+        summary="面向课前准备多智能体流程的 REST 与 SSE 网关。",
+        description=(
+            "该网关将基于 LangGraph 的课前准备流程通过 HTTP API、Server-Sent Events (SSE) "
+            "以及产物下载接口对外暴露。"
+        ),
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
+        openapi_tags=OPENAPI_TAGS,
+        swagger_ui_parameters=SWAGGER_UI_PARAMETERS,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.state.run_registry = registry
+    app.state.settings = resolved_settings
+    app.state.llm_client = llm_client
+
+    app.include_router(assistant_router)
+    app.include_router(health_router)
+    app.include_router(prep_runs_router)
+
+    @app.get("/docs", include_in_schema=False)
+    def redirect_docs() -> RedirectResponse:
+        """将旧的 Swagger 地址重定向到新的命名空间路径。"""
+        return RedirectResponse(url=app.docs_url or "/api/docs")
+
+    @app.get("/redoc", include_in_schema=False)
+    def redirect_redoc() -> RedirectResponse:
+        """将旧的 ReDoc 地址重定向到新的命名空间路径。"""
+        return RedirectResponse(url=app.redoc_url or "/api/redoc")
+
+    @app.get("/openapi.json", include_in_schema=False)
+    def redirect_openapi() -> RedirectResponse:
+        """将旧的 OpenAPI 地址重定向到新的命名空间路径。"""
+        return RedirectResponse(url=app.openapi_url or "/api/openapi.json")
+
+    return app

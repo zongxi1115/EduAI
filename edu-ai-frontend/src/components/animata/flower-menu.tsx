@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 
 type MenuItem = {
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
@@ -21,6 +21,7 @@ const MenuToggler = ({
   animationDuration,
   togglerSize,
   iconSize,
+  menuId,
 }: {
   isOpen: boolean;
   onChange: () => void;
@@ -29,6 +30,7 @@ const MenuToggler = ({
   animationDuration: number;
   togglerSize: number;
   iconSize: number;
+  menuId: string;
 }) => {
   const lineHeight = iconSize * 0.1;
   const lineWidth = iconSize * 0.8;
@@ -37,7 +39,7 @@ const MenuToggler = ({
   return (
     <>
       <input
-        id="menu-toggler"
+        id={`menu-toggler-${menuId}`}
         type="checkbox"
         checked={isOpen}
         onChange={onChange}
@@ -45,7 +47,7 @@ const MenuToggler = ({
         style={{ width: togglerSize, height: togglerSize }}
       />
       <label
-        htmlFor="menu-toggler"
+        htmlFor={`menu-toggler-${menuId}`}
         className="absolute inset-0 z-20 m-auto flex cursor-pointer items-center justify-center rounded-full transition"
         style={{
           backgroundColor,
@@ -149,6 +151,7 @@ export default function FlowerMenu({
   togglerSize = 40,
 }: FlowerMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const elementId = useId();
   const itemCount = menuItems.length;
   const itemSize = togglerSize * 1.3; // significantly smaller
   const iconSize = Math.max(14, Math.floor(togglerSize * 0.45)); // smaller inner icons
@@ -163,6 +166,7 @@ export default function FlowerMenu({
         animationDuration={animationDuration}
         togglerSize={togglerSize}
         iconSize={iconSize}
+        menuId={elementId}
       />
       <ul className="absolute inset-0 m-0 h-full w-full list-none p-0">
         {menuItems.map((item, index) => (
