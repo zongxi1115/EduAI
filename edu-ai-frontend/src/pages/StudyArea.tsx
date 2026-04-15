@@ -65,7 +65,9 @@ export default function StudyArea() {
             <div className="flex-1 overflow-hidden flex flex-col pt-4 px-6 md:pt-6 md:px-8 pb-4">
                <div className="w-full h-full flex flex-col">
                   {/* <h2 className="text-xl font-bold mb-4">草稿纸 画板功能测试</h2> */}
-                  <DraftBoard />
+                  <DraftBoard 
+                    questionContent="已知函数 $f(x) = \frac{\ln x}{x} + ax$ ($a \in \mathbb{R}$)。\n\n1. 若 $a = -1$, 求 $f(x)$ 的单调区间;\n2. 证明：若 $a > 0$, 则 $f(x) > 0$"
+                  />
                </div>
             </div>
           </div>

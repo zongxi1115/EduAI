@@ -1,17 +1,25 @@
 import React, { useRef, useState, useEffect } from "react";
 import { getStroke } from "perfect-freehand";
 import FlowerMenu from "@/components/animata/flower-menu";
-import { Pencil, Eraser, Minus, Settings2, Circle, Square, Undo2, Redo2 } from "lucide-react";
+import { Pencil, Eraser, Minus, Settings2, Circle, Square, Undo2, Redo2, Type } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 type Point = [number, number, number];
-type Tool = "pencil" | "eraser" | "line" | "circle" | "rectangle";
+type Tool = "pencil" | "eraser" | "line" | "circle" | "rectangle" | "text";
 type EraserType = "pixel" | "stroke";
-type Stroke = { points: Point[]; color: string; size: number; tool: Tool };
+type Stroke = { points: Point[]; color: string; size: number; tool: Tool; text?: string };
 
-export function DraftBoard() {
+interface DraftBoardProps {
+  questionContent?: string;
+}
+
+export function DraftBoard({ questionContent }: DraftBoardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -20,6 +28,7 @@ export function DraftBoard() {
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  const [activeText, setActiveText] = useState<{x: number, y: number, text: string} | null>(null);
   
   const [tool, setTool] = useState<Tool>("pencil");
   const [eraserType, setEraserType] = useState<EraserType>("pixel");
@@ -30,6 +39,10 @@ export function DraftBoard() {
   const [menuPos, setMenuPos] = useState({ x: 16, y: 16 });
   const [isDraggingMenu, setIsDraggingMenu] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
+
+  const stopCanvasInteraction = (e: React.PointerEvent<HTMLElement>) => {
+    e.stopPropagation();
+  };
 
   // Auto-resize canvas to match container
   useEffect(() => {
@@ -52,7 +65,7 @@ export function DraftBoard() {
   // Redraw strokes
   useEffect(() => {
     redraw();
-  }, [strokes, currentStroke, color, size, tool]);
+  }, [strokes, currentStroke, color, size, tool, activeText]);
 
   const redraw = () => {
     const canvas = canvasRef.current;
@@ -87,7 +100,7 @@ export function DraftBoard() {
         const end = s.points[s.points.length - 1];
         
         ctx.beginPath();
-        ctx.strokeStyle = s.tool === "eraser" ? "#000" : s.color;
+        ctx.strokeStyle = s.color;
         ctx.lineWidth = s.size;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
@@ -103,6 +116,14 @@ export function DraftBoard() {
         }
         
         ctx.stroke();
+      } else if (s.tool === "text" && s.text) {
+        ctx.font = `${s.size * 2}px sans-serif`;
+        ctx.textBaseline = "top";
+        ctx.fillStyle = s.color;
+        // Basic multi-line support
+        s.text.split('\n').forEach((line, i) => {
+           ctx.fillText(line, s.points[0][0], s.points[0][1] + i * (s.size * 2 * 1.5));
+        });
       }
     };
 
@@ -110,6 +131,10 @@ export function DraftBoard() {
 
     if (currentStroke.length > 0) {
       drawStroke({ points: currentStroke, color, size, tool });
+    }
+    
+    if (activeText && activeText.text) {
+      drawStroke({ points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text });
     }
     
     ctx.restore();
@@ -122,10 +147,24 @@ export function DraftBoard() {
   };
 
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const pt = getPoint(e);
+    
+    if (activeText) {
+      if (activeText.text.trim()) {
+        commitAction([...strokes, { points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text }]);
+      }
+      setActiveText(null);
+      return;
+    }
+
+    if (tool === "text") {
+      setActiveText({ x: pt[0], y: pt[1], text: "" });
+      return;
+    }
+
     setIsDrawing(true);
     e.currentTarget.setPointerCapture(e.pointerId);
 
-    const pt = getPoint(e);
     if (tool === "eraser" && eraserType === "stroke") {
       handleStrokeErase(pt);
     } else {
@@ -185,7 +224,7 @@ export function DraftBoard() {
       if (strokes.length !== history[historyIndex].length) {
         commitAction(strokes);
       }
-    } else {
+    } else if (tool !== "text") {
       if (currentStroke.length > 0) {
         commitAction([...strokes, { points: currentStroke, color, size, tool }]);
       }
@@ -210,7 +249,7 @@ export function DraftBoard() {
     });
   };
 
-  const onMenuPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onMenuPointerUp = () => {
     setIsDraggingMenu(false);
   };
 
@@ -240,22 +279,84 @@ export function DraftBoard() {
     { icon: Pencil, onClick: () => setTool("pencil") },
     { icon: Eraser, onClick: () => setTool("eraser") },
     { icon: Minus, onClick: () => setTool("line") },
+    { icon: Type, onClick: () => setTool("text") },
   ];
 
   return (
-    <div ref={containerRef} className="relative w-full h-full min-h-[400px] border rounded-xl overflow-hidden bg-slate-50 shadow-inner">
+    <div ref={containerRef} className="relative w-full flex-1 h-full min-h-[400px] border rounded-xl overflow-hidden bg-slate-50 shadow-inner">
+      {/* Question content rendered underneath the canvas like a printed worksheet */}
+      {questionContent && (
+        <div className="absolute top-0 left-0 w-full p-6 pb-24 prose prose-slate max-w-none pointer-events-none select-none z-0">
+          <ReactMarkdown
+             remarkPlugins={[remarkMath]}
+             rehypePlugins={[rehypeKatex]}
+             components={{
+               p: ({node, ...props}) => <p className="text-base text-slate-800 m-0 mb-4" {...props} />,
+             }}
+          >
+            {questionContent}
+          </ReactMarkdown>
+        </div>
+      )}
+
       <canvas
         ref={canvasRef}
         onPointerDown={startDrawing}
         onPointerMove={draw}
         onPointerUp={endDrawing}
         onPointerCancel={endDrawing}
-        className="block touch-none cursor-crosshair"
+        className={`block relative z-[1] w-full h-full bg-transparent touch-none ${tool === "text" ? "cursor-text" : "cursor-crosshair"}`}
       />
+
+      {/* Floating Text Input when active */}
+      {activeText && (
+        <textarea
+          ref={(el) => {
+            if (el) {
+              setTimeout(() => el.focus(), 50);
+            }
+          }}
+          placeholder="输入文字..."
+          className="absolute z-30 bg-white/80 backdrop-blur-sm border-2 border-primary border-dashed rounded-md outline-none resize-none p-1 overflow-hidden break-words whitespace-pre shadow-lg"
+          style={{
+            left: activeText.x,
+            top: activeText.y,
+            color: color,
+            fontSize: `${size * 2}px`,
+            lineHeight: 1.5,
+            fontFamily: "sans-serif",
+            minWidth: "120px",
+            minHeight: "40px",
+          }}
+          value={activeText.text}
+          onPointerDown={stopCanvasInteraction}
+          onChange={(e) => {
+             setActiveText({ ...activeText, text: e.target.value });
+             e.target.style.height = "auto";
+             e.target.style.height = e.target.scrollHeight + "px";
+             e.target.style.width = "auto";
+             e.target.style.width = Math.max(120, e.target.scrollWidth) + "px";
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              if (activeText.text.trim()) {
+                commitAction([...strokes, { points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text }]);
+              }
+              setActiveText(null);
+            }
+          }}
+          onBlur={() => {
+             if (activeText.text.trim()) {
+               commitAction([...strokes, { points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text }]);
+             }
+             setActiveText(null);
+          }}
+        />
+      )}
 
       {/* Toolbox Menu */}
       <div 
-        className="absolute z-10 select-none touch-none"
+        className="absolute z-20 select-none touch-none"
         style={{ left: menuPos.x, top: menuPos.y }}
         onPointerDown={onMenuPointerDown}
         onPointerMove={onMenuPointerMove}
@@ -271,12 +372,16 @@ export function DraftBoard() {
       </div>
 
       {/* Floating Toolbar for Settings */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 p-2 bg-white/80 backdrop-blur shadow-md rounded-full border">
+      <div
+        className="absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border bg-white/80 p-2 shadow-md backdrop-blur"
+        onPointerDown={stopCanvasInteraction}
+      >
         
         <div className="px-3 flex gap-2 font-medium text-sm text-muted-foreground items-center">
            {tool === "pencil" && <><Pencil className="w-4 h-4"/> 铅笔</>}
            {tool === "eraser" && <><Eraser className="w-4 h-4"/> 橡皮擦</>}
            {(tool === "line" || tool === "circle" || tool === "rectangle") && <><Minus className="w-4 h-4"/> 形状</>}
+           {tool === "text" && <><Type className="w-4 h-4"/> 文字</>}
         </div>
 
         <div className="h-4 w-px bg-border mx-1"></div>
@@ -299,7 +404,7 @@ export function DraftBoard() {
           <PopoverContent className="w-72" side="top" align="center">
              <div className="space-y-4">
                 <div className="space-y-2">
-                    <label className="text-sm font-medium">笔迹粗细: {size}px</label>
+                    <label className="text-sm font-medium">{tool === "text" ? "字体大小" : "笔迹粗细"}: {size}</label>
                     <Slider min={2} max={32} step={1} value={[size]} onValueChange={(v: number[]) => setSize(v[0])} />
                 </div>
                 
