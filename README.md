@@ -1,3 +1,7 @@
+# 贡献前必读
+
+请不要直接merge到main分支，先**务必且只在** 对应自己的分支开发，完成后提交**pull request**，并@相关人员进行code review后才能merge到main分支。
+
 # Edu Multi-Agent
 
 This module builds a LangGraph-based teaching preparation workflow for the pre-class stage.

@@ -33,6 +33,9 @@ from .prompts import (
 )
 
 
+GraphEventCallback = Callable[[dict[str, Any]], None]
+
+
 class WorkflowState(TypedDict, total=False):
     request: dict[str, Any]
     output_dir: str
@@ -157,13 +160,55 @@ def _validate_generated_files(files: dict[str, str]) -> None:
             compile(content, filename, "exec")
 
 
-def build_workflow(settings: Settings):
+def _emit_event(
+    event_callback: GraphEventCallback | None,
+    *,
+    event: str,
+    node: str,
+    summary: str,
+    phase: str,
+    agent_name: AgentName | None = None,
+    data: dict[str, Any] | None = None,
+) -> None:
+    if event_callback is None:
+        return
+
+    payload: dict[str, Any] = {
+        "event": event,
+        "node": node,
+        "phase": phase,
+        "summary": summary,
+    }
+    if agent_name is not None:
+        payload["agent_name"] = agent_name
+    if data:
+        payload["data"] = data
+    event_callback(payload)
+
+
+def build_workflow(
+    settings: Settings,
+    event_callback: GraphEventCallback | None = None,
+):
     llm = LLMClient(settings)
     agent_order = [spec.agent_name for spec in AGENT_SPECS]
 
     def planner_node(state: WorkflowState) -> dict[str, Any]:
         request = GenerationRequest.model_validate(state["request"])
         output_dir = Path(state["output_dir"])
+        node_name = "planner"
+
+        _emit_event(
+            event_callback,
+            event="node_started",
+            node=node_name,
+            phase="planning",
+            summary="Planner node started.",
+            data={
+                "title": "总控规划",
+                "learning_goal": request.learning_goal,
+            },
+        )
 
         system_prompt, user_prompt = build_planner_prompts(request)
         plan = llm.invoke_json(system_prompt, user_prompt, PreparationPlan)
@@ -179,6 +224,17 @@ def build_workflow(settings: Settings):
             "00_supervisor/preparation_plan.md",
             render_plan_markdown(request, normalized_plan),
         )
+        _emit_event(
+            event_callback,
+            event="plan_ready",
+            node=node_name,
+            phase="planning",
+            summary="Preparation plan generated.",
+            data={
+                "plan": normalized_plan.model_dump(),
+                "plan_path": str(plan_path),
+            },
+        )
         return {"plan": normalized_plan.model_dump(), "plan_path": str(plan_path)}
 
     def make_agent_node(spec: AgentSpec) -> Callable[[WorkflowState], dict[str, Any]]:
@@ -187,6 +243,21 @@ def build_workflow(settings: Settings):
             plan = PreparationPlan.model_validate(state["plan"])
             output_dir = Path(state["output_dir"])
             route = _get_route(plan, spec.agent_name)
+            node_name = f"{spec.agent_name}_agent"
+
+            _emit_event(
+                event_callback,
+                event="node_started",
+                node=node_name,
+                phase="artifact_generation",
+                agent_name=spec.agent_name,
+                summary=f"{spec.title} started.",
+                data={
+                    "title": spec.title,
+                    "objective": route.objective,
+                    "deliverables": route.deliverables,
+                },
+            )
 
             if not route.selected:
                 skipped_path = write_text_file(
@@ -201,6 +272,15 @@ def build_workflow(settings: Settings):
                     output_dir=str(output_dir / spec.folder),
                     files=[str(skipped_path)],
                     status="skipped",
+                )
+                _emit_event(
+                    event_callback,
+                    event="artifact_skipped",
+                    node=node_name,
+                    phase="artifact_generation",
+                    agent_name=spec.agent_name,
+                    summary=f"{spec.title} skipped by planner.",
+                    data={"artifact": artifact.model_dump()},
                 )
                 return {"artifact_results": [artifact.model_dump()]}
 
@@ -228,6 +308,15 @@ def build_workflow(settings: Settings):
                     output_dir=str(output_dir / spec.folder),
                     files=written_files,
                 )
+                _emit_event(
+                    event_callback,
+                    event="artifact_ready",
+                    node=node_name,
+                    phase="artifact_generation",
+                    agent_name=spec.agent_name,
+                    summary=f"{spec.title} generated successfully.",
+                    data={"artifact": artifact.model_dump()},
+                )
             except Exception as exc:
                 failed_path = write_text_file(
                     output_dir,
@@ -243,6 +332,18 @@ def build_workflow(settings: Settings):
                     notes=[str(exc)],
                     status="failed",
                 )
+                _emit_event(
+                    event_callback,
+                    event="artifact_failed",
+                    node=node_name,
+                    phase="artifact_generation",
+                    agent_name=spec.agent_name,
+                    summary=f"{spec.title} failed during generation.",
+                    data={
+                        "artifact": artifact.model_dump(),
+                        "error": str(exc),
+                    },
+                )
 
             return {"artifact_results": [artifact.model_dump()]}
 
@@ -252,16 +353,34 @@ def build_workflow(settings: Settings):
         request = GenerationRequest.model_validate(state["request"])
         plan = PreparationPlan.model_validate(state["plan"])
         output_dir = Path(state["output_dir"])
+        node_name = "supervisor_report"
         artifacts = [
             ArtifactResult.model_validate(item)
             for item in state.get("artifact_results", [])
         ]
         artifacts.sort(key=lambda artifact: agent_order.index(artifact.agent_name))
 
+        _emit_event(
+            event_callback,
+            event="node_started",
+            node=node_name,
+            phase="reporting",
+            summary="Supervisor report node started.",
+            data={"artifact_count": len(artifacts)},
+        )
+
         manifest_path = write_json_file(
             output_dir,
             "00_supervisor/artifact_manifest.json",
             {"artifacts": [artifact.model_dump() for artifact in artifacts]},
+        )
+        _emit_event(
+            event_callback,
+            event="manifest_ready",
+            node=node_name,
+            phase="reporting",
+            summary="Artifact manifest written.",
+            data={"manifest_path": str(manifest_path)},
         )
 
         try:
@@ -279,6 +398,14 @@ def build_workflow(settings: Settings):
             output_dir,
             "00_supervisor/final_report.md",
             report_markdown,
+        )
+        _emit_event(
+            event_callback,
+            event="report_ready",
+            node=node_name,
+            phase="reporting",
+            summary="Supervisor report generated.",
+            data={"report_path": str(report_path)},
         )
         return {
             "report_path": str(report_path),
