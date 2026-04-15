@@ -7,6 +7,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { SingleChoiceQuestion } from "@/components/SingleChoiceQuestion";
 import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
 import { FillInTheBlanksQuestion } from "@/components/FillInTheBlanksQuestion";
+import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
+import { DrawingQuestion } from "@/components/DrawingQuestion";
 
 export default function StudyArea() {
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -109,6 +111,22 @@ export default function StudyArea() {
                        questionContent={String.raw`世界上最高的山峰是 ___，它的海拔高度大约是 ___ 米。
 
 已知的相对论质能方程为： ___，由物理学家 ___ 提出。请在下方写下你的计算思路，如：求 $\sqrt{16}$ 的结果是 \_\_\_。`}
+                    />
+                  </div>
+
+                  {/* 简答题测试 */}
+                  <div>
+                    <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">四、简答题测试</h2>
+                    <ShortAnswerQuestion
+                      questionContent={String.raw`请简述牛顿三大定律的核心内容，并举例说明第三定律在生活中的实际应用。`}
+                    />
+                  </div>
+
+                  {/* 作图题测试 */}
+                  <div>
+                    <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">五、作图题测试</h2>
+                    <DrawingQuestion
+                      questionContent={String.raw`请在下方区域画出一个带有阻尼系数的单摆系统的受力示意图，并标注出位移 $x$ 与受力 $F$ 的方向。`}
                     />
                   </div>
                </div>

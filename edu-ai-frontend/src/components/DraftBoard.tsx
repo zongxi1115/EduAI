@@ -46,6 +46,7 @@ export function DraftBoard({ questionContent }: DraftBoardProps) {
 
   // Auto-resize canvas to match container
   useEffect(() => {
+    let animationFrameId: number;
     const handleResize = () => {
       if (containerRef.current && canvasRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
@@ -54,18 +55,34 @@ export function DraftBoard({ questionContent }: DraftBoardProps) {
         canvasRef.current.height = clientHeight * ratio;
         canvasRef.current.style.width = `${clientWidth}px`;
         canvasRef.current.style.height = `${clientHeight}px`;
-        redraw(); // Redraw whenever resized
+        // redraw() depends on fresh states, but here we just call a state trigger or redraw
+        setCanvasSizeRenderBust(prev => prev + 1);
       }
     };
-    handleResize();
+
+    const resizeObserver = new ResizeObserver(() => {
+      animationFrameId = requestAnimationFrame(handleResize);
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+    
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
+    };
   }, []);
+
+  const [canvasSizeRenderBust, setCanvasSizeRenderBust] = useState(0);
 
   // Redraw strokes
   useEffect(() => {
     redraw();
-  }, [strokes, currentStroke, color, size, tool, activeText]);
+  }, [strokes, currentStroke, color, size, tool, activeText, canvasSizeRenderBust]);
 
   const redraw = () => {
     const canvas = canvasRef.current;
