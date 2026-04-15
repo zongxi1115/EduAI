@@ -53,7 +53,7 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
             </Button>
           </DialogTrigger>
           {/* @ts-ignore */}
-          <DialogContent className="fixed inset-0 m-0 max-w-full max-h-full h-dvh w-dvw p-0 flex flex-col rounded-none overflow-hidden border-none" showCloseButton={false}>
+          <DialogContent className="fixed inset-0 m-0 max-w-none max-h-none h-[100dvh] w-[100dvw] p-0 flex flex-col rounded-none overflow-hidden border-none top-0 left-0 translate-x-0 translate-y-0 sm:max-w-none" showCloseButton={false}>
              <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
              
              {/* DraftBoard fills entire modal */}

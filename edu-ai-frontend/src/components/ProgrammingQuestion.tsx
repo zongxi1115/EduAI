@@ -38,7 +38,7 @@ export function ProgrammingQuestion({ questionContent, initialCode = "", languag
               </Button>
             </DialogTrigger>
             {/* @ts-ignore */}
-            <DialogContent className="fixed inset-0 m-0 max-w-full max-h-full h-dvh w-dvw p-0 flex flex-col rounded-none overflow-hidden border-none" showCloseButton={false}>
+            <DialogContent className="fixed inset-0 m-0 max-w-none max-h-none h-[100dvh] w-[100dvw] p-0 flex flex-col rounded-none overflow-hidden border-none top-0 left-0 translate-x-0 translate-y-0 sm:max-w-none" showCloseButton={false}>
                <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
                <div className="flex-1 w-full h-full relative">
                  <DraftBoard questionContent={questionContent} />
@@ -69,7 +69,7 @@ export function ProgrammingQuestion({ questionContent, initialCode = "", languag
       {/* Right side: Code Editor */}
       <div className="w-full md:w-1/2 flex flex-col h-full bg-[#1e1e1e] relative z-20">
         <div className="flex items-center justify-between p-3 pl-5 border-b border-white/10 shrink-0 bg-[#252526]">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">{language}</span>
+          <span className="text-xs font-semibold text-slate-400  tracking-widest">{language}</span>
           <div className="flex gap-3">
             <Button variant="secondary" size="sm" className="h-8 text-xs bg-white/10 hover:bg-white/20 text-white border-0 gap-1.5 transition-colors" onClick={() => {}}>
               <Play className="w-3 h-3 fill-current" />
