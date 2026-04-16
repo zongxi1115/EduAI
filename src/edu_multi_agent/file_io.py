@@ -7,7 +7,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import ArtifactResult, GenerationRequest, PreparationPlan
+from .models import (
+    ArtifactResult,
+    GenerationRequest,
+    PracticeBlueprint,
+    PreparationPlan,
+)
 
 
 SUMMARY_PATTERN = re.compile(r"<<<SUMMARY>>>\s*(.*?)\s*<<<END SUMMARY>>>", re.S)
@@ -170,6 +175,51 @@ def render_plan_markdown(
             "",
             "## Agent 路由结果",
             *route_lines,
+        ]
+    ).strip()
+
+
+def render_practice_blueprint_markdown(
+    request: GenerationRequest,
+    blueprint: PracticeBlueprint,
+) -> str:
+    allocation_lines: list[str] = []
+    for allocation in blueprint.question_allocations:
+        allocation_lines.append(f"### {allocation.question_type}")
+        allocation_lines.append(f"- 建议题量: {allocation.count}")
+        allocation_lines.append(f"- 作用: {allocation.purpose}")
+        allocation_lines.append(
+            "- 能力覆盖: "
+            + (", ".join(allocation.competency_focus) if allocation.competency_focus else "无")
+        )
+        allocation_lines.append("")
+
+    return "\n".join(
+        [
+            "# 练习题型规划蓝图",
+            "",
+            f"- 学习目标: {request.learning_goal}",
+            f"- 学科: {request.subject}",
+            f"- 学段/年级: {request.grade_level}",
+            f"- 建议总题量: {blueprint.total_questions}",
+            "",
+            "## 规划摘要",
+            blueprint.planning_summary,
+            "",
+            "## 主题特征",
+            *[f"- {item}" for item in blueprint.topic_characteristics],
+            "",
+            "## 配比原则",
+            *[f"- {item}" for item in blueprint.distribution_principles],
+            "",
+            "## 题目推进节奏",
+            *[f"- {item}" for item in blueprint.progression_plan],
+            "",
+            "## 必须覆盖",
+            *[f"- {item}" for item in blueprint.must_cover],
+            "",
+            "## 题型分配",
+            *allocation_lines,
         ]
     ).strip()
 

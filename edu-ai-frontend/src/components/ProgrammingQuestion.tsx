@@ -44,12 +44,49 @@ type RunnerMessage = RunnerSuccessMessage | RunnerErrorMessage;
 
 const RUN_TIMEOUT_MS = 5000;
 const SUPPORTED_JS_LANGUAGES = new Set(["javascript", "js", "node", "nodejs"]);
+const SUPPORTED_PYTHON_LANGUAGES = new Set(["python", "py", "python3"]);
 const RUNNER_PANEL_MIN_HEIGHT = 240;
 const RUNNER_PANEL_DEFAULT_HEIGHT = 320;
 const RUNNER_PANEL_MAX_HEIGHT = 520;
+const PYTHON_RUN_ENDPOINT = "/api/v1/code-execution/execute";
+
+interface RemoteRunnerResponse {
+  ok: boolean;
+  logs: OutputLine[];
+  result_text: string | null;
+  error_text: string | null;
+  duration_ms: number;
+}
 
 function isJavaScriptLanguage(language: string) {
   return SUPPORTED_JS_LANGUAGES.has(language.trim().toLowerCase());
+}
+
+function isPythonLanguage(language: string) {
+  return SUPPORTED_PYTHON_LANGUAGES.has(language.trim().toLowerCase());
+}
+
+function buildRunnerPlaceholder(language: string) {
+  if (isPythonLanguage(language)) {
+    return "return solve([2, 7, 11, 15], 9)";
+  }
+  return "return twoSum([2, 7, 11, 15], 9);";
+}
+
+function buildRunnerExample(language: string) {
+  if (isPythonLanguage(language)) {
+    return {
+      returnExample: "return solve([2, 7, 11, 15], 9)",
+      printExample: "print(solve([2, 7, 11, 15], 9))",
+      metaText: "Python 代码会通过后端 API 运行。",
+    };
+  }
+
+  return {
+    returnExample: "return twoSum([2, 7, 11, 15], 9);",
+    printExample: "console.log(twoSum([2, 7, 11, 15], 9));",
+    metaText: "JavaScript 代码会直接在浏览器中运行。",
+  };
 }
 
 function buildRunnerWorkerSource() {
@@ -170,8 +207,10 @@ export function ProgrammingQuestion({
   const workerRef = useRef<Worker | null>(null);
   const workerUrlRef = useRef<string | null>(null);
   const timeoutRef = useRef<number | null>(null);
+  const remoteAbortControllerRef = useRef<AbortController | null>(null);
   const runnerPanelResizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const canRunOnline = isJavaScriptLanguage(language);
+  const canRunOnline = isJavaScriptLanguage(language) || isPythonLanguage(language);
+  const runnerExamples = buildRunnerExample(language);
 
   const cleanupRunner = () => {
     if (timeoutRef.current !== null) {
@@ -187,6 +226,11 @@ export function ProgrammingQuestion({
     if (workerUrlRef.current) {
       URL.revokeObjectURL(workerUrlRef.current);
       workerUrlRef.current = null;
+    }
+
+    if (remoteAbortControllerRef.current) {
+      remoteAbortControllerRef.current.abort();
+      remoteAbortControllerRef.current = null;
     }
   };
 
@@ -230,6 +274,75 @@ export function ProgrammingQuestion({
     if (onSubmit) onSubmit(code);
   };
 
+  const runPythonRemotely = async () => {
+    const controller = new AbortController();
+    remoteAbortControllerRef.current = controller;
+    setIsRunning(true);
+    setRunDurationMs(null);
+    setOutputLines([{ type: "meta", text: "正在通过后端运行 Python 代码..." }]);
+
+    try {
+      const response = await fetch(PYTHON_RUN_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          language: "python",
+          code,
+          runner_code: runnerCode,
+          timeout_ms: RUN_TIMEOUT_MS,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`运行请求失败（${response.status}）`);
+      }
+
+      const payload = (await response.json()) as RemoteRunnerResponse;
+      if (remoteAbortControllerRef.current !== controller) {
+        return;
+      }
+
+      remoteAbortControllerRef.current = null;
+      setIsRunning(false);
+      setRunDurationMs(payload.duration_ms);
+
+      const nextLines = [...payload.logs];
+      if (payload.ok) {
+        if (payload.result_text !== null) {
+          nextLines.push({ type: "result", text: `返回值: ${payload.result_text}` });
+        }
+        if (nextLines.length === 0) {
+          nextLines.push({ type: "meta", text: "运行完成，没有输出。" });
+        }
+      } else {
+        nextLines.push({
+          type: "error",
+          text: payload.error_text || "Python 运行失败，请稍后再试。",
+        });
+      }
+
+      setOutputLines(nextLines);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      remoteAbortControllerRef.current = null;
+      setIsRunning(false);
+      setRunDurationMs(null);
+      setOutputLines([
+        {
+          type: "error",
+          text: error instanceof Error ? error.message : "Python 运行失败，请稍后再试。",
+        },
+      ]);
+    }
+  };
+
   const handleRun = () => {
     if (!isRunnerPanelVisible) {
       setIsRunnerPanelVisible(true);
@@ -237,11 +350,17 @@ export function ProgrammingQuestion({
 
     if (!canRunOnline) {
       setRunDurationMs(null);
-      setOutputLines([{ type: "error", text: `暂不支持 ${language} 在线运行，目前先支持 JavaScript。` }]);
+      setOutputLines([{ type: "error", text: `暂不支持 ${language} 在线运行，目前先支持 JavaScript 和 Python。` }]);
       return;
     }
 
     cleanupRunner();
+
+    if (isPythonLanguage(language)) {
+      void runPythonRemotely();
+      return;
+    }
+
     setIsRunning(true);
     setRunDurationMs(null);
     setOutputLines([{ type: "meta", text: "正在运行 JavaScript 代码..." }]);
@@ -440,12 +559,13 @@ export function ProgrammingQuestion({
                   <Textarea
                     value={runnerCode}
                     onChange={(event) => setRunnerCode(event.target.value)}
-                    placeholder={"return twoSum([2, 7, 11, 15], 9);"}
+                    placeholder={buildRunnerPlaceholder(language)}
                     className="min-h-24 resize-y border-white/10 bg-white/5 text-sm text-slate-100 placeholder:text-slate-500 font-mono focus-visible:border-primary/60 focus-visible:ring-primary/20"
                     spellCheck={false}
                   />
                   <p className="text-xs text-slate-500">
-                    示例：<code>return twoSum([2, 7, 11, 15], 9);</code> 或 <code>console.log(twoSum([2, 7, 11, 15], 9));</code>
+                    示例：<code>{runnerExamples.returnExample}</code> 或 <code>{runnerExamples.printExample}</code>
+                    <span className="ml-2">{runnerExamples.metaText}</span>
                   </p>
                 </div>
 

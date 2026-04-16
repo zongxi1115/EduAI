@@ -6,6 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 AgentName = Literal["study_guide", "practice", "manim", "interactive_web"]
+QuestionTypeName = Literal[
+    "FillInTheBlank",
+    "MultipleChoice",
+    "ShortAnswer",
+    "Listening",
+    "Coding",
+    "Drawing",
+]
 
 
 class GenerationRequest(BaseModel):
@@ -102,6 +110,51 @@ class PreparationPlan(BaseModel):
     agent_routes: list[AgentRoute] = Field(
         default_factory=list,
         description="各专业 Agent 的规划路线。",
+    )
+
+
+class PracticeQuestionAllocation(BaseModel):
+    """单种题型在练习蓝图中的分配结果。"""
+
+    question_type: QuestionTypeName = Field(description="题型名称。")
+    count: int = Field(
+        ge=0,
+        description="该题型建议生成的题目数量。",
+    )
+    purpose: str = Field(description="该题型在本轮练习中的教学目的。")
+    competency_focus: list[str] = Field(
+        default_factory=list,
+        description="该题型重点覆盖的能力点。",
+    )
+
+
+class PracticeBlueprint(BaseModel):
+    """练习题规划 Agent 产出的题型与题量蓝图。"""
+
+    planning_summary: str = Field(description="题型规划的整体摘要。")
+    total_questions: int = Field(
+        ge=1,
+        description="本轮建议生成的题目总数。",
+    )
+    topic_characteristics: list[str] = Field(
+        default_factory=list,
+        description="该主题在题型规划时识别出的关键特征。",
+    )
+    distribution_principles: list[str] = Field(
+        default_factory=list,
+        description="决定题型配比时遵循的原则。",
+    )
+    progression_plan: list[str] = Field(
+        default_factory=list,
+        description="建议的题目推进节奏，如热身、核心、挑战、迁移。",
+    )
+    must_cover: list[str] = Field(
+        default_factory=list,
+        description="本轮练习必须覆盖的知识点、能力点或误区。",
+    )
+    question_allocations: list[PracticeQuestionAllocation] = Field(
+        default_factory=list,
+        description="各题型的建议数量与用途。",
     )
 
 

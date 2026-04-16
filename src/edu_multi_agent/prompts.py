@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .models import ArtifactResult, GenerationRequest, PreparationPlan
+from .models import (
+    ArtifactResult,
+    GenerationRequest,
+    PracticeBlueprint,
+    PreparationPlan,
+)
 
 
 def _plan_json(plan: PreparationPlan) -> str:
@@ -16,6 +21,10 @@ def _artifact_json(artifacts: list[ArtifactResult]) -> str:
         ensure_ascii=False,
         indent=2,
     )
+
+
+def _practice_blueprint_json(blueprint: PracticeBlueprint) -> str:
+    return json.dumps(blueprint.model_dump(), ensure_ascii=False, indent=2)
 
 
 def _load_question_type_reference() -> str:
@@ -78,7 +87,7 @@ Return one JSON object with exactly this shape:
       "agent_name": "practice",
       "selected": true,
       "objective": "goal for this agent",
-      "deliverables": ["practice_questions.json", "answer_key.md"],
+      "deliverables": ["practice_blueprint.md", "practice_questions.json", "answer_key.md"],
       "focus_points": ["item 1", "item 2"]
     }},
     {{
@@ -148,9 +157,83 @@ File requirements:
     return system_prompt, user_prompt
 
 
+def build_practice_planner_prompts(
+    request: GenerationRequest,
+    plan: PreparationPlan,
+) -> tuple[str, str]:
+    system_prompt = """
+You are the practice-planning agent in a teaching-preparation multi-agent system.
+Your job is to decide how many questions of each question type should be generated
+before the practice-design agent writes any concrete questions.
+Return strict JSON only. Do not include Markdown fences.
+""".strip()
+
+    user_prompt = f"""
+Create a practice blueprint for the pre-class question bank.
+
+Context:
+- Learning goal: {request.learning_goal}
+- Subject: {request.subject}
+- Grade level: {request.grade_level}
+- Learner profile: {request.learner_profile}
+- Notes: {request.notes}
+
+Supervisor plan:
+{_plan_json(plan)}
+
+Available question types and their typical strengths:
+- FillInTheBlank: terminology recall, formula completion, symbolic details, short factual checks.
+- MultipleChoice: concept discrimination, misconception checks, fast diagnosis of understanding.
+- ShortAnswer: explanation, strategy choice, reasoning, method comparison, reflective transfer.
+- Listening: audio comprehension, pronunciation, music, or any skill where listening is essential.
+- Coding: algorithm design, debugging, implementation, computational procedures, programmatic problem solving.
+- Drawing: geometry, forces, structure diagrams, process maps, coordinate graphs, or visual-spatial reasoning.
+
+Planning requirements:
+- Output all explanatory strings in Chinese.
+- Decide the distribution from the topic nature, learner profile, transfer goals, and the practice route.
+- Do not use a fixed template. Not every question type must appear.
+- If the topic requires implementation, algorithmic thinking, computational procedures, or step-by-step problem solving,
+  allocate multiple Coding and/or ShortAnswer questions instead of leaving Coding as a token single item.
+- If the topic is mainly conceptual recall, MultipleChoice and FillInTheBlank can take a larger share.
+- Use Listening only when audio is inherently required by the learning goal.
+- Use Drawing only when visual-spatial representation is important to mastering the topic.
+- The full bank should cover warm-up, core consolidation, challenge, and transfer/application.
+- Prefer 6-12 total questions unless the context strongly justifies another size.
+- Only include question types with a positive count in `question_allocations`.
+
+Return one JSON object with exactly this shape:
+{{
+  "planning_summary": "short Chinese summary",
+  "total_questions": 8,
+  "topic_characteristics": ["item 1", "item 2"],
+  "distribution_principles": ["item 1", "item 2"],
+  "progression_plan": ["warm-up", "core practice", "challenge", "transfer"],
+  "must_cover": ["item 1", "item 2"],
+  "question_allocations": [
+    {{
+      "question_type": "MultipleChoice",
+      "count": 2,
+      "purpose": "why this type matters here",
+      "competency_focus": ["item 1", "item 2"]
+    }},
+    {{
+      "question_type": "ShortAnswer",
+      "count": 3,
+      "purpose": "why this type matters here",
+      "competency_focus": ["item 1", "item 2"]
+    }}
+  ]
+}}
+""".strip()
+
+    return system_prompt, user_prompt
+
+
 def build_practice_prompts(
     request: GenerationRequest,
     plan: PreparationPlan,
+    blueprint: PracticeBlueprint,
 ) -> tuple[str, str]:
     question_type_reference = _load_question_type_reference()
     system_prompt = """
@@ -171,6 +254,9 @@ Context:
 
 Supervisor plan:
 {_plan_json(plan)}
+
+Practice blueprint:
+{_practice_blueprint_json(blueprint)}
 
 Output format:
 <<<SUMMARY>>>
@@ -193,18 +279,27 @@ File requirements:
   FillInTheBlank, MultipleChoice, ShortAnswer, Listening, Coding, Drawing.
 - Each item must include a `question_type` field whose value is exactly one of:
   `FillInTheBlank`, `MultipleChoice`, `ShortAnswer`, `Listening`, `Coding`, `Drawing`.
+- Do not generate `id` or `question_id` yourself. The system will assign a global unique id
+  after generation is complete.
 - Besides `question_type`, each item must use the exact field names from the dataclass
   definition of that question type.
-- Prefer FillInTheBlank, MultipleChoice, and ShortAnswer unless the learning goal
-  clearly requires another type.
+- You must generate exactly {blueprint.total_questions} questions in total.
+- The count of each `question_type` must exactly match the practice blueprint.
+- Follow the blueprint's progression plan and must-cover points instead of reverting
+  to a generic balanced mix.
+- If one question type receives multiple slots in the blueprint, each instance must
+  target a distinct sub-skill, misconception, or level of transfer.
 - The question bank must include warm-up items, core practice, one challenge task,
-  and one applied or discussion-style prompt.
-- Every question must have a stable id, Chinese question text, and Chinese analysis.
+  and one applied, transfer, or discussion-style prompt.
+- Every question must have clear Chinese question text and Chinese analysis.
 - The generated JSON must be directly parseable by `json.loads`.
 - Do not wrap the array in an object.
 - answer_key.md must provide concise answers, solution ideas, and common mistakes.
-- answer_key.md must reference each question by id in `practice_questions.json`.
+- answer_key.md must follow the same order as `practice_questions.json`, and reference each item
+  as `第1题`、`第2题`、`第3题` ... instead of inventing ids.
 - The difficulty should match the learner profile and stay aligned with the learning goal.
+- For Coding questions, `reference_code` must be a complete reference implementation,
+  and `test_cases` must be JSON-serializable.
 - Do not output anything outside the tags.
 """.strip()
 
@@ -219,6 +314,32 @@ def build_manim_prompts(
 You are the Manim animation agent in a teaching-preparation multi-agent system.
 You produce a self-contained Manim Python script plus a short render guide.
 Return only the required tags and files.
+
+
+编写高质量 Manim 教学动画，注意：
+
+生命周期：play() 后的临时对象必须 FadeOut()
+
+视觉引导：
+
+重点用 Indicate()、Circumscribe() 强调
+重要内容用 YELLOW/RED 高亮
+复杂内容分步展示，每步 wait(1)
+教学辅助：
+
+用 Arrow/Brace 添加说明
+用 ReplacementTransform 展示演变
+对比用不同颜色区分
+动画选择：
+
+出现：Write(文字)、Create(图形)、FadeIn(通用)
+强调：Indicate、Flash、Wiggle
+变换：Transform、ReplacementTransform
+质量标准：
+✅ 关键内容有视觉强调
+✅ 节奏适中有停顿
+✅ 颜色运用一致
+✅ 场景整洁无堆积
 """.strip()
 
     user_prompt = f"""

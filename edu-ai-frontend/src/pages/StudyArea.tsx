@@ -21,11 +21,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "@/components/ui/markdown";
 import { Separator } from "@/components/ui/separator";
-import { SingleChoiceQuestion } from "@/components/SingleChoiceQuestion";
-import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
-import { FillInTheBlanksQuestion } from "@/components/FillInTheBlanksQuestion";
-import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
-import { DrawingQuestion } from "@/components/DrawingQuestion";
+import {
+  parsePracticeQuestionsPayload,
+  PracticeQuestionWorkspace,
+} from "@/components/PracticeQuestionWorkspace";
+import type { PracticeQuestionRecord } from "@/components/PracticeQuestionWorkspace";
 import { FloatingAIInput } from "@/components/FloatingAIInput";
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
@@ -142,6 +142,46 @@ const DEFAULT_WORKSPACE_TAB: WorkspaceTab = {
   type: "workspace",
   status: "ready",
 };
+
+const MOCK_PRACTICE_QUESTIONS: PracticeQuestionRecord[] = [
+  {
+    question_type: "MultipleChoice",
+    id: "mock_choice_01",
+    question: "下面哪一项最能说明学习区已经接入真实题库渲染能力？",
+    options: [
+      "继续展示固定写死的 5 道示例题",
+      "根据 `practice_questions.json` 的真实内容动态渲染题目",
+      "只展示题目总数，不展示具体题型",
+      "只允许单选题显示",
+    ],
+    correct_answer: "根据 `practice_questions.json` 的真实内容动态渲染题目",
+    analysis: "这道 mock 题用于说明新的学习区会跟随真实题库变化，而不是继续展示固定示例。",
+    requires_ai_judgment: false,
+  },
+  {
+    question_type: "Coding",
+    id: "mock_coding_01",
+    question:
+      "实现一个函数 `sumArray(nums)`，返回数组中所有数字之和。你可以先用它体验新的真实题库工作区。",
+    reference_code:
+      "function sumArray(nums) {\n  return nums.reduce((total, value) => total + value, 0);\n}",
+    test_cases: [
+      [[[1, 2, 3, 4]], 10],
+      [[[5]], 5],
+    ],
+    analysis: "这道 mock 编程题主要用来验证编程题在学习区中的动态渲染能力。",
+    requires_ai_judgment: true,
+  },
+  {
+    question_type: "ShortAnswer",
+    id: "mock_short_01",
+    question: "请简述为什么题型规划和具体出题最好拆成两个阶段。",
+    reference_answer:
+      "因为先规划题型和题量，可以让后续生成结果围绕主题能力目标展开，避免固定模板或题型失衡。",
+    analysis: "这道 mock 简答题对应当前系统正在进行的架构升级主题。",
+    requires_ai_judgment: true,
+  },
+];
 
 const MOCK_WORKSPACE_DATA: StudyWorkspaceData = {
   workspaceTitle: "Edu AI Workspace",
@@ -276,6 +316,12 @@ function classifyMaterial(fileName: string) {
   if (lowerName === "answer_key.md") {
     return { label: "答案解析", colorClass: "text-amber-600", openMode: "markdown" as const, priority: 90 };
   }
+  if (lowerName === "practice_blueprint.md") {
+    return { label: "题型蓝图", colorClass: "text-cyan-600", openMode: "markdown" as const, priority: 91 };
+  }
+  if (lowerName === "practice_blueprint.json") {
+    return { label: "题型蓝图", colorClass: "text-cyan-600", openMode: "download" as const, priority: 83 };
+  }
   if (lowerName === "usage_notes.md") {
     return { label: "使用说明", colorClass: "text-rose-600", openMode: "markdown" as const, priority: 88 };
   }
@@ -346,6 +392,20 @@ function buildMaterialItems(artifactResponse: ArtifactListResponse): StudyMateri
 
   items.sort((left, right) => right.priority - left.priority || left.name.localeCompare(right.name));
   return items;
+}
+
+function findArtifactFileByName(
+  artifactResponse: ArtifactListResponse,
+  fileName: string
+): FileDescriptor | null {
+  for (const artifact of artifactResponse.artifacts) {
+    const matchedFile = artifact.files.find((file) => file.name === fileName);
+    if (matchedFile) {
+      return matchedFile;
+    }
+  }
+
+  return null;
 }
 
 function buildWorkspaceData(
@@ -442,67 +502,27 @@ function CircularProgressWidget({
   );
 }
 
-function MainWorkspaceQuestions() {
+function MainWorkspaceQuestions({
+  learningGoal,
+  questions,
+  isLoading,
+  error,
+  emptyHint,
+}: {
+  learningGoal: string;
+  questions: PracticeQuestionRecord[];
+  isLoading: boolean;
+  error?: string | null;
+  emptyHint?: string;
+}) {
   return (
-    <div className="w-full h-full flex flex-col gap-10 overflow-y-auto pr-4">
-      <div>
-        <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">一、单选题测试</h2>
-        <SingleChoiceQuestion
-          questionContent={String.raw`已知复数 $z = \frac{1+i}{1-i}$，则 $|z|$ 的值为：`}
-          options={[
-            { id: "A", content: String.raw`$\frac{1}{2}$` },
-            { id: "B", content: String.raw`$1$` },
-            { id: "C", content: String.raw`$\sqrt{2}$` },
-            { id: "D", content: String.raw`$2$` },
-          ]}
-        />
-      </div>
-
-      <div>
-        <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">二、编程题测试</h2>
-        <ProgrammingQuestion
-          questionContent={String.raw`### 两数之和
-
-给定一个整数数组 $nums$ 和一个整数目标值 $target$，请你在该数组中找出 **和为目标值** $target$ 的那 **两个** 整数，并返回它们的数组下标。
-
-你可以假设每种输入只会对应一个答案。但是，数组中同一个元素在答案里不能重复出现。
-
-你可以按任意顺序返回答案。
-
-**示例 1：**
-> **输入：** $nums = [2,7,11,15]$, $target = 9$  
-> **输出：** $[0,1]$  
-> **解释：** 因为 $nums[0] + nums[1] == 9$ ，返回 $[0, 1]$ 。
-`}
-          language="javascript"
-          initialCode={`/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number[]}\n */\nvar twoSum = function(nums, target) {\n    \n};`}
-          initialRunnerCode={`return twoSum([2, 7, 11, 15], 9);`}
-        />
-      </div>
-
-      <div>
-        <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">三、填空题测试</h2>
-        <FillInTheBlanksQuestion
-          questionContent={String.raw`世界上最高的山峰是 ___，它的海拔高度大约是 ___ 米。
-
-已知的相对论质能方程为： ___，由物理学家 ___ 提出。请在下方写下你的计算思路，如：求 $\sqrt{16}$ 的结果是 \_\_\_。`}
-        />
-      </div>
-
-      <div>
-        <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">四、简答题测试</h2>
-        <ShortAnswerQuestion
-          questionContent={String.raw`请简述牛顿三大定律的核心内容，并举例说明第三定律在生活中的实际应用。`}
-        />
-      </div>
-
-      <div>
-        <h2 className="text-xl font-bold mb-4 shrink-0 text-slate-800">五、作图题测试</h2>
-        <DrawingQuestion
-          questionContent={String.raw`请在下方区域画出一个带有阻尼系数的单摆系统的受力示意图，并标注出位移 $x$ 与受力 $F$ 的方向。`}
-        />
-      </div>
-    </div>
+    <PracticeQuestionWorkspace
+      learningGoal={learningGoal}
+      questions={questions}
+      isLoading={isLoading}
+      error={error}
+      emptyHint={emptyHint}
+    />
   );
 }
 
@@ -516,6 +536,9 @@ export default function StudyArea() {
   const [drawerWidth, setDrawerWidth] = useState(320);
   const [isDragging, setIsDragging] = useState(false);
   const [workspaceData, setWorkspaceData] = useState<StudyWorkspaceData>(MOCK_WORKSPACE_DATA);
+  const [practiceQuestions, setPracticeQuestions] =
+    useState<PracticeQuestionRecord[]>(MOCK_PRACTICE_QUESTIONS);
+  const [practiceQuestionsError, setPracticeQuestionsError] = useState<string | null>(null);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>([DEFAULT_WORKSPACE_TAB]);
   const [activeTabId, setActiveTabId] = useState(WORKSPACE_TAB_ID);
@@ -534,6 +557,8 @@ export default function StudyArea() {
   useEffect(() => {
     if (!runId) {
       setWorkspaceData(MOCK_WORKSPACE_DATA);
+      setPracticeQuestions(MOCK_PRACTICE_QUESTIONS);
+      setPracticeQuestionsError(null);
       setIsLoadingWorkspace(false);
       return;
     }
@@ -543,6 +568,8 @@ export default function StudyArea() {
 
     async function loadWorkspaceData() {
       setIsLoadingWorkspace(true);
+      setPracticeQuestions([]);
+      setPracticeQuestionsError(null);
 
       try {
         const [statusResponse, artifactsResponse] = await Promise.all([
@@ -567,8 +594,40 @@ export default function StudyArea() {
               bundle_download_url: statusData.links.bundle,
             };
 
+        let nextPracticeQuestions: PracticeQuestionRecord[] = [];
+        let nextPracticeQuestionsError: string | null = null;
+        const practiceQuestionsFile = findArtifactFileByName(artifactData, "practice_questions.json");
+
+        if (practiceQuestionsFile) {
+          try {
+            const practiceResponse = await fetch(practiceQuestionsFile.download_url, {
+              signal: controller.signal,
+              headers: { Accept: "application/json, text/plain;q=0.9, */*;q=0.8" },
+            });
+
+            if (!practiceResponse.ok) {
+              throw new Error(`practice questions request failed: ${practiceResponse.status}`);
+            }
+
+            const practicePayload = (await practiceResponse.json()) as unknown;
+            nextPracticeQuestions = parsePracticeQuestionsPayload(practicePayload);
+
+            if (nextPracticeQuestions.length === 0) {
+              nextPracticeQuestionsError = "题库文件已生成，但当前内容为空或格式暂不支持展示。";
+            }
+          } catch (error) {
+            const fallbackMessage =
+              error instanceof Error ? error.message : "practice questions request failed";
+            nextPracticeQuestionsError = `真实题库加载失败：${fallbackMessage}`;
+          }
+        } else if (statusData.status === "succeeded") {
+          nextPracticeQuestionsError = "当前任务已完成，但未找到 `practice_questions.json`。";
+        }
+
         if (!cancelled) {
           setWorkspaceData(buildWorkspaceData(statusData, artifactData));
+          setPracticeQuestions(nextPracticeQuestions);
+          setPracticeQuestionsError(nextPracticeQuestionsError);
         }
       } catch {
         if (!cancelled) {
@@ -577,6 +636,8 @@ export default function StudyArea() {
             workspaceSubtitle: `未获取到 run_id=${runId} 的真实任务数据，当前展示示例内容。`,
             usingMock: true,
           });
+          setPracticeQuestions(MOCK_PRACTICE_QUESTIONS);
+          setPracticeQuestionsError(null);
         }
       } finally {
         if (!cancelled) {
@@ -721,7 +782,19 @@ export default function StudyArea() {
 
   const renderWorkspaceContent = () => {
     if (activeTab.type === "workspace") {
-      return <MainWorkspaceQuestions />;
+      return (
+        <MainWorkspaceQuestions
+          learningGoal={workspaceData.workspaceTitle}
+          questions={practiceQuestions}
+          isLoading={isLoadingWorkspace && !workspaceData.usingMock}
+          error={practiceQuestionsError}
+          emptyHint={
+            workspaceData.usingMock
+              ? "当前展示的是示例题库。创建真实任务后，这里会自动切换为生成产物里的练习题。"
+              : "当前还没有真实题库，请等待练习 Agent 完成生成。"
+          }
+        />
+      );
     }
 
     return (
@@ -757,7 +830,7 @@ export default function StudyArea() {
           )}
 
           {activeTab.status === "ready" && (
-            <Markdown className="prose prose-slate max-w-none [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_pre]:overflow-x-auto">
+            <Markdown className="max-w-none text-slate-800 dark:text-slate-200">
               {activeTab.content || "# 空文档\n\n当前文档没有可展示的内容。"}
             </Markdown>
           )}

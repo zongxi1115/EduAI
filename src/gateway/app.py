@@ -8,6 +8,7 @@ from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
 
 from .routers.assistant import router as assistant_router
+from .routers.code_execution import router as code_execution_router
 from .routers.health import router as health_router
 from .routers.prep_runs import router as prep_runs_router
 from .services.run_registry import RunRegistry
@@ -29,6 +30,10 @@ OPENAPI_TAGS = [
         "description": (
             "用于前端选中内容后的即时问答。该类接口通常直接调用大模型并流式返回结果，不创建后台任务。"
         ),
+    },
+    {
+        "name": "代码运行",
+        "description": "用于前端编程题在线运行，例如后端执行 Python 代码。",
     },
 ]
 
@@ -73,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.llm_client = llm_client
 
     app.include_router(assistant_router)
+    app.include_router(code_execution_router)
     app.include_router(health_router)
     app.include_router(prep_runs_router)
 
