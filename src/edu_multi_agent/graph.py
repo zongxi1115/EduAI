@@ -9,10 +9,11 @@ from operator import add
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from typing import Annotated, Any, Callable, TypedDict
+from typing import Annotated, Any, Callable, Literal, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
 
 from .config import PROJECT_ROOT, Settings
 from .file_io import (
@@ -117,6 +118,50 @@ MANIM_VALIDATION_OUTPUT_CHAR_LIMIT = 6000
 MANIM_ARTIFACT_RENDER_TIMEOUT_SECONDS = 240
 MANIM_REPAIR_MEMORY_RELATIVE_PATH = "docs/repair_memory/manim_runtime_lessons.jsonl"
 MANIM_REPAIR_MEMORY_MAX_ITEMS = 8
+MANIM_TOOL_REPAIR_MAX_STEPS = 12
+
+
+class ManimRepairToolCall(BaseModel):
+    """One tool action requested by the Manim repair agent."""
+
+    action: Literal[
+        "read_file",
+        "read_lines",
+        "grep",
+        "replace_lines",
+        "replace_file",
+        "run_validation",
+        "finish",
+    ] = Field(description="The next tool to execute.")
+    file_name: Literal["lesson_animation.py", "render_guide.md"] | None = Field(
+        default=None,
+        description="Target file when the tool needs one.",
+    )
+    start_line: int | None = Field(
+        default=None,
+        ge=1,
+        description="1-based start line for line-based edits/reads.",
+    )
+    end_line: int | None = Field(
+        default=None,
+        ge=1,
+        description="1-based end line for line-based edits/reads.",
+    )
+    pattern: str | None = Field(
+        default=None,
+        description="Search pattern used by grep.",
+    )
+    replacement: str | None = Field(
+        default=None,
+        description="Replacement text for line-based edits.",
+    )
+    content: str | None = Field(
+        default=None,
+        description="Full file content when replacing a file.",
+    )
+    reason: str = Field(
+        description="Short explanation of why this tool is the best next step.",
+    )
 
 
 def _default_route(spec: AgentSpec) -> AgentRoute:
@@ -616,6 +661,192 @@ def _build_manim_repair_tool_report(files: dict[str, str], error_text: str) -> t
     return "\n".join(report).strip(), focus_lines, search_hints
 
 
+def _format_numbered_file_content(content: str) -> str:
+    lines = content.splitlines()
+    if not lines:
+        return "(empty file)"
+    return "\n".join(f"{index:4}: {line}" for index, line in enumerate(lines, start=1))
+
+
+def _execute_manim_repair_tool_call(
+    files: dict[str, str],
+    tool_call: ManimRepairToolCall,
+) -> tuple[dict[str, str], str, str | None]:
+    current_files = dict(files)
+
+    def require_file_name() -> str:
+        if not tool_call.file_name:
+            raise ValueError(f"Tool `{tool_call.action}` requires `file_name`.")
+        if tool_call.file_name not in current_files:
+            raise ValueError(f"Unknown file: {tool_call.file_name}")
+        return tool_call.file_name
+
+    if tool_call.action == "read_file":
+        file_name = require_file_name()
+        return current_files, (
+            f"Tool result for read_file on {file_name}:\n"
+            + _format_numbered_file_content(current_files[file_name])
+        ), None
+
+    if tool_call.action == "read_lines":
+        file_name = require_file_name()
+        start_line = tool_call.start_line or 1
+        end_line = tool_call.end_line or start_line
+        if end_line < start_line:
+            raise ValueError("`end_line` must be greater than or equal to `start_line`.")
+        lines = current_files[file_name].splitlines()
+        start_index = max(1, start_line)
+        end_index = min(len(lines), end_line)
+        if not lines:
+            excerpt = "(empty file)"
+        else:
+            excerpt = "\n".join(
+                f"{index:4}: {lines[index - 1]}"
+                for index in range(start_index, end_index + 1)
+            )
+        return current_files, (
+            f"Tool result for read_lines on {file_name} ({start_line}-{end_line}):\n{excerpt}"
+        ), None
+
+    if tool_call.action == "grep":
+        file_name = require_file_name()
+        pattern = (tool_call.pattern or "").strip()
+        if not pattern:
+            raise ValueError("Tool `grep` requires a non-empty `pattern`.")
+        matched_lines = [
+            f"{index:4}: {line}"
+            for index, line in enumerate(current_files[file_name].splitlines(), start=1)
+            if pattern in line
+        ]
+        grep_output = "\n".join(matched_lines) if matched_lines else "(no matches)"
+        return current_files, (
+            f'Tool result for grep on {file_name} with pattern "{pattern}":\n{grep_output}'
+        ), None
+
+    if tool_call.action == "replace_lines":
+        file_name = require_file_name()
+        if tool_call.replacement is None:
+            raise ValueError("Tool `replace_lines` requires `replacement`.")
+        start_line = tool_call.start_line
+        end_line = tool_call.end_line
+        if start_line is None or end_line is None:
+            raise ValueError("Tool `replace_lines` requires `start_line` and `end_line`.")
+        if end_line < start_line:
+            raise ValueError("`end_line` must be greater than or equal to `start_line`.")
+
+        original_lines = current_files[file_name].splitlines()
+        if start_line < 1 or end_line > len(original_lines):
+            raise ValueError(
+                f"Invalid replace range {start_line}-{end_line} for file with {len(original_lines)} lines."
+            )
+        replacement_lines = tool_call.replacement.splitlines()
+        updated_lines = [
+            *original_lines[: start_line - 1],
+            *replacement_lines,
+            *original_lines[end_line:],
+        ]
+        current_files[file_name] = "\n".join(updated_lines).rstrip() + "\n"
+        preview_start = max(1, start_line - 2)
+        preview_end = min(len(updated_lines), start_line + len(replacement_lines) + 1)
+        preview = "\n".join(
+            f"{index:4}: {updated_lines[index - 1]}"
+            for index in range(preview_start, preview_end + 1)
+        )
+        return current_files, (
+            f"Tool result for replace_lines on {file_name} ({start_line}-{end_line}) succeeded.\n"
+            f"Updated excerpt:\n{preview}"
+        ), None
+
+    if tool_call.action == "replace_file":
+        file_name = require_file_name()
+        if tool_call.content is None:
+            raise ValueError("Tool `replace_file` requires `content`.")
+        current_files[file_name] = tool_call.content.rstrip() + "\n"
+        return current_files, (
+            f"Tool result for replace_file on {file_name} succeeded.\n"
+            + _format_numbered_file_content(current_files[file_name])
+        ), None
+
+    if tool_call.action == "run_validation":
+        _validate_generated_files(current_files)
+        validation_command = _validate_manim_bundle_runtime(current_files)
+        return current_files, (
+            "Tool result for run_validation:\n"
+            f"Validation passed with command: {validation_command}"
+        ), validation_command
+
+    raise ValueError(f"Unsupported tool action: {tool_call.action}")
+
+
+def _build_manim_tool_repair_prompts(
+    *,
+    request: GenerationRequest,
+    current_files: dict[str, str],
+    current_error_text: str,
+    last_tool_result: str,
+    step_index: int,
+    repair_memory_text: str,
+) -> tuple[str, str]:
+    file_summaries = [
+        f"- {file_name}: {len(content.splitlines())} lines"
+        for file_name, content in current_files.items()
+    ]
+    system_prompt = """
+You are a Manim runtime repair agent.
+You must repair the current files incrementally by choosing one tool action at a time.
+Do not regenerate the package from scratch unless a full-file replacement is truly necessary.
+Return strict JSON only.
+
+Available tools:
+- read_file: inspect a full file with line numbers.
+- read_lines: inspect a line range in one file.
+- grep: search for a literal pattern in one file and get matching line numbers.
+- replace_lines: replace a specific inclusive line range with new text.
+- replace_file: replace a whole file when surgical edits are impossible.
+- run_validation: run `manim -pql lesson_animation.py LessonScene`.
+- finish: stop tool use only when you are confident the current files are ready; the system will validate one final time.
+
+Rules:
+- Prefer read_lines or grep before editing if the failure is not fully localized.
+- Prefer replace_lines over replace_file whenever possible.
+- Use the current traceback and previous tool outputs to localize the bug.
+- Keep `LessonScene`, `from manim import *`, and the overall teaching intent.
+- Make the smallest viable change that resolves the runtime issue.
+""".strip()
+
+    user_prompt = f"""
+Repair the existing Manim package for this learning goal: {request.learning_goal}
+
+Current files:
+{chr(10).join(file_summaries)}
+
+Current validation error:
+{current_error_text}
+
+Previous tool result:
+{last_tool_result}
+
+Past repair lessons:
+{repair_memory_text or "(No previous lessons recorded.)"}
+
+This is tool step {step_index}/{MANIM_TOOL_REPAIR_MAX_STEPS}.
+
+Return one JSON object with this shape:
+{{
+  "action": "read_lines | grep | replace_lines | replace_file | run_validation | finish",
+  "file_name": "lesson_animation.py or render_guide.md when needed, else null",
+  "start_line": 1,
+  "end_line": 3,
+  "pattern": "optional grep pattern",
+  "replacement": "optional replacement text",
+  "content": "optional full file content",
+  "reason": "short explanation"
+}}
+""".strip()
+
+    return system_prompt, user_prompt
+
+
 def _extract_manim_error_signature(error_text: str) -> str:
     error_lines = [line.strip() for line in error_text.splitlines() if line.strip()]
     for line in reversed(error_lines):
@@ -995,128 +1226,210 @@ def build_workflow(
             plan,
             repair_memory_text,
         )
-        repair_feedback = ""
-        last_error: Exception | None = None
-        validation_command = ""
+        initial_bundle = llm.invoke_bundle(
+            system_prompt,
+            base_user_prompt,
+            required_files,
+        )
+        current_files = dict(initial_bundle.files)
+        current_summary = initial_bundle.summary
         last_focus_lines: list[int] = []
         last_search_hints: list[str] = []
         last_error_text = ""
+        validation_command = ""
 
-        for attempt in range(1, MANIM_VALIDATION_MAX_ATTEMPTS + 1):
+        try:
             _emit_event(
                 event_callback,
                 event="artifact_validation_started",
                 node=node_name,
                 phase="artifact_validation",
                 agent_name="manim",
-                summary=(
-                    f"Manim runtime validation attempt {attempt}/{MANIM_VALIDATION_MAX_ATTEMPTS} started."
-                ),
-                data={"attempt": attempt, "max_attempts": MANIM_VALIDATION_MAX_ATTEMPTS},
+                summary="Manim runtime validation attempt 1/1 started.",
+                data={"attempt": 1, "max_attempts": 1},
             )
-
-            bundle = llm.invoke_bundle(
-                system_prompt,
-                base_user_prompt + repair_feedback,
-                required_files,
-            )
-
-            try:
-                _validate_generated_files(bundle.files)
-                validation_command = _validate_manim_bundle_runtime(bundle.files)
-                _emit_event(
-                    event_callback,
-                    event="artifact_validation_passed",
-                    node=node_name,
-                    phase="artifact_validation",
-                    agent_name="manim",
-                    summary="Manim runtime validation passed.",
-                    data={
-                        "attempt": attempt,
-                        "command": validation_command,
-                    },
-                )
-                notes = [
-                    f"Manim 运行校验已通过：{validation_command}",
-                    f"Manim 自动修复轮次：{attempt - 1}",
-                ]
-                if attempt > 1 and last_error_text:
-                    _record_manim_repair_memory(
-                        run_id=run_id,
-                        learning_goal=request.learning_goal,
-                        error_text=last_error_text,
-                        script_content=bundle.files.get("lesson_animation.py", ""),
-                        search_hints=last_search_hints,
-                        focus_lines=last_focus_lines,
-                    )
-                    notes.append("本次 Manim 修复经验已写入项目经验库。")
-                return bundle, notes
-            except RuntimeError:
-                raise
-            except Exception as exc:
-                last_error = exc
-                last_error_text = str(exc)
-
-            if attempt >= MANIM_VALIDATION_MAX_ATTEMPTS:
-                break
-
-            error_text = str(last_error)
-            tool_report, focus_lines, search_hints = _build_manim_repair_tool_report(
-                bundle.files,
-                error_text,
-            )
-            last_focus_lines = focus_lines
-            last_search_hints = search_hints
+            _validate_generated_files(current_files)
+            validation_command = _validate_manim_bundle_runtime(current_files)
             _emit_event(
                 event_callback,
-                event="artifact_validation_failed",
+                event="artifact_validation_passed",
                 node=node_name,
                 phase="artifact_validation",
                 agent_name="manim",
-                summary=f"Manim runtime validation failed on attempt {attempt}.",
-                data={
-                    "attempt": attempt,
-                    "error": error_text,
-                },
+                summary="Manim runtime validation passed.",
+                data={"attempt": 1, "command": validation_command},
             )
-            repair_feedback = (
-                "\n\nYour previous Manim package failed real execution validation. "
-                "Do not regenerate the package from zero. Start from the current files below, "
-                "preserve the working parts, and make the smallest viable edits needed to pass validation.\n"
-                "You must fix the code and return the full package again using the exact tags "
-                "and exact filenames.\n"
-                "Validation command:\n"
-                "manim -pql lesson_animation.py LessonScene\n\n"
-                "Validation error output:\n"
-                f"{error_text}\n\n"
-                f"{tool_report}\n\n"
-                "Repair requirements:\n"
-                "- Keep using `from manim import *`.\n"
-                "- Keep the main scene class name exactly `LessonScene`.\n"
-                "- Prefer line-level or block-level fixes instead of redesigning the whole animation.\n"
-                "- Use the traceback focus lines and grep hits above to localize the bug before editing.\n"
-                "- Ensure the script runs successfully under the validation command.\n"
-                "- Avoid shape mismatches, missing imports/names, invalid animations, and unsupported API usage.\n"
-                "- Return the complete package again, not just a patch."
-            )
+            return initial_bundle, [
+                f"Manim 运行校验已通过：{validation_command}",
+                "Manim 自动修复轮次：0",
+            ]
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            last_error_text = str(exc)
 
-        assert last_error is not None
+        tool_report, focus_lines, search_hints = _build_manim_repair_tool_report(
+            current_files,
+            last_error_text,
+        )
+        last_focus_lines = focus_lines
+        last_search_hints = search_hints
         _emit_event(
             event_callback,
             event="artifact_validation_failed",
             node=node_name,
             phase="artifact_validation",
             agent_name="manim",
-            summary="Manim runtime validation failed after exhausting repair attempts.",
+            summary="Initial Manim runtime validation failed; entering tool-based repair mode.",
+            data={"attempt": 1, "error": last_error_text},
+        )
+
+        last_tool_result = tool_report
+        for step_index in range(1, MANIM_TOOL_REPAIR_MAX_STEPS + 1):
+            repair_system_prompt, repair_user_prompt = _build_manim_tool_repair_prompts(
+                request=request,
+                current_files=current_files,
+                current_error_text=last_error_text,
+                last_tool_result=last_tool_result,
+                step_index=step_index,
+                repair_memory_text=repair_memory_text,
+            )
+            tool_call = llm.invoke_json(
+                repair_system_prompt,
+                repair_user_prompt,
+                ManimRepairToolCall,
+            )
+            _emit_event(
+                event_callback,
+                event="artifact_repair_tool_requested",
+                node=node_name,
+                phase="artifact_repair",
+                agent_name="manim",
+                summary=f"Manim repair agent requested tool `{tool_call.action}`.",
+                data={
+                    "step": step_index,
+                    "tool_call": tool_call.model_dump(),
+                },
+            )
+
+            if tool_call.action == "finish":
+                try:
+                    _validate_generated_files(current_files)
+                    validation_command = _validate_manim_bundle_runtime(current_files)
+                    _emit_event(
+                        event_callback,
+                        event="artifact_validation_passed",
+                        node=node_name,
+                        phase="artifact_validation",
+                        agent_name="manim",
+                        summary="Manim runtime validation passed after tool-based repair.",
+                        data={
+                            "step": step_index,
+                            "command": validation_command,
+                        },
+                    )
+                    _record_manim_repair_memory(
+                        run_id=run_id,
+                        learning_goal=request.learning_goal,
+                        error_text=last_error_text,
+                        script_content=current_files.get("lesson_animation.py", ""),
+                        search_hints=last_search_hints,
+                        focus_lines=last_focus_lines,
+                    )
+                    notes = [
+                        f"Manim 运行校验已通过：{validation_command}",
+                        f"Manim 自动修复轮次：{step_index}",
+                        "本次 Manim 修复经验已写入项目经验库。",
+                    ]
+                    return initial_bundle.__class__(
+                        summary=current_summary,
+                        files=current_files,
+                    ), notes
+                except RuntimeError:
+                    raise
+                except Exception as exc:
+                    last_error_text = str(exc)
+                    last_tool_result, last_focus_lines, last_search_hints = _build_manim_repair_tool_report(
+                        current_files,
+                        last_error_text,
+                    )
+                    continue
+
+            try:
+                current_files, tool_result, tool_validation_command = _execute_manim_repair_tool_call(
+                    current_files,
+                    tool_call,
+                )
+                last_tool_result = tool_result
+                _emit_event(
+                    event_callback,
+                    event="artifact_repair_tool_completed",
+                    node=node_name,
+                    phase="artifact_repair",
+                    agent_name="manim",
+                    summary=f"Manim repair tool `{tool_call.action}` completed.",
+                    data={
+                        "step": step_index,
+                        "tool_result": tool_result[:2000],
+                    },
+                )
+
+                if tool_call.action == "run_validation":
+                    validation_command = tool_validation_command or ""
+                    _record_manim_repair_memory(
+                        run_id=run_id,
+                        learning_goal=request.learning_goal,
+                        error_text=last_error_text,
+                        script_content=current_files.get("lesson_animation.py", ""),
+                        search_hints=last_search_hints,
+                        focus_lines=last_focus_lines,
+                    )
+                    notes = [
+                        f"Manim 运行校验已通过：{validation_command}",
+                        f"Manim 自动修复轮次：{step_index}",
+                        "本次 Manim 修复经验已写入项目经验库。",
+                    ]
+                    return initial_bundle.__class__(
+                        summary=current_summary,
+                        files=current_files,
+                    ), notes
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                last_error_text = str(exc)
+                last_tool_result, last_focus_lines, last_search_hints = _build_manim_repair_tool_report(
+                    current_files,
+                    last_error_text,
+                )
+                _emit_event(
+                    event_callback,
+                    event="artifact_repair_tool_failed",
+                    node=node_name,
+                    phase="artifact_repair",
+                    agent_name="manim",
+                    summary=f"Manim repair tool `{tool_call.action}` failed.",
+                    data={
+                        "step": step_index,
+                        "error": last_error_text,
+                    },
+                )
+
+        _emit_event(
+            event_callback,
+            event="artifact_validation_failed",
+            node=node_name,
+            phase="artifact_validation",
+            agent_name="manim",
+            summary="Manim tool-based repair exhausted all steps without success.",
             data={
-                "attempt": MANIM_VALIDATION_MAX_ATTEMPTS,
-                "error": str(last_error),
+                "steps": MANIM_TOOL_REPAIR_MAX_STEPS,
+                "error": last_error_text,
             },
         )
         raise RuntimeError(
-            "Manim bundle failed runtime validation after "
-            f"{MANIM_VALIDATION_MAX_ATTEMPTS} attempts: {last_error}"
-        ) from last_error
+            "Manim bundle failed runtime validation after tool-based repair steps: "
+            f"{last_error_text}"
+        )
 
     def planner_node(state: WorkflowState) -> dict[str, Any]:
         request = GenerationRequest.model_validate(state["request"])
