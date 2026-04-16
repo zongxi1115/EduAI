@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from operator import add
 from pathlib import Path
+import sys
+from tempfile import TemporaryDirectory
 from typing import Annotated, Any, Callable, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 
-from .config import Settings
+from .config import PROJECT_ROOT, Settings
 from .file_io import (
+    append_jsonl_file,
+    now_iso,
     render_fallback_report,
     render_plan_markdown,
     render_practice_blueprint_markdown,
@@ -104,6 +111,12 @@ QUESTION_TYPE_ORDER: tuple[QuestionTypeName, ...] = (
 )
 PRACTICE_BLUEPRINT_JSON_PATH = "02_practice/practice_blueprint.json"
 PRACTICE_BLUEPRINT_MARKDOWN_PATH = "02_practice/practice_blueprint.md"
+MANIM_VALIDATION_MAX_ATTEMPTS = 5
+MANIM_VALIDATION_TIMEOUT_SECONDS = 180
+MANIM_VALIDATION_OUTPUT_CHAR_LIMIT = 6000
+MANIM_ARTIFACT_RENDER_TIMEOUT_SECONDS = 240
+MANIM_REPAIR_MEMORY_RELATIVE_PATH = "docs/repair_memory/manim_runtime_lessons.jsonl"
+MANIM_REPAIR_MEMORY_MAX_ITEMS = 8
 
 
 def _default_route(spec: AgentSpec) -> AgentRoute:
@@ -433,6 +446,381 @@ def _append_question_id_mapping(
     return "\n".join([answer_key_markdown.rstrip(), "", *mapping_lines]).strip() + "\n"
 
 
+def _resolve_manim_validation_command() -> list[str]:
+    manim_cli = shutil.which("manim")
+    if manim_cli:
+        return [manim_cli]
+    return [sys.executable, "-m", "manim"]
+
+
+def _load_manim_repair_memory() -> list[dict[str, Any]]:
+    memory_path = PROJECT_ROOT / MANIM_REPAIR_MEMORY_RELATIVE_PATH
+    if not memory_path.is_file():
+        return []
+
+    records: list[dict[str, Any]] = []
+    for line in memory_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records[-MANIM_REPAIR_MEMORY_MAX_ITEMS:]
+
+
+def _format_manim_repair_memory_for_prompt(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return ""
+
+    lines = [
+        "Past successful Manim runtime repair lessons from this project:",
+    ]
+    for index, record in enumerate(records, start=1):
+        lines.append(f"{index}. Error signature: {record.get('error_signature', 'Unknown')}")
+        for lesson in record.get("lessons", []):
+            lines.append(f"   - {lesson}")
+        search_hints = record.get("search_hints", [])
+        if search_hints:
+            lines.append("   - Useful search hints: " + ", ".join(search_hints))
+    return "\n".join(lines).strip()
+
+
+def _extract_manim_traceback_line_numbers(error_text: str) -> list[int]:
+    line_numbers: list[int] = []
+    patterns = (
+        r"lesson_animation\.py:(\d+)",
+        r"py:(\d+)\s+in",
+        r"line\s+(\d+)",
+    )
+    for pattern in patterns:
+        for match in re.findall(pattern, error_text):
+            try:
+                line_number = int(match)
+            except ValueError:
+                continue
+            if line_number > 0 and line_number not in line_numbers:
+                line_numbers.append(line_number)
+    return line_numbers
+
+
+def _format_manim_numbered_excerpt(
+    script_content: str,
+    *,
+    focus_lines: list[int],
+    context_radius: int = 4,
+) -> str:
+    lines = script_content.splitlines()
+    if not lines:
+        return "(empty script)"
+
+    if not focus_lines:
+        focus_lines = [1]
+
+    selected_indexes: list[int] = []
+    for focus_line in focus_lines:
+        start = max(1, focus_line - context_radius)
+        end = min(len(lines), focus_line + context_radius)
+        for index in range(start, end + 1):
+            if index not in selected_indexes:
+                selected_indexes.append(index)
+
+    excerpt_lines: list[str] = []
+    previous_index = None
+    for index in selected_indexes:
+        if previous_index is not None and index - previous_index > 1:
+            excerpt_lines.append("   ...")
+        excerpt_lines.append(f"{index:4}: {lines[index - 1]}")
+        previous_index = index
+
+    return "\n".join(excerpt_lines)
+
+
+def _collect_manim_search_hints(
+    script_content: str,
+    *,
+    focus_lines: list[int],
+    error_text: str,
+) -> dict[str, list[str]]:
+    lines = script_content.splitlines()
+    lowered_error = error_text.lower()
+    candidate_patterns = ["shift(", "move_to(", "next_to(", "ReplacementTransform(", "Transform(", "VGroup(", "np.", "animate", "Arrow(", "Text("]
+    relevant_patterns: list[str] = []
+
+    for focus_line in focus_lines:
+        if 1 <= focus_line <= len(lines):
+            focus_source = lines[focus_line - 1]
+            for pattern in candidate_patterns:
+                if pattern in focus_source and pattern not in relevant_patterns:
+                    relevant_patterns.append(pattern)
+
+    if "broadcast" in lowered_error or "shape" in lowered_error:
+        for pattern in ("np.", "shift(", "move_to("):
+            if pattern not in relevant_patterns:
+                relevant_patterns.append(pattern)
+    if "nameerror" in lowered_error and "np" in lowered_error and "np." not in relevant_patterns:
+        relevant_patterns.append("np.")
+    if not relevant_patterns:
+        relevant_patterns.extend(["shift(", "move_to(", "VGroup("])
+
+    hits: dict[str, list[str]] = {}
+    for pattern in relevant_patterns:
+        matched_lines = [
+            f"{index:4}: {line}"
+            for index, line in enumerate(lines, start=1)
+            if pattern in line
+        ]
+        if matched_lines:
+            hits[pattern] = matched_lines[:8]
+    return hits
+
+
+def _build_manim_repair_tool_report(files: dict[str, str], error_text: str) -> tuple[str, list[int], list[str]]:
+    script_content = files.get("lesson_animation.py", "")
+    render_guide = files.get("render_guide.md", "").strip()
+    focus_lines = _extract_manim_traceback_line_numbers(error_text)
+    excerpt = _format_manim_numbered_excerpt(script_content, focus_lines=focus_lines)
+    grep_hits = _collect_manim_search_hints(
+        script_content,
+        focus_lines=focus_lines,
+        error_text=error_text,
+    )
+    search_hints = list(grep_hits)
+
+    grep_sections = []
+    for pattern, hits in grep_hits.items():
+        grep_sections.append(f'grep "{pattern}":')
+        grep_sections.extend(hits)
+        grep_sections.append("")
+
+    grep_section_lines = grep_sections if grep_sections else ["(no grep hits)"]
+    report = [
+        "Local debugging tools already executed for you:",
+        "",
+        f"- traceback focus lines: {focus_lines or ['unresolved']}",
+        "",
+        "Focused source excerpt with line numbers:",
+        excerpt,
+        "",
+        "grep results on the current script:",
+        *grep_section_lines,
+        "Current render guide:",
+        render_guide or "(empty render guide)",
+        "",
+        "Current full lesson_animation.py:",
+        script_content.strip() or "(empty script)",
+    ]
+    return "\n".join(report).strip(), focus_lines, search_hints
+
+
+def _extract_manim_error_signature(error_text: str) -> str:
+    error_lines = [line.strip() for line in error_text.splitlines() if line.strip()]
+    for line in reversed(error_lines):
+        if "Error" in line or "Exception" in line:
+            return line[:240]
+    return (error_lines[-1] if error_lines else "Unknown Manim runtime error")[:240]
+
+
+def _derive_manim_repair_lessons(
+    error_text: str,
+    script_content: str,
+    *,
+    focus_lines: list[int],
+) -> list[str]:
+    lowered_error = error_text.lower()
+    lessons = [
+        "收到运行报错后，先根据 traceback 行号定位，再做最小必要修改，不要整份脚本推倒重写。",
+    ]
+
+    if "broadcast" in lowered_error or "shape" in lowered_error:
+        lessons.append(
+            "涉及 RIGHT/LEFT/UP/DOWN 等 Manim 方向向量时，保持 3 维坐标一致；不要把 `np.random.randn(2)` 这类二维数组直接与 3 维向量相加。"
+        )
+        lessons.append(
+            "如果要做随机扰动，优先生成标量后分别乘 `RIGHT`/`UP`，或显式构造成 `[x, y, 0]`。"
+        )
+
+    if "nameerror" in lowered_error and "np" in lowered_error:
+        lessons.append("脚本里使用 `np` 时必须显式导入 `numpy as np`，不要依赖隐式上下文。")
+
+    if "attributeerror" in lowered_error:
+        lessons.append("调用动画方法前先确认对象类型正确，避免把普通值、列表或 None 当成 Mobject/Animation 使用。")
+
+    if "typeerror" in lowered_error:
+        lessons.append("优先检查当前行的参数类型和维度是否符合 Manim API 预期，再决定是否改动画结构。")
+
+    lines = script_content.splitlines()
+    for focus_line in focus_lines:
+        if 1 <= focus_line <= len(lines):
+            source = lines[focus_line - 1]
+            if "shift(" in source and "np." in source:
+                lessons.append("`shift()` 里的表达式如果混入 numpy 偏移，先检查返回值是不是标准 3 维向量。")
+                break
+
+    deduped_lessons: list[str] = []
+    for lesson in lessons:
+        if lesson not in deduped_lessons:
+            deduped_lessons.append(lesson)
+    return deduped_lessons
+
+
+def _record_manim_repair_memory(
+    *,
+    run_id: str,
+    learning_goal: str,
+    error_text: str,
+    script_content: str,
+    search_hints: list[str],
+    focus_lines: list[int],
+) -> None:
+    lessons = _derive_manim_repair_lessons(
+        error_text,
+        script_content,
+        focus_lines=focus_lines,
+    )
+    payload = {
+        "timestamp": now_iso(),
+        "run_id": run_id,
+        "learning_goal": learning_goal,
+        "error_signature": _extract_manim_error_signature(error_text),
+        "focus_lines": focus_lines,
+        "search_hints": search_hints,
+        "lessons": lessons,
+    }
+    append_jsonl_file(PROJECT_ROOT, MANIM_REPAIR_MEMORY_RELATIVE_PATH, payload)
+
+
+def _truncate_validation_output(text: str, *, max_chars: int = MANIM_VALIDATION_OUTPUT_CHAR_LIMIT) -> str:
+    normalized = text.strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[-max_chars:]
+
+
+def _validate_manim_bundle_runtime(
+    files: dict[str, str],
+    *,
+    timeout_seconds: int = MANIM_VALIDATION_TIMEOUT_SECONDS,
+) -> str:
+    script_name = "lesson_animation.py"
+    scene_name = "LessonScene"
+    script_content = files.get(script_name)
+    if not script_content:
+        raise ValueError(f"Missing {script_name} for Manim runtime validation.")
+
+    command_prefix = _resolve_manim_validation_command()
+    display_command = " ".join(
+        [*command_prefix, "-pql", script_name, scene_name]
+    )
+
+    with TemporaryDirectory(prefix="edu_manim_validation_") as temp_dir:
+        temp_path = Path(temp_dir)
+        script_path = temp_path / script_name
+        script_path.write_text(script_content, encoding="utf-8")
+
+        try:
+            completed = subprocess.run(
+                [*command_prefix, "-pql", script_name, scene_name],
+                cwd=temp_path,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError(
+                "Manim runtime validation timed out.\n"
+                f"Command: {display_command}\n"
+                f"Timeout: {timeout_seconds}s"
+            ) from exc
+
+    if completed.returncode != 0:
+        combined_output = "\n".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part and part.strip()
+        ).strip()
+        lowered_output = combined_output.lower()
+        if "no module named manim" in lowered_output or "is not recognized as an internal or external command" in lowered_output:
+            raise RuntimeError(
+                "Manim runtime validation is unavailable in the current environment.\n"
+                f"Command: {display_command}\n"
+                "Execution output:\n"
+                + _truncate_validation_output(combined_output)
+            )
+        raise ValueError(
+            "Manim runtime validation failed.\n"
+            f"Command: {display_command}\n"
+            "Execution output:\n"
+            + _truncate_validation_output(combined_output)
+        )
+
+    return display_command
+
+
+def _render_manim_artifact(
+    target_dir: Path,
+    *,
+    timeout_seconds: int = MANIM_ARTIFACT_RENDER_TIMEOUT_SECONDS,
+) -> tuple[str, list[str]]:
+    script_name = "lesson_animation.py"
+    scene_name = "LessonScene"
+    script_path = target_dir / script_name
+    if not script_path.is_file():
+        raise ValueError(f"Missing {script_name} before final Manim render.")
+
+    command_prefix = _resolve_manim_validation_command()
+    display_command = " ".join([*command_prefix, "-ql", script_name, scene_name])
+
+    try:
+        completed = subprocess.run(
+            [*command_prefix, "-ql", script_name, scene_name],
+            cwd=target_dir,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(
+            "Final Manim artifact render timed out.\n"
+            f"Command: {display_command}\n"
+            f"Timeout: {timeout_seconds}s"
+        ) from exc
+
+    if completed.returncode != 0:
+        combined_output = "\n".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part and part.strip()
+        ).strip()
+        raise ValueError(
+            "Final Manim artifact render failed.\n"
+            f"Command: {display_command}\n"
+            "Execution output:\n"
+            + _truncate_validation_output(combined_output)
+        )
+
+    rendered_videos = [
+        path
+        for path in target_dir.rglob("*.mp4")
+        if "partial_movie_files" not in path.parts
+    ]
+    if not rendered_videos:
+        raise ValueError(
+            "Final Manim artifact render succeeded but no mp4 output was found.\n"
+            f"Command: {display_command}"
+        )
+
+    rendered_videos.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return display_command, [str(path) for path in rendered_videos]
+
+
 def _finalize_practice_files(
     files: dict[str, str],
     *,
@@ -592,6 +980,144 @@ def build_workflow(
     llm = LLMClient(settings)
     agent_order = [spec.agent_name for spec in AGENT_SPECS]
 
+    def generate_manim_bundle_with_repair(
+        request: GenerationRequest,
+        plan: PreparationPlan,
+        *,
+        run_id: str,
+        required_files: tuple[str, ...],
+        node_name: str,
+    ):
+        repair_memory_records = _load_manim_repair_memory()
+        repair_memory_text = _format_manim_repair_memory_for_prompt(repair_memory_records)
+        system_prompt, base_user_prompt = build_manim_prompts(
+            request,
+            plan,
+            repair_memory_text,
+        )
+        repair_feedback = ""
+        last_error: Exception | None = None
+        validation_command = ""
+        last_focus_lines: list[int] = []
+        last_search_hints: list[str] = []
+        last_error_text = ""
+
+        for attempt in range(1, MANIM_VALIDATION_MAX_ATTEMPTS + 1):
+            _emit_event(
+                event_callback,
+                event="artifact_validation_started",
+                node=node_name,
+                phase="artifact_validation",
+                agent_name="manim",
+                summary=(
+                    f"Manim runtime validation attempt {attempt}/{MANIM_VALIDATION_MAX_ATTEMPTS} started."
+                ),
+                data={"attempt": attempt, "max_attempts": MANIM_VALIDATION_MAX_ATTEMPTS},
+            )
+
+            bundle = llm.invoke_bundle(
+                system_prompt,
+                base_user_prompt + repair_feedback,
+                required_files,
+            )
+
+            try:
+                _validate_generated_files(bundle.files)
+                validation_command = _validate_manim_bundle_runtime(bundle.files)
+                _emit_event(
+                    event_callback,
+                    event="artifact_validation_passed",
+                    node=node_name,
+                    phase="artifact_validation",
+                    agent_name="manim",
+                    summary="Manim runtime validation passed.",
+                    data={
+                        "attempt": attempt,
+                        "command": validation_command,
+                    },
+                )
+                notes = [
+                    f"Manim 运行校验已通过：{validation_command}",
+                    f"Manim 自动修复轮次：{attempt - 1}",
+                ]
+                if attempt > 1 and last_error_text:
+                    _record_manim_repair_memory(
+                        run_id=run_id,
+                        learning_goal=request.learning_goal,
+                        error_text=last_error_text,
+                        script_content=bundle.files.get("lesson_animation.py", ""),
+                        search_hints=last_search_hints,
+                        focus_lines=last_focus_lines,
+                    )
+                    notes.append("本次 Manim 修复经验已写入项目经验库。")
+                return bundle, notes
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                last_error_text = str(exc)
+
+            if attempt >= MANIM_VALIDATION_MAX_ATTEMPTS:
+                break
+
+            error_text = str(last_error)
+            tool_report, focus_lines, search_hints = _build_manim_repair_tool_report(
+                bundle.files,
+                error_text,
+            )
+            last_focus_lines = focus_lines
+            last_search_hints = search_hints
+            _emit_event(
+                event_callback,
+                event="artifact_validation_failed",
+                node=node_name,
+                phase="artifact_validation",
+                agent_name="manim",
+                summary=f"Manim runtime validation failed on attempt {attempt}.",
+                data={
+                    "attempt": attempt,
+                    "error": error_text,
+                },
+            )
+            repair_feedback = (
+                "\n\nYour previous Manim package failed real execution validation. "
+                "Do not regenerate the package from zero. Start from the current files below, "
+                "preserve the working parts, and make the smallest viable edits needed to pass validation.\n"
+                "You must fix the code and return the full package again using the exact tags "
+                "and exact filenames.\n"
+                "Validation command:\n"
+                "manim -pql lesson_animation.py LessonScene\n\n"
+                "Validation error output:\n"
+                f"{error_text}\n\n"
+                f"{tool_report}\n\n"
+                "Repair requirements:\n"
+                "- Keep using `from manim import *`.\n"
+                "- Keep the main scene class name exactly `LessonScene`.\n"
+                "- Prefer line-level or block-level fixes instead of redesigning the whole animation.\n"
+                "- Use the traceback focus lines and grep hits above to localize the bug before editing.\n"
+                "- Ensure the script runs successfully under the validation command.\n"
+                "- Avoid shape mismatches, missing imports/names, invalid animations, and unsupported API usage.\n"
+                "- Return the complete package again, not just a patch."
+            )
+
+        assert last_error is not None
+        _emit_event(
+            event_callback,
+            event="artifact_validation_failed",
+            node=node_name,
+            phase="artifact_validation",
+            agent_name="manim",
+            summary="Manim runtime validation failed after exhausting repair attempts.",
+            data={
+                "attempt": MANIM_VALIDATION_MAX_ATTEMPTS,
+                "error": str(last_error),
+            },
+        )
+        raise RuntimeError(
+            "Manim bundle failed runtime validation after "
+            f"{MANIM_VALIDATION_MAX_ATTEMPTS} attempts: {last_error}"
+        ) from last_error
+
     def planner_node(state: WorkflowState) -> dict[str, Any]:
         request = GenerationRequest.model_validate(state["request"])
         output_dir = Path(state["output_dir"])
@@ -721,6 +1247,7 @@ def build_workflow(
             route = _get_route(plan, spec.agent_name)
             node_name = f"{spec.agent_name}_agent"
             practice_blueprint: PracticeBlueprint | None = None
+            manim_validation_notes: list[str] = []
             practice_blueprint_files = (
                 list(state.get("practice_blueprint_files", []))
                 if spec.agent_name == "practice"
@@ -784,14 +1311,27 @@ def build_workflow(
                         plan,
                         practice_blueprint,
                     )
+                    bundle = llm.invoke_bundle(
+                        system_prompt,
+                        user_prompt,
+                        spec.required_files,
+                    )
                 else:
-                    system_prompt, user_prompt = spec.prompt_builder(request, plan)
-
-                bundle = llm.invoke_bundle(
-                    system_prompt,
-                    user_prompt,
-                    spec.required_files,
-                )
+                    if spec.agent_name == "manim":
+                        bundle, manim_validation_notes = generate_manim_bundle_with_repair(
+                            request,
+                            plan,
+                            run_id=output_dir.name,
+                            required_files=spec.required_files,
+                            node_name=node_name,
+                        )
+                    else:
+                        system_prompt, user_prompt = spec.prompt_builder(request, plan)
+                        bundle = llm.invoke_bundle(
+                            system_prompt,
+                            user_prompt,
+                            spec.required_files,
+                        )
                 raw_files = bundle.files
                 _validate_generated_files(
                     raw_files,
@@ -816,13 +1356,27 @@ def build_workflow(
                     )
                     written_files.append(str(target))
 
+                if spec.agent_name == "manim":
+                    render_command, rendered_video_files = _render_manim_artifact(
+                        output_dir / spec.folder
+                    )
+                    manim_validation_notes = [
+                        *manim_validation_notes,
+                        f"Manim 最终视频已渲染：{render_command}",
+                    ]
+                    written_files.extend(rendered_video_files)
+
                 artifact = ArtifactResult(
                     agent_name=spec.agent_name,
                     title=spec.title,
                     summary=bundle.summary,
                     output_dir=str(output_dir / spec.folder),
                     files=written_files,
-                    notes=practice_notes,
+                    notes=(
+                        [*practice_notes, *manim_validation_notes]
+                        if spec.agent_name == "manim"
+                        else practice_notes
+                    ),
                 )
                 _emit_event(
                     event_callback,

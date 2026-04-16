@@ -10,6 +10,7 @@ import {
   FileText,
   LayoutDashboard,
   LoaderCircle,
+  Maximize2,
   Package,
   Target,
   X,
@@ -29,7 +30,7 @@ import type { PracticeQuestionRecord } from "@/components/PracticeQuestionWorksp
 import { FloatingAIInput } from "@/components/FloatingAIInput";
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
-type MaterialOpenMode = "markdown" | "link" | "download";
+type MaterialOpenMode = "markdown" | "html" | "video" | "download";
 
 interface RunLinks {
   status: string;
@@ -126,7 +127,7 @@ interface StudyWorkspaceData {
 interface WorkspaceTab {
   id: string;
   title: string;
-  type: "workspace" | "markdown";
+  type: "workspace" | "markdown" | "html" | "video";
   status: "ready" | "loading" | "error";
   content?: string;
   error?: string;
@@ -332,7 +333,15 @@ function classifyMaterial(fileName: string) {
     return { label: "题库数据", colorClass: "text-amber-600", openMode: "download" as const, priority: 82 };
   }
   if (lowerName.endsWith(".html")) {
-    return { label: "交互网页", colorClass: "text-rose-600", openMode: "link" as const, priority: 86 };
+    return { label: "交互网页", colorClass: "text-rose-600", openMode: "html" as const, priority: 86 };
+  }
+  if (
+    lowerName.endsWith(".mp4") ||
+    lowerName.endsWith(".webm") ||
+    lowerName.endsWith(".mov") ||
+    lowerName.endsWith(".m4v")
+  ) {
+    return { label: "动画视频", colorClass: "text-violet-600", openMode: "video" as const, priority: 89 };
   }
   if (lowerName.endsWith(".pdf")) {
     return { label: "PDF 资料", colorClass: "text-blue-600", openMode: "download" as const, priority: 80 };
@@ -527,7 +536,7 @@ function MainWorkspaceQuestions({
 }
 
 function isPreviewableMaterial(mode: MaterialOpenMode) {
-  return mode === "markdown" || mode === "link";
+  return mode === "markdown" || mode === "html" || mode === "video";
 }
 
 export default function StudyArea() {
@@ -542,6 +551,7 @@ export default function StudyArea() {
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>([DEFAULT_WORKSPACE_TAB]);
   const [activeTabId, setActiveTabId] = useState(WORKSPACE_TAB_ID);
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
 
   const activeTab = openTabs.find((tab) => tab.id === activeTabId) ?? DEFAULT_WORKSPACE_TAB;
 
@@ -553,6 +563,10 @@ export default function StudyArea() {
     setOpenTabs([DEFAULT_WORKSPACE_TAB]);
     setActiveTabId(WORKSPACE_TAB_ID);
   }, [runId]);
+
+  useEffect(() => {
+    setIsPreviewFullscreen(false);
+  }, [activeTabId]);
 
   useEffect(() => {
     if (!runId) {
@@ -717,19 +731,29 @@ export default function StudyArea() {
     }
   };
 
-  const openMarkdownTab = async (material: StudyMaterialItem) => {
+  const openPreviewTab = async (material: StudyMaterialItem) => {
     const existingTab = openTabs.find((tab) => tab.id === material.id);
     if (existingTab) {
       setActiveTabId(existingTab.id);
       return;
     }
 
+    const previewType =
+      material.openMode === "markdown"
+        ? "markdown"
+        : material.openMode === "html"
+          ? "html"
+          : "video";
+
     const nextTab: WorkspaceTab = {
       id: material.id,
       title: material.name,
-      type: "markdown",
-      status: material.previewContent ? "ready" : "loading",
-      content: material.previewContent,
+      type: previewType,
+      status:
+        previewType === "markdown" && !material.previewContent && material.previewUrl && material.previewUrl !== "#"
+          ? "loading"
+          : "ready",
+      content: previewType === "markdown" ? material.previewContent : undefined,
       sourceUrl: material.previewUrl,
       downloadUrl: material.downloadUrl,
     };
@@ -737,7 +761,12 @@ export default function StudyArea() {
     setOpenTabs((currentTabs) => [...currentTabs, nextTab]);
     setActiveTabId(material.id);
 
-    if (material.previewContent || !material.previewUrl || material.previewUrl === "#") {
+    if (
+      previewType !== "markdown" ||
+      material.previewContent ||
+      !material.previewUrl ||
+      material.previewUrl === "#"
+    ) {
       return;
     }
 
@@ -767,8 +796,8 @@ export default function StudyArea() {
   };
 
   const handleMaterialAction = (material: StudyMaterialItem) => {
-    if (material.openMode === "markdown") {
-      void openMarkdownTab(material);
+    if (isPreviewableMaterial(material.openMode)) {
+      void openPreviewTab(material);
       return;
     }
 
@@ -778,6 +807,84 @@ export default function StudyArea() {
     }
 
     window.open(targetUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const renderInlinePreview = (tab: WorkspaceTab, fullscreen = false) => {
+    const previewHeightClass = fullscreen ? "h-full" : "h-[calc(100%-61px)]";
+
+    if (tab.status === "loading") {
+      return (
+        <div className="flex items-center gap-2 px-6 py-5 text-sm text-slate-500">
+          <LoaderCircle className="w-4 h-4 animate-spin" />
+          正在加载预览内容...
+        </div>
+      );
+    }
+
+    if (tab.status === "error") {
+      return (
+        <div className="px-6 py-5">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {tab.error || "文档加载失败。"}
+          </div>
+        </div>
+      );
+    }
+
+    if (tab.type === "markdown") {
+      return (
+        <ScrollArea className={`${previewHeightClass} px-6 py-5`}>
+          <Markdown className="max-w-none text-slate-800 dark:text-slate-200">
+            {tab.content || "# 空文档\n\n当前文档没有可展示的内容。"}
+          </Markdown>
+        </ScrollArea>
+      );
+    }
+
+    if (tab.type === "html") {
+      if (!tab.sourceUrl) {
+        return (
+          <div className="px-6 py-5 text-sm text-slate-500">
+            当前网页素材没有可用的预览地址。
+          </div>
+        );
+      }
+
+      return (
+        <div className={`${previewHeightClass} bg-slate-100`}>
+          <iframe
+            title={tab.title}
+            src={tab.sourceUrl}
+            className="h-full w-full border-0 bg-white"
+            sandbox="allow-scripts allow-same-origin"
+          />
+        </div>
+      );
+    }
+
+    if (tab.type === "video") {
+      if (!tab.sourceUrl) {
+        return (
+          <div className="px-6 py-5 text-sm text-slate-500">
+            当前视频素材没有可用的播放地址。
+          </div>
+        );
+      }
+
+      return (
+        <div className={`${previewHeightClass} flex items-center justify-center bg-black p-4 md:p-6`}>
+          <video
+            controls
+            className="max-h-full w-full rounded-xl bg-black shadow-2xl"
+            src={tab.sourceUrl}
+          >
+            当前浏览器不支持视频播放。
+          </video>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   const renderWorkspaceContent = () => {
@@ -805,36 +912,26 @@ export default function StudyArea() {
             <p className="text-xs text-slate-500">在线预览</p>
           </div>
 
-          {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
-            <Button variant="outline" size="sm" asChild>
-              <a href={activeTab.downloadUrl} target="_blank" rel="noreferrer">
-                <Download className="w-3.5 h-3.5" />
-                下载原文件
-              </a>
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {(activeTab.type === "html" || activeTab.type === "video") && (
+              <Button variant="outline" size="sm" onClick={() => setIsPreviewFullscreen(true)}>
+                <Maximize2 className="w-3.5 h-3.5" />
+                全屏
+              </Button>
+            )}
+
+            {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={activeTab.downloadUrl} target="_blank" rel="noreferrer">
+                  <Download className="w-3.5 h-3.5" />
+                  下载原文件
+                </a>
+              </Button>
+            )}
+          </div>
         </div>
 
-        <ScrollArea className="h-[calc(100%-61px)] px-6 py-5">
-          {activeTab.status === "loading" && (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <LoaderCircle className="w-4 h-4 animate-spin" />
-              正在加载 Markdown 内容...
-            </div>
-          )}
-
-          {activeTab.status === "error" && (
-            <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-              {activeTab.error || "文档加载失败。"}
-            </div>
-          )}
-
-          {activeTab.status === "ready" && (
-            <Markdown className="max-w-none text-slate-800 dark:text-slate-200">
-              {activeTab.content || "# 空文档\n\n当前文档没有可展示的内容。"}
-            </Markdown>
-          )}
-        </ScrollArea>
+        {renderInlinePreview(activeTab)}
       </div>
     );
   };
@@ -871,7 +968,7 @@ export default function StudyArea() {
               </button>
 
               {openTabs
-                .filter((tab) => tab.type === "markdown")
+                .filter((tab) => tab.type !== "workspace")
                 .map((tab) => (
                   <div
                     key={tab.id}
@@ -881,10 +978,10 @@ export default function StudyArea() {
                   >
                     <button
                       className="flex items-center gap-2 text-sm min-w-0"
-                      onClick={() => setActiveTabId(tab.id)}
-                    >
-                      <FileText className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate max-w-40">{tab.title}</span>
+                        onClick={() => setActiveTabId(tab.id)}
+                      >
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate max-w-40">{tab.title}</span>
                     </button>
                     <button
                       className="rounded-md p-1 hover:bg-black/5"
@@ -1081,10 +1178,15 @@ export default function StudyArea() {
                                     <FileText className="w-3.5 h-3.5" />
                                     预览
                                   </>
-                                ) : material.openMode === "link" ? (
+                                ) : material.openMode === "html" ? (
                                   <>
                                     <ExternalLink className="w-3.5 h-3.5" />
-                                    打开
+                                    网页
+                                  </>
+                                ) : material.openMode === "video" ? (
+                                  <>
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    播放
                                   </>
                                 ) : (
                                   <>
@@ -1170,6 +1272,36 @@ export default function StudyArea() {
             </Tooltip>
           </aside>
         </main>
+
+        {isPreviewFullscreen && (activeTab.type === "html" || activeTab.type === "video") && (
+          <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-sm">
+            <div className="flex h-full flex-col">
+              <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 text-white">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{activeTab.title}</p>
+                  <p className="text-xs text-slate-300">站内全屏预览</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
+                    <Button variant="secondary" size="sm" asChild>
+                      <a href={activeTab.downloadUrl} target="_blank" rel="noreferrer">
+                        <Download className="w-3.5 h-3.5" />
+                        下载
+                      </a>
+                    </Button>
+                  )}
+
+                  <Button variant="secondary" size="icon" onClick={() => setIsPreviewFullscreen(false)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1">{renderInlinePreview(activeTab, true)}</div>
+            </div>
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );

@@ -309,6 +309,7 @@ File requirements:
 def build_manim_prompts(
     request: GenerationRequest,
     plan: PreparationPlan,
+    repair_memory: str | None = None,
 ) -> tuple[str, str]:
     system_prompt = """
 You are the Manim animation agent in a teaching-preparation multi-agent system.
@@ -355,6 +356,9 @@ Context:
 Supervisor plan:
 {_plan_json(plan)}
 
+Project runtime lessons:
+{repair_memory or "(No previous Manim runtime lessons recorded yet.)"}
+
 Output format:
 <<<SUMMARY>>>
 One short Chinese paragraph describing what was produced.
@@ -372,6 +376,8 @@ File requirements:
 - Define one main scene class named `LessonScene`.
 - Keep it self-contained. Do not rely on external assets.
 - The animation should explain the concept visually and match the learning goal.
+- The script will be executed with `manim -pql lesson_animation.py LessonScene`, so it must
+  run without runtime errors under that command.
 - render_guide.md must include the render command and a short explanation of the scene.
 - Do not output anything outside the tags.
 """.strip()
