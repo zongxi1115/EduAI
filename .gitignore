@@ -19,3 +19,6 @@ out/
 coverage/
 .cache/
 outputs/
+.codex
+uv*
+*.egg-info

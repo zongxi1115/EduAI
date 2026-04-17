@@ -151,22 +151,22 @@ export default function LoadingPage() {
         />
       </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-10 md:py-20 flex flex-col items-center justify-center min-h-screen">
+      <div className="max-w-6xl mx-auto px-6 py-10 md:py-20 flex items-center justify-center min-h-screen">
         
-        {/* Top Header Section with Lottie and Blur Text */}
+        {/* Left Section - Loading Animation */}
         <AnimatePresence>
           {!showFocusMode && (
             <motion.div
-              exit={{ opacity: 0, height: 0, scale: 0.95, filter: "blur(20px)" }}
+              exit={{ opacity: 0, width: 0, scale: 0.95, filter: "blur(20px)" }}
               transition={{ duration: 0.6, ease: "easeInOut" }}
-              className="w-full flex flex-col items-center overflow-hidden"
+              className="w-1/2 flex flex-col items-center justify-center overflow-hidden px-8"
             >
               {/* Lottie Animation */}
               <motion.div 
                  initial={{ opacity: 0, y: 30 }}
                  animate={{ opacity: 1, y: 0 }}
                  transition={{ duration: 0.8, ease: "easeOut" }}
-                 className="relative w-56 h-56 md:w-72 md:h-72 pointer-events-none z-10 mb-6"
+                 className="relative w-80 h-80 md:w-96 md:h-96 pointer-events-none z-10 mb-6"
               >
                 <div className="absolute inset-0 bg-[#09f]/5 blur-[80px] rounded-full mx-auto my-auto animate-pulse" />
                 <iframe 
@@ -177,7 +177,7 @@ export default function LoadingPage() {
               </motion.div>
 
               {/* Title & Status (blur + fade transition) */}
-              <div className="text-center mb-10 h-24">
+              <div className="text-center h-24">
                 <AnimatePresence mode="wait">
                   <motion.h1 
                      key={isComplete ? "complete" : "loading"}
@@ -220,7 +220,7 @@ export default function LoadingPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: "easeOut" }}
-            className="mb-8 w-full flex flex-col items-center"
+            className="w-1/2 flex flex-col items-center justify-center px-8"
           >
             <div className="w-20 h-20 mb-6 bg-emerald-50 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/10 border border-emerald-100/50">
               <Check className="w-10 h-10 text-emerald-500" strokeWidth={2.5} />
@@ -245,13 +245,13 @@ export default function LoadingPage() {
           </motion.div>
         )}
 
-        {/* SSE Event Stream Terminal (Stays visible) */}
+        {/* Right Section - SSE Event Stream Terminal */}
         <motion.div 
           layout
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, type: "spring", bounce: 0.2 }}
-          className="w-full bg-white border border-gray-200/80 rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/5 relative"
+          className={`${showFocusMode ? 'w-full' : 'w-1/2'} bg-white border border-gray-200/80 rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/5 relative`}
         >
           {/* Terminal Header */}
           <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between">
