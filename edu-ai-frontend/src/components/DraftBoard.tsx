@@ -15,11 +15,17 @@ type Tool = "pencil" | "eraser" | "line" | "circle" | "rectangle" | "text";
 type EraserType = "pixel" | "stroke";
 type Stroke = { points: Point[]; color: string; size: number; tool: Tool; text?: string };
 
-interface DraftBoardProps {
-  questionContent?: string;
+export interface DraftBoardExportApi {
+  exportImageDataUrl: () => string | null;
+  hasContent: boolean;
 }
 
-export function DraftBoard({ questionContent }: DraftBoardProps) {
+interface DraftBoardProps {
+  questionContent?: string;
+  onExportReady?: (api: DraftBoardExportApi | null) => void;
+}
+
+export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -298,6 +304,30 @@ export function DraftBoard({ questionContent }: DraftBoardProps) {
     { icon: Minus, onClick: () => setTool("line") },
     { icon: Type, onClick: () => setTool("text") },
   ];
+
+  useEffect(() => {
+    if (!onExportReady) {
+      return;
+    }
+
+    onExportReady({
+      exportImageDataUrl: () => {
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          return null;
+        }
+        return canvas.toDataURL("image/png");
+      },
+      hasContent:
+        strokes.length > 0 ||
+        currentStroke.length > 0 ||
+        Boolean(activeText?.text.trim()),
+    });
+
+    return () => {
+      onExportReady(null);
+    };
+  }, [activeText?.text, currentStroke.length, onExportReady, strokes.length]);
 
   return (
     <div ref={containerRef} className="relative w-full flex-1 h-full min-h-[400px] border rounded-xl overflow-hidden bg-slate-50 shadow-inner">

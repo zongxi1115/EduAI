@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
   BookOpen,
   Brain,
   ChevronRight,
+  ChevronDown,
+  FolderOpen,
+  Folder,
   Download,
   ExternalLink,
   FileText,
   LayoutDashboard,
   LoaderCircle,
-  Maximize2,
   Package,
   Target,
   X,
@@ -18,19 +21,18 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "@/components/ui/markdown";
-import { Separator } from "@/components/ui/separator";
 import {
   parsePracticeQuestionsPayload,
   PracticeQuestionWorkspace,
 } from "@/components/PracticeQuestionWorkspace";
 import type { PracticeQuestionRecord } from "@/components/PracticeQuestionWorkspace";
 import { FloatingAIInput } from "@/components/FloatingAIInput";
+import { Battery as CircularProgressWidget } from "@/components/ui/battery";
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
-type MaterialOpenMode = "markdown" | "html" | "video" | "download";
+type MaterialOpenMode = "markdown" | "link" | "download";
 
 interface RunLinks {
   status: string;
@@ -333,15 +335,7 @@ function classifyMaterial(fileName: string) {
     return { label: "题库数据", colorClass: "text-amber-600", openMode: "download" as const, priority: 82 };
   }
   if (lowerName.endsWith(".html")) {
-    return { label: "交互网页", colorClass: "text-rose-600", openMode: "html" as const, priority: 86 };
-  }
-  if (
-    lowerName.endsWith(".mp4") ||
-    lowerName.endsWith(".webm") ||
-    lowerName.endsWith(".mov") ||
-    lowerName.endsWith(".m4v")
-  ) {
-    return { label: "动画视频", colorClass: "text-violet-600", openMode: "video" as const, priority: 89 };
+    return { label: "交互网页", colorClass: "text-rose-600", openMode: "link" as const, priority: 86 };
   }
   if (lowerName.endsWith(".pdf")) {
     return { label: "PDF 资料", colorClass: "text-blue-600", openMode: "download" as const, priority: 80 };
@@ -450,66 +444,7 @@ function buildWorkspaceData(
   };
 }
 
-function CircularProgressWidget({
-  icon: Icon,
-  title,
-  subtitle,
-  progress,
-  color,
-}: {
-  icon: React.ElementType;
-  title: string;
-  subtitle: string;
-  progress: number;
-  color: string;
-}) {
-  const radius = 28;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (progress / 100) * circumference;
 
-  return (
-    <div className="flex flex-col items-center gap-3 bg-gradient-to-b from-card to-card/80 border rounded-3xl p-4 shadow-sm w-full relative overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5">
-      <div className="absolute top-0 right-0 p-3 opacity-20 pointer-events-none">
-        <Icon className="w-16 h-16" style={{ color }} />
-      </div>
-
-      <div className="relative flex items-center justify-center z-10 w-20 h-20">
-        <svg width="80" height="80" className="transform -rotate-90 drop-shadow-sm">
-          <circle
-            cx="40"
-            cy="40"
-            r={radius}
-            strokeWidth="7"
-            stroke="currentColor"
-            fill="transparent"
-            className="text-muted/40"
-          />
-          <circle
-            cx="40"
-            cy="40"
-            r={radius}
-            strokeWidth="7"
-            stroke={color}
-            fill="transparent"
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            className="transition-all duration-1000 ease-out drop-shadow-md"
-          />
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Icon className="w-6 h-6" style={{ color }} />
-        </div>
-      </div>
-      <div className="text-center z-10 space-y-0.5 w-full">
-        <div className="font-semibold text-[0.95rem] text-foreground tracking-tight">{title}</div>
-        <div className="text-[11px] font-medium tracking-wide" style={{ color }}>
-          {subtitle} ({progress}%)
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function MainWorkspaceQuestions({
   learningGoal,
@@ -536,7 +471,99 @@ function MainWorkspaceQuestions({
 }
 
 function isPreviewableMaterial(mode: MaterialOpenMode) {
-  return mode === "markdown" || mode === "html" || mode === "video";
+  return mode === "markdown" || mode === "link";
+}
+
+function MaterialFileTree({ materials, handleMaterialAction }: { materials: StudyMaterialItem[], handleMaterialAction: (m: StudyMaterialItem) => void }) {
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+
+  const groupedMaterials = useMemo(() => {
+    const groups: Record<string, StudyMaterialItem[]> = {};
+    materials.forEach(m => {
+      const folderName = m.description || "其他文件";
+      if (!groups[folderName]) groups[folderName] = [];
+      groups[folderName].push(m);
+    });
+    return groups;
+  }, [materials]);
+
+  const toggleFolder = (folderName: string) => {
+    setOpenFolders(prev => ({
+      ...prev,
+      [folderName]: prev[folderName] === undefined ? false : !prev[folderName]
+    }));
+  };
+
+  return (
+    <div className="flex flex-col gap-1 w-full text-sm">
+      {Object.entries(groupedMaterials).map(([folderName, files]) => {
+        const isOpen = openFolders[folderName] !== false;
+        
+        return (
+          <div key={folderName} className="flex flex-col">
+            <div 
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md hover:bg-muted/60 transition-colors text-slate-700 font-medium"
+              onClick={() => toggleFolder(folderName)}
+            >
+              {isOpen ? <FolderOpen className="w-4 h-4 text-sky-500 fill-sky-200" /> : <Folder className="w-4 h-4 text-sky-500 fill-sky-200" />}
+              <span className="truncate">{folderName}</span>
+              {isOpen ? <ChevronDown className="w-3.5 h-3.5 ml-auto opacity-50" /> : <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-50" />}
+            </div>
+            
+            <AnimatePresence initial={false}>
+              {isOpen && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="flex flex-col overflow-hidden"
+                >
+                  <div className="flex flex-col gap-0.5 mt-0.5 mb-2 ml-3 pl-3 border-l border-slate-200/60">
+                    {files.map((material, i) => (
+                      <motion.div
+                        key={material.id}
+                        initial={{ opacity: 0, x: -5 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.2, delay: i * 0.04, ease: "easeOut" }}
+                        className={`flex items-center justify-between gap-3 px-2 py-1.5 rounded-md transition-colors border border-transparent hover:border-border hover:bg-muted/60 group/file ${
+                          isPreviewableMaterial(material.openMode) ? "cursor-pointer" : ""
+                        }`}
+                        onClick={() => handleMaterialAction(material)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleMaterialAction(material);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <FileText className={`w-4 h-4 shrink-0 opacity-80 ${material.colorClass}`} />
+                          <span className="truncate text-slate-600 group-hover/file:text-slate-900 transition-colors">{material.name}</span>
+                        </div>
+
+                        <div className="shrink-0 transition-opacity">
+                          {material.openMode === "markdown" ? (
+                            <FileText className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                          ) : material.openMode === "link" ? (
+                            <ExternalLink className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function StudyArea() {
@@ -551,7 +578,6 @@ export default function StudyArea() {
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>([DEFAULT_WORKSPACE_TAB]);
   const [activeTabId, setActiveTabId] = useState(WORKSPACE_TAB_ID);
-  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
 
   const activeTab = openTabs.find((tab) => tab.id === activeTabId) ?? DEFAULT_WORKSPACE_TAB;
 
@@ -563,10 +589,6 @@ export default function StudyArea() {
     setOpenTabs([DEFAULT_WORKSPACE_TAB]);
     setActiveTabId(WORKSPACE_TAB_ID);
   }, [runId]);
-
-  useEffect(() => {
-    setIsPreviewFullscreen(false);
-  }, [activeTabId]);
 
   useEffect(() => {
     if (!runId) {
@@ -741,18 +763,15 @@ export default function StudyArea() {
     const previewType =
       material.openMode === "markdown"
         ? "markdown"
-        : material.openMode === "html"
+        : material.openMode === "link"
           ? "html"
           : "video";
 
     const nextTab: WorkspaceTab = {
       id: material.id,
       title: material.name,
-      type: previewType,
-      status:
-        previewType === "markdown" && !material.previewContent && material.previewUrl && material.previewUrl !== "#"
-          ? "loading"
-          : "ready",
+      type: previewType as any,
+      status: previewType === "markdown" && !material.previewContent ? "loading" : "ready",
       content: previewType === "markdown" ? material.previewContent : undefined,
       sourceUrl: material.previewUrl,
       downloadUrl: material.downloadUrl,
@@ -796,7 +815,7 @@ export default function StudyArea() {
   };
 
   const handleMaterialAction = (material: StudyMaterialItem) => {
-    if (isPreviewableMaterial(material.openMode)) {
+    if (material.openMode === "markdown" || material.openMode === "link") {
       void openPreviewTab(material);
       return;
     }
@@ -807,84 +826,6 @@ export default function StudyArea() {
     }
 
     window.open(targetUrl, "_blank", "noopener,noreferrer");
-  };
-
-  const renderInlinePreview = (tab: WorkspaceTab, fullscreen = false) => {
-    const previewHeightClass = fullscreen ? "h-full" : "h-[calc(100%-61px)]";
-
-    if (tab.status === "loading") {
-      return (
-        <div className="flex items-center gap-2 px-6 py-5 text-sm text-slate-500">
-          <LoaderCircle className="w-4 h-4 animate-spin" />
-          正在加载预览内容...
-        </div>
-      );
-    }
-
-    if (tab.status === "error") {
-      return (
-        <div className="px-6 py-5">
-          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {tab.error || "文档加载失败。"}
-          </div>
-        </div>
-      );
-    }
-
-    if (tab.type === "markdown") {
-      return (
-        <ScrollArea className={`${previewHeightClass} px-6 py-5`}>
-          <Markdown className="max-w-none text-slate-800 dark:text-slate-200">
-            {tab.content || "# 空文档\n\n当前文档没有可展示的内容。"}
-          </Markdown>
-        </ScrollArea>
-      );
-    }
-
-    if (tab.type === "html") {
-      if (!tab.sourceUrl) {
-        return (
-          <div className="px-6 py-5 text-sm text-slate-500">
-            当前网页素材没有可用的预览地址。
-          </div>
-        );
-      }
-
-      return (
-        <div className={`${previewHeightClass} bg-slate-100`}>
-          <iframe
-            title={tab.title}
-            src={tab.sourceUrl}
-            className="h-full w-full border-0 bg-white"
-            sandbox="allow-scripts allow-same-origin"
-          />
-        </div>
-      );
-    }
-
-    if (tab.type === "video") {
-      if (!tab.sourceUrl) {
-        return (
-          <div className="px-6 py-5 text-sm text-slate-500">
-            当前视频素材没有可用的播放地址。
-          </div>
-        );
-      }
-
-      return (
-        <div className={`${previewHeightClass} flex items-center justify-center bg-black p-4 md:p-6`}>
-          <video
-            controls
-            className="max-h-full w-full rounded-xl bg-black shadow-2xl"
-            src={tab.sourceUrl}
-          >
-            当前浏览器不支持视频播放。
-          </video>
-        </div>
-      );
-    }
-
-    return null;
   };
 
   const renderWorkspaceContent = () => {
@@ -912,26 +853,61 @@ export default function StudyArea() {
             <p className="text-xs text-slate-500">在线预览</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {(activeTab.type === "html" || activeTab.type === "video") && (
-              <Button variant="outline" size="sm" onClick={() => setIsPreviewFullscreen(true)}>
-                <Maximize2 className="w-3.5 h-3.5" />
-                全屏
-              </Button>
-            )}
-
-            {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={activeTab.downloadUrl} target="_blank" rel="noreferrer">
-                  <Download className="w-3.5 h-3.5" />
-                  下载原文件
-                </a>
-              </Button>
-            )}
-          </div>
+          {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={activeTab.downloadUrl} target="_blank" rel="noreferrer">
+                <Download className="w-3.5 h-3.5" />
+                下载原文件
+              </a>
+            </Button>
+          )}
         </div>
 
-        {renderInlinePreview(activeTab)}
+        {activeTab.type === "html" || activeTab.type === "video" ? (
+          <div className="h-[calc(100%-61px)]">
+            {activeTab.type === "html" ? (
+              activeTab.sourceUrl ? (
+                <iframe
+                  title={activeTab.title}
+                  src={activeTab.sourceUrl}
+                  className="h-full w-full border-0 bg-white"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              ) : (
+                <div className="px-6 py-5 text-sm text-slate-500">当前网页素材没有可用的预览地址。</div>
+              )
+            ) : activeTab.sourceUrl ? (
+              <div className="flex h-full items-center justify-center bg-black p-4 md:p-6">
+                <video controls className="max-h-full w-full rounded-xl bg-black shadow-2xl" src={activeTab.sourceUrl}>
+                  当前浏览器不支持视频播放。
+                </video>
+              </div>
+            ) : (
+              <div className="px-6 py-5 text-sm text-slate-500">当前视频素材没有可用的播放地址。</div>
+            )}
+          </div>
+        ) : (
+          <ScrollArea className="h-[calc(100%-61px)] px-6 py-5">
+            {activeTab.status === "loading" && (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <LoaderCircle className="w-4 h-4 animate-spin" />
+                正在加载内容...
+              </div>
+            )}
+
+            {activeTab.status === "error" && (
+              <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                {activeTab.error || "文档加载失败。"}
+              </div>
+            )}
+
+            {activeTab.status === "ready" && (
+              <Markdown className="prose prose-slate max-w-none [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_pre]:overflow-x-auto">
+                {activeTab.content || "# 空文档\n\n当前文档没有可展示的内容。"}
+              </Markdown>
+            )}
+          </ScrollArea>
+        )}
       </div>
     );
   };
@@ -968,7 +944,7 @@ export default function StudyArea() {
               </button>
 
               {openTabs
-                .filter((tab) => tab.type !== "workspace")
+                .filter((tab) => tab.type === "markdown")
                 .map((tab) => (
                   <div
                     key={tab.id}
@@ -978,10 +954,10 @@ export default function StudyArea() {
                   >
                     <button
                       className="flex items-center gap-2 text-sm min-w-0"
-                        onClick={() => setActiveTabId(tab.id)}
-                      >
-                        <FileText className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate max-w-40">{tab.title}</span>
+                      onClick={() => setActiveTabId(tab.id)}
+                    >
+                      <FileText className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate max-w-40">{tab.title}</span>
                     </button>
                     <button
                       className="rounded-md p-1 hover:bg-black/5"
@@ -1110,93 +1086,19 @@ export default function StudyArea() {
                   <div className="space-y-3 animate-in fade-in zoom-in-95 duration-200">
                     <Card className="shadow-none border-dashed bg-muted/30">
                       <CardContent className="p-4 flex flex-col gap-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-xs text-muted-foreground">关键文件</p>
-                            <p className="text-sm font-medium text-foreground">
-                              已筛选 {workspaceData.materials.length} 个可直接使用的重要文件
-                            </p>
-                          </div>
-
+                        <div className="flex justify-end">
                           {workspaceData.bundleDownloadUrl && workspaceData.bundleDownloadUrl !== "#" && (
                             <Button variant="outline" size="sm" asChild>
                               <a href={workspaceData.bundleDownloadUrl} target="_blank" rel="noreferrer">
                                 <Download className="w-3.5 h-3.5" />
-                                整包
+                                下载全部打包文件
                               </a>
                             </Button>
                           )}
                         </div>
 
-                        <Separator />
-
                         {workspaceData.materials.length > 0 ? (
-                          workspaceData.materials.map((material) => (
-                            <div
-                              key={material.id}
-                              className={`flex items-center gap-3 text-sm p-3 rounded-md transition-colors border border-transparent hover:border-border hover:bg-muted/60 ${
-                                isPreviewableMaterial(material.openMode) ? "cursor-pointer" : ""
-                              }`}
-                              onClick={() => handleMaterialAction(material)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault();
-                                  handleMaterialAction(material);
-                                }
-                              }}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <FileText className={`w-5 h-5 shrink-0 ${material.colorClass}`} />
-
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="truncate font-medium text-foreground">{material.name}</span>
-                                  <Badge
-                                    variant="outline"
-                                    className={`shrink-0 ${material.colorClass} border-current/25`}
-                                  >
-                                    {material.label}
-                                  </Badge>
-                                </div>
-                                <div className="text-[11px] text-muted-foreground truncate">
-                                  {material.description}
-                                </div>
-                              </div>
-
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="shrink-0"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleMaterialAction(material);
-                                }}
-                              >
-                                {material.openMode === "markdown" ? (
-                                  <>
-                                    <FileText className="w-3.5 h-3.5" />
-                                    预览
-                                  </>
-                                ) : material.openMode === "html" ? (
-                                  <>
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                    网页
-                                  </>
-                                ) : material.openMode === "video" ? (
-                                  <>
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                    播放
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="w-3.5 h-3.5" />
-                                    下载
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          ))
+                          <MaterialFileTree materials={workspaceData.materials} handleMaterialAction={handleMaterialAction} />
                         ) : (
                           <div className="text-sm text-muted-foreground p-3">当前还没有可下载素材。</div>
                         )}
@@ -1272,36 +1174,6 @@ export default function StudyArea() {
             </Tooltip>
           </aside>
         </main>
-
-        {isPreviewFullscreen && (activeTab.type === "html" || activeTab.type === "video") && (
-          <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-sm">
-            <div className="flex h-full flex-col">
-              <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 text-white">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{activeTab.title}</p>
-                  <p className="text-xs text-slate-300">站内全屏预览</p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
-                    <Button variant="secondary" size="sm" asChild>
-                      <a href={activeTab.downloadUrl} target="_blank" rel="noreferrer">
-                        <Download className="w-3.5 h-3.5" />
-                        下载
-                      </a>
-                    </Button>
-                  )}
-
-                  <Button variant="secondary" size="icon" onClick={() => setIsPreviewFullscreen(false)}>
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="min-h-0 flex-1">{renderInlinePreview(activeTab, true)}</div>
-            </div>
-          </div>
-        )}
       </div>
     </TooltipProvider>
   );

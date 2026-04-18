@@ -25,9 +25,6 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
-    if (onSelect) {
-      onSelect(id);
-    }
   };
 
   return (

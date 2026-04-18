@@ -10,6 +10,13 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(slots=True)
 class Settings:
     base_url: str
@@ -18,6 +25,7 @@ class Settings:
     output_root: Path
     temperature: float = 0.2
     request_timeout_seconds: int = 180
+    support_vision: bool = False
 
     @classmethod
     def from_env(cls, env_path: str | None = None) -> "Settings":
@@ -34,6 +42,7 @@ class Settings:
             output_root = (PROJECT_ROOT / output_root_path).resolve()
         temperature = float(os.getenv("TEMPERATURE", "0.2"))
         request_timeout_seconds = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "180"))
+        support_vision = _env_flag("SUPPORT_VISION", False)
 
         missing = [
             name
@@ -56,4 +65,5 @@ class Settings:
             output_root=output_root,
             temperature=temperature,
             request_timeout_seconds=request_timeout_seconds,
+            support_vision=support_vision,
         )
