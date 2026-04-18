@@ -304,7 +304,7 @@ export default function HomePage() {
               disabled={isSubmitting}
             >
               <PromptInputTextarea
-                placeholder="在此输入您的教学目标或授课需求..."
+                placeholder="在此输入你今天想学的内容..."
                 className="text-base sm:text-lg min-h-14 py-2 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 leading-relaxed font-medium"
               />
               
