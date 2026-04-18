@@ -22,3 +22,4 @@ outputs/
 .codex
 uv*
 *.egg-info
+.github/agents/

@@ -69,6 +69,7 @@ export default function LoadingPage() {
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const nodeGraphRef = useRef<HTMLDivElement>(null);
 
   // Connect to real SSE Stream
   useEffect(() => {
@@ -171,6 +172,13 @@ export default function LoadingPage() {
 
   const nodeHistory = Array.from(new Set(events.map(e => e.data.node).filter(n => n && n !== 'END' && n !== '__start__')));
   const currentNode = isComplete ? null : nodeHistory[nodeHistory.length - 1];
+
+  // Auto-scroll node graph to right
+  useEffect(() => {
+    if (nodeGraphRef.current) {
+      nodeGraphRef.current.scrollLeft = nodeGraphRef.current.scrollWidth;
+    }
+  }, [nodeHistory.length]);
 
   const renderPayload = (ev: SSEEvent) => {
     const d = ev.data.data;
@@ -308,14 +316,14 @@ export default function LoadingPage() {
             <motion.div
               exit={{ opacity: 0, width: 0, scale: 0.95, filter: "blur(20px)", margin: 0, padding: 0 }}
               transition={{ duration: 0.6, ease: "easeInOut" }}
-              className="w-[320px] lg:w-[400px] shrink-0 flex flex-col items-center justify-center overflow-hidden"
+              className={`shrink-0 flex flex-col items-center justify-center overflow-hidden transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-[320px] lg:w-[400px]' : 'w-[440px] lg:w-[560px]'}`}
             >
               {/* Lottie Animation */}
               <motion.div 
                  initial={{ opacity: 0, y: 30 }}
                  animate={{ opacity: 1, y: 0 }}
                  transition={{ duration: 0.8, ease: "easeOut" }}
-                 className="relative w-80 h-80 md:w-96 md:h-96 pointer-events-none z-10 mb-6"
+                 className={`relative pointer-events-none z-10 mb-6 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-80 h-80 md:w-96 md:h-96' : 'w-[360px] h-[360px] md:w-[480px] md:h-[480px]'}`}
               >
                 <div className="absolute inset-0 bg-[#09f]/5 blur-[80px] rounded-full mx-auto my-auto animate-pulse" />
                 <iframe 
@@ -334,7 +342,7 @@ export default function LoadingPage() {
                      animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
                      exit={{ opacity: 0, filter: "blur(12px)", y: -10 }}
                      transition={{ duration: 0.6 }}
-                     className="text-3xl md:text-3xl font-semibold tracking-tight text-gray-900 mb-3"
+                     className={`font-semibold tracking-tight text-gray-900 mb-3 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl'}`}
                   >
                     {isComplete ? '教师备课完成' : '老师正在准备材料...'}
                   </motion.h1>
@@ -421,9 +429,10 @@ export default function LoadingPage() {
           {/* Node Graph Flow */}
           {nodeHistory.length > 0 && (
              <motion.div 
+               ref={nodeGraphRef}
                initial={{ opacity: 0, height: 0 }}
                animate={{ opacity: 1, height: 'auto' }}
-               className="mb-6 flex items-center gap-2 overflow-x-auto pb-4 custom-scrollbar shrink-0"
+               className="mb-6 flex items-center gap-2 overflow-x-auto pb-4 custom-scrollbar shrink-0 scroll-smooth"
              >
                {nodeHistory.map((node, i) => {
                  const isActive = node === currentNode;
@@ -487,14 +496,14 @@ export default function LoadingPage() {
                     <ChainOfThoughtContent>
                        <div className="text-xs text-gray-500 font-mono mt-2 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
                           <div className="flex flex-wrap gap-x-4 gap-y-1">
-                            <span>Event: <span className="text-[#09f] font-semibold">{ev.event}</span></span>
-                            <span>Node: <span className="text-[#09f] font-semibold">{ev.data.node}</span></span>
-                            <span>Time: <span className="text-slate-400">{new Date(ev.data.timestamp).toLocaleTimeString()}</span></span>
+                            <span>事件: <span className="text-[#09f] font-semibold">{ev.event}</span></span>
+                            <span>节点: <span className="text-[#09f] font-semibold">{ev.data.node}</span></span>
+                            <span>时间: <span className="text-slate-400">{new Date(ev.data.timestamp).toLocaleTimeString()}</span></span>
                           </div>
                           {ev.data.run_status === 'running' && (
                              <div className="mt-2 flex items-center text-rose-400 animate-pulse">
                                <Activity className="w-3 h-3 mr-1" />
-                               Running...
+                               运行中...
                              </div>
                           )}
                           {/* Render Meaningful Payloads */}
@@ -527,12 +536,12 @@ export default function LoadingPage() {
             <motion.div 
               layout
               initial={{ opacity: 0, width: 0, scale: 0.95 }}
-              animate={{ opacity: 1, width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? 360 : 300, scale: 1 }}
+              animate={{ opacity: 1, width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? 500 : 360, scale: 1 }}
               exit={{ opacity: 0, width: 0, scale: 0.95 }}
               transition={{ duration: 0.8, type: "spring", bounce: 0.2 }}
               className="shrink-0 h-[calc(100vh-160px)] min-h-[500px] overflow-hidden"
             >
-              <div className="w-[300px] lg:w-[360px] shrink-0 bg-white/70 backdrop-blur-xl border border-slate-200/50 rounded-3xl overflow-hidden shadow-2xl shadow-slate-200/50 h-full flex flex-col relative w-full h-full">
+              <div className="w-[360px] lg:w-[500px] shrink-0 bg-white/70 backdrop-blur-xl border border-slate-200/50 rounded-3xl overflow-hidden shadow-2xl shadow-slate-200/50 h-full flex flex-col relative w-full h-full">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white/80 backdrop-blur top-0 z-10 shrink-0">
                   <div className="flex items-center gap-3 w-full pr-12 min-w-0">
@@ -592,13 +601,13 @@ export default function LoadingPage() {
                            <div className="w-6 h-6 border-2 border-[#09f] border-t-transparent rounded-full animate-spin"></div>
                          </span>
                        </div>
-                       <p className="text-slate-500 font-medium">Loading Document...</p>
+                       <p className="text-slate-500 font-medium">请求文档中...</p>
                     </div>
                   ) : fileContent ? (
                     <div className="p-6 md:p-8 w-full bg-white/30 min-h-full">
                       {/* Render Markdown */}
                       {selectedFileUrl?.endsWith('.md') ? (
-                        <div className="prose prose-slate prose-blue prose-sm md:prose-base max-w-none prose-headings:font-semibold prose-a:text-[#09f] prose-pre:bg-slate-900 prose-pre:text-slate-50 prose-img:rounded-xl">
+                        <div className="prose prose-custom max-w-none mb-4 leading-relaxed">
                           <ReactMarkdown 
                              remarkPlugins={[remarkGfm, remarkMath]} 
                              rehypePlugins={[rehypeKatex]}
@@ -619,7 +628,7 @@ export default function LoadingPage() {
                   ) : (
                      <div className="flex flex-col items-center justify-center h-full text-slate-400">
                        <FileText className="w-10 h-10 mb-3 opacity-20" />
-                       <p className="text-sm">Select a file to preview</p>
+                       <p className="text-sm">选择一个文件预览</p>
                      </div>
                   )}
                 </div>
