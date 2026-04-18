@@ -180,6 +180,76 @@
     margin-left: 2px;
     border-radius: 9999px;
   }
+  
+  .prose-custom table {
+    @apply w-full border-collapse rounded-xl overflow-hidden shadow-sm border border-slate-200 table-fixed my-6;
+  }
+  .prose-custom thead {
+    @apply bg-slate-50 border-b border-slate-200 text-slate-700;
+  }
+  .prose-custom th {
+    @apply px-4 py-3 text-left font-semibold align-middle text-sm md:text-base;
+  }
+  .prose-custom td {
+    @apply px-4 py-3 border-b border-slate-100 text-slate-600 align-middle text-sm md:text-base;
+  }
+  .prose-custom tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .prose-custom tbody tr:nth-child(even) {
+    @apply bg-slate-50/30;
+  }
+  .prose-custom tbody tr:hover {
+    @apply bg-slate-50;
+  }
+  .prose-custom blockquote {
+    @apply border-l-4 border-[#09f] bg-[#09f]/5 text-slate-700 px-5 py-3 rounded-r-lg font-normal not-italic my-6 shadow-sm border-y border-r border-slate-100;
+  }
+  .prose-custom hr {
+    @apply border-slate-200 my-8;
+  }
+  .prose-custom :not(pre) > code {
+    @apply px-1.5 py-0.5 bg-slate-100 text-slate-800 rounded-md font-mono text-[0.85em] border border-slate-200 font-medium;
+  }
+  .prose-custom pre {
+    @apply bg-slate-900 border border-slate-800 rounded-xl max-h-[500px] overflow-auto shadow-md my-6;
+  }
+  .prose-custom pre::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .prose-custom pre::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .prose-custom pre::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+  }
+  .prose-custom pre::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+  }
+  .prose-custom pre code {
+    @apply bg-transparent border-0 p-0 text-slate-50 text-[0.85em];
+  }
+  .prose-custom ul li::marker,
+  .prose-custom ol li::marker {
+    @apply text-slate-400 font-semibold;
+  }
+  .prose-custom a {
+    @apply text-[#09f] hover:text-[#08e] hover:underline font-medium transition-colors;
+  }
+  .prose-custom img {
+    @apply rounded-xl shadow-sm border border-slate-100 w-full object-cover my-6;
+  }
+  .prose-custom h1, .prose-custom h2, .prose-custom h3, .prose-custom h4 {
+    @apply text-slate-800 font-semibold mt-8 mb-4 tracking-tight;
+  }
+  .prose-custom h1 {
+    @apply text-2xl md:text-3xl border-b border-slate-100 pb-2;
+  }
+  .prose-custom h2 {
+    @apply text-xl md:text-2xl;
+  }
 }
 
 @keyframes blink {
