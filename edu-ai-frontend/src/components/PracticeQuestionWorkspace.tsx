@@ -436,35 +436,6 @@ export function PracticeQuestionWorkspace({
 
   return (
     <div className="w-full h-full flex flex-col gap-8 overflow-y-auto pr-4">
-      <Card className="border-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 text-white shadow-lg">
-        <CardContent className="p-6 space-y-4">
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-300">Practice Workspace</p>
-            <h2 className="text-2xl font-semibold tracking-tight">{learningGoal || "练习题学习区"}</h2>
-            <p className="text-sm text-slate-300">
-              这里展示的是本次任务真实生成的题库内容，题型和题量会随主题、学习者画像与目标能力动态变化。
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Badge className="border-white/15 bg-white/10 text-white hover:bg-white/15">
-              共 {questions.length} 题
-            </Badge>
-            {(Object.keys(typeCounts) as PracticeQuestionType[])
-              .filter((questionType) => typeCounts[questionType] > 0)
-              .map((questionType) => (
-                <Badge
-                  key={questionType}
-                  variant="outline"
-                  className={`border-none ${QUESTION_TYPE_BADGE_CLASS[questionType]}`}
-                >
-                  {QUESTION_TYPE_LABELS[questionType]} {typeCounts[questionType]} 题
-                </Badge>
-              ))}
-          </div>
-        </CardContent>
-      </Card>
-
       {isLoading ? (
         <div className="flex items-center gap-2 rounded-2xl border bg-white px-5 py-4 text-sm text-slate-500 shadow-sm">
           <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -494,7 +465,6 @@ export function PracticeQuestionWorkspace({
                 <Badge variant="outline" className={QUESTION_TYPE_BADGE_CLASS[question.question_type]}>
                   {QUESTION_TYPE_LABELS[question.question_type]}
                 </Badge>
-                <span className="text-xs font-medium tracking-wide text-slate-500">{question.id}</span>
               </div>
 
               {renderQuestionCard(question)}
