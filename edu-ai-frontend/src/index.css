@@ -71,6 +71,15 @@
     color: transparent;
     animation: textShimmer 2s linear infinite;
   }
+  
+  .animate-silver-shimmer-slow {
+    background: linear-gradient(110deg, #94a3b8 30%, #e2e8f0 50%, #94a3b8 70%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: textShimmer 4s linear infinite;
+  }
 }
 
 @keyframes textShimmer {
