@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -22,12 +22,53 @@ const PHRASES = [
     "随时答疑，高效提分",
     "攻克难题，轻松拿高分"
   ]
-const SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理", "其他"]
-const GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
-const TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
+const INITIAL_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理"]
+const INITIAL_GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
+const INITIAL_TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
 
 interface CreatePrepRunResponse {
   run_id?: string
+}
+
+function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [value, setValue] = useState("");
+
+  if (isEditing) {
+    return (
+      <input 
+        autoFocus
+        className="px-3 py-[2px] text-sm rounded-full border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 h-7 text-zinc-900 dark:text-zinc-100"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={() => {
+          if (value.trim()) onAdd(value.trim());
+          setIsEditing(false);
+          setValue("");
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            if (value.trim()) onAdd(value.trim());
+            setIsEditing(false);
+            setValue("");
+          } else if (e.key === 'Escape') {
+            setIsEditing(false);
+            setValue("");
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <Badge 
+      variant="outline"
+      className="cursor-pointer px-3 py-1 font-normal border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors bg-transparent h-7"
+      onClick={() => setIsEditing(true)}
+    >
+      <Plus className="w-3 h-3 mr-1" /> 自定义
+    </Badge>
+  );
 }
 
 export default function HomePage() {
@@ -35,6 +76,10 @@ export default function HomePage() {
   const [isExpanded, setIsExpanded] = useState(false)
   
   // Extra options
+  const [subjects, setSubjects] = useState(INITIAL_SUBJECTS)
+  const [grades, setGrades] = useState(INITIAL_GRADES)
+  const [teacherStyles, setTeacherStyles] = useState(INITIAL_TEACHER_STYLES)
+  
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([])
   const [selectedGrades, setSelectedGrades] = useState<string[]>([])
   const [selectedStyles, setSelectedStyles] = useState<string[]>([])
@@ -65,6 +110,18 @@ export default function HomePage() {
     if (arr.includes(item)) setArr(arr.filter(i => i !== item))
     else setArr([...arr, item])
   }
+  
+  const handleAddCustom = (
+    val: string, 
+    sourceArr: string[], 
+    setSourceArr: React.Dispatch<React.SetStateAction<string[]>>,
+    selectedArr: string[],
+    setSelectedArr: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    if (!val || sourceArr.includes(val)) return;
+    setSourceArr([...sourceArr, val]);
+    setSelectedArr([...selectedArr, val]);
+  };
 
   const handleSearch = async () => {
     const trimmedQuery = query.trim()
@@ -75,12 +132,12 @@ export default function HomePage() {
     const styleText = selectedStyles.join("、")
 
     const learnerProfile =
-      [gradeLevel !== "Unspecified" ? `适用学段：${gradeLevel}` : "", styleText ? `希望教学风格：${styleText}` : ""]
+      [gradeLevel !== "Unspecified" ? "适用学段：$gradeLevel" : "", styleText ? "希望教学风格：$styleText" : ""]
         .filter(Boolean)
         .join("；") || "Mixed-ability class that needs clear guidance, visual explanation, and structured practice."
 
     const notes =
-      [selectedSubjects.length > 0 ? `学科偏好：${subject}` : "", customReq.trim() ? `补充要求：${customReq.trim()}` : ""]
+      [selectedSubjects.length > 0 ? "学科偏好：$subject" : "", customReq.trim() ? "补充要求：${customReq.trim()}" : ""]
         .filter(Boolean)
         .join("；") || "None"
 
@@ -105,7 +162,7 @@ export default function HomePage() {
       })
 
       if (!response.ok) {
-        let message = `创建任务失败（${response.status}）`
+        let message = "创建任务失败（${response.status}）"
         try {
           const errorPayload = (await response.json()) as {
             detail?: string | Array<{ msg?: string }>
@@ -129,7 +186,7 @@ export default function HomePage() {
         throw new Error("后端未返回 run_id，暂时无法进入加载页。")
       }
 
-      navigate(`/load/${payload.run_id}`)
+      navigate("/load/${payload.run_id}")
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "创建任务失败，请稍后重试。")
     } finally {
@@ -142,7 +199,7 @@ export default function HomePage() {
   }
 
   return (
-          <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 bg-[#fafafa] dark:bg-zinc-950 relative overflow-hidden">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 bg-[#fafafa] dark:bg-zinc-950 relative overflow-hidden">
         {/* Background blobs */}
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none w-full h-full">
           <motion.div
@@ -351,61 +408,67 @@ export default function HomePage() {
                       
                       <div className="space-y-3">
                         <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" />学科领域</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {SUBJECTS.map(sub => (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {subjects.map(sub => (
                             <Badge 
                               key={sub}
                               variant={selectedSubjects.includes(sub) ? "default" : "secondary"}
-                              className={`cursor-pointer px-3 py-1 font-normal transition-all duration-200 ${
+                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
                                 selectedSubjects.includes(sub) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
                               onClick={() => toggleArray(selectedSubjects, setSelectedSubjects, sub)}
                             >
                               {sub}
                             </Badge>
                           ))}
+                          <CustomEditableTag 
+                            onAdd={(val) => handleAddCustom(val, subjects, setSubjects, selectedSubjects, setSelectedSubjects)}
+                          />
                         </div>
                       </div>
                       
                       <div className="space-y-3">
                         <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5" />适用年级</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {GRADES.map(grade => (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {grades.map(grade => (
                             <Badge 
                               key={grade}
                               variant={selectedGrades.includes(grade) ? "default" : "secondary"}
-                              className={`cursor-pointer px-3 py-1 font-normal transition-all duration-200 ${
+                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
                                 selectedGrades.includes(grade) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
                               onClick={() => toggleArray(selectedGrades, setSelectedGrades, grade)}
                             >
                               {grade}
                             </Badge>
                           ))}
+                          <CustomEditableTag 
+                            onAdd={(val) => handleAddCustom(val, grades, setGrades, selectedGrades, setSelectedGrades)}
+                          />
                         </div>
                       </div>
 
                       <div className="space-y-3">
                         <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><User2 className="w-3.5 h-3.5" />教师风格</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {TEACHER_STYLES.map(style => (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {teacherStyles.map(style => (
                             <Badge 
                               key={style}
                               variant={selectedStyles.includes(style) ? "default" : "secondary"}
-                              className={`cursor-pointer px-3 py-1 font-normal transition-all duration-200 ${
+                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
                                 selectedStyles.includes(style) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
                               onClick={() => toggleArray(selectedStyles, setSelectedStyles, style)}
                             >
                               {style}
                             </Badge>
                           ))}
+                          <CustomEditableTag 
+                            onAdd={(val) => handleAddCustom(val, teacherStyles, setTeacherStyles, selectedStyles, setSelectedStyles)}
+                          />
                         </div>
                       </div>
 
@@ -516,20 +579,3 @@ function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x:
     </motion.div>
   )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
