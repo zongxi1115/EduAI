@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, Loader2 } from 'lucide-react'
-import './App.css'
+import '../App.css'
 
 interface StoryCard {
     title: string
@@ -39,12 +39,6 @@ const defaultFormData: SearchFormData = {
     learner_profile: '',
     notes: '',
     language: '中文',
-}
-
-function getApiConfig() {
-    const apiKey = (import.meta.env.VITE_LLM_API_KEY as string | undefined)?.trim() ?? ''
-    const model = (import.meta.env.VITE_LLM_MODEL as string | undefined)?.trim() || 'gpt-4.1-mini'
-    return { apiKey, model }
 }
 
 function flattenMessageContent(content: unknown): string {
@@ -147,83 +141,53 @@ function parseCards(rawContent: string): StoryCard[] {
     return []
 }
 
-function createDetailPrompt(topic: string, formData: SearchFormData): string {
-    const learningGoal = formData.learning_goal.trim() || defaultKeyword
-    const detailLines = [`learning_goal: ${learningGoal}`]
-
-    if (formData.subject.trim()) {
-        detailLines.push(`subject: ${formData.subject.trim()}`)
-    }
-    if (formData.grade_level.trim()) {
-        detailLines.push(`grade_level: ${formData.grade_level.trim()}`)
-    }
-    if (formData.learner_profile.trim()) {
-        detailLines.push(`learner_profile: ${formData.learner_profile.trim()}`)
-    }
-    if (formData.notes.trim()) {
-        detailLines.push(`notes: ${formData.notes.trim()}`)
-    }
-
-    const language = formData.language.trim() || '中文'
-    detailLines.push(`language: ${language}`)
-
-    return `请围绕“${topic}”主题，根据以下字段生成 3 条推荐内容：\n${detailLines.join('\n')}\n要求题目具体、摘要简洁、适合中学生和大学生阅读。`
-}
-
 async function fetchTopicCards(topic: string, formData: SearchFormData): Promise<StoryCard[]> {
-    const { apiKey, model } = getApiConfig()
-    if (!apiKey) {
-        throw new Error('缺少 VITE_LLM_API_KEY，请在前端 .env.local 中配置后重试。')
-    }
+    const learningGoal = formData.learning_goal.trim() || defaultKeyword
+    const subject = formData.subject.trim() || '综合学科'
+    const gradeLevel = formData.grade_level.trim() || '通用年级'
+    const learnerProfile = formData.learner_profile.trim() || '基础水平'
+    const notes = formData.notes.trim() || '注重核心概念与练习结合'
+    const language = formData.language.trim() || '中文'
+    const author = language.toLowerCase().includes('english') ? 'AI Study Team' : 'AI 教研组'
 
-    const userPrompt = createDetailPrompt(topic, formData)
+    // 本地模拟生成，避免任何远程 API 请求。
+    await new Promise((resolve) => setTimeout(resolve, 260))
 
-    const response = await fetch('/api/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
+    const localCards: StoryCard[] = [
+        {
+            title: `${topic}：${learningGoal}速览`,
+            author,
+            pages: '3页',
+            excerpt: `面向${gradeLevel}的${subject}入门梳理，结合“${learnerProfile}”学习特征，快速建立知识框架。`,
         },
-        body: JSON.stringify({
-            model,
-            temperature: 0.5,
-            messages: [
-                {
-                    role: 'system',
-                    content:
-                        '你是教育内容编辑。请只输出 JSON，不要输出任何解释。返回长度为 3 的数组，每一项格式为 {"title":"","author":"","pages":"","excerpt":""}，每条内容都要和指定主题强相关。',
-                },
-                {
-                    role: 'user',
-                    content: userPrompt,
-                },
-            ],
-        }),
-    })
+        {
+            title: `${subject}实践：围绕${learningGoal}的训练单`,
+            author,
+            pages: '4页',
+            excerpt: `从核心概念到题型迁移，按“讲解-练习-反馈”节奏组织，重点满足：${notes}。`,
+        },
+        {
+            title: `${gradeLevel}学习计划：${learningGoal}一周任务表`,
+            author,
+            pages: '2页',
+            excerpt: `提供每日目标、时间建议与复盘要点，适配${subject}场景，帮助持续推进学习目标。`,
+        },
+    ]
 
-    const rawText = await response.text()
-    let payload: ChatCompletionResponse = {}
-    try {
-        payload = JSON.parse(rawText) as ChatCompletionResponse
-    } catch {
-        if (!response.ok) {
-            throw new Error(`API 请求失败（${response.status}）`)
-        }
-        throw new Error('API 返回内容不是合法 JSON。')
+    const mockPayload: ChatCompletionResponse = {
+        choices: [
+            {
+                message: {
+                    content: JSON.stringify(localCards),
+                },
+            },
+        ],
     }
 
-    if (!response.ok) {
-        const errorMessage = payload.error?.message || `API 请求失败（${response.status}）`
-        throw new Error(errorMessage)
-    }
-
-    const content = flattenMessageContent(payload.choices?.[0]?.message?.content)
+    const content = flattenMessageContent(mockPayload.choices?.[0]?.message?.content)
     const cards = parseCards(content)
-    if (!cards.length) {
-        throw new Error('API 返回内容无法解析为推荐卡片。')
-    }
 
-    return cards
+    return cards.length ? cards : localCards
 }
 
 export function HomePage() {

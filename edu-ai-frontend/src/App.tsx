@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import StudyArea from "./pages/StudyArea";
 import LoadingPage from "./pages/LoadingPage";
-import { HomePage } from "./HomePage";
+import { HomePage } from "./pages/HomePage";
 
 export default function App() {
   return (
