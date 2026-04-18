@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -26,6 +26,10 @@ const SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "�
 const GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
 const TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
 
+interface CreatePrepRunResponse {
+  run_id?: string
+}
+
 export default function HomePage() {
   const [query, setQuery] = useState("")
   const [isExpanded, setIsExpanded] = useState(false)
@@ -35,6 +39,8 @@ export default function HomePage() {
   const [selectedGrades, setSelectedGrades] = useState<string[]>([])
   const [selectedStyles, setSelectedStyles] = useState<string[]>([])
   const [customReq, setCustomReq] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   
   const navigate = useNavigate()
   
@@ -60,16 +66,79 @@ export default function HomePage() {
     else setArr([...arr, item])
   }
 
-  const handleSearch = () => {
-    if (!query.trim()) return
-    const state: any = { 
-      query, 
-      subjects: selectedSubjects, 
-      grades: selectedGrades, 
-      styles: selectedStyles,
-      customReq
+  const handleSearch = async () => {
+    const trimmedQuery = query.trim()
+    if (!trimmedQuery || isSubmitting) return
+
+    const subject = selectedSubjects.join("、") || "General"
+    const gradeLevel = selectedGrades.join("、") || "Unspecified"
+    const styleText = selectedStyles.join("、")
+
+    const learnerProfile =
+      [gradeLevel !== "Unspecified" ? `适用学段：${gradeLevel}` : "", styleText ? `希望教学风格：${styleText}` : ""]
+        .filter(Boolean)
+        .join("；") || "Mixed-ability class that needs clear guidance, visual explanation, and structured practice."
+
+    const notes =
+      [selectedSubjects.length > 0 ? `学科偏好：${subject}` : "", customReq.trim() ? `补充要求：${customReq.trim()}` : ""]
+        .filter(Boolean)
+        .join("；") || "None"
+
+    setSubmitError(null)
+    setIsSubmitting(true)
+
+    try {
+      const response = await fetch("/api/v1/prep-runs", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          learning_goal: trimmedQuery,
+          subject,
+          grade_level: gradeLevel,
+          learner_profile: learnerProfile,
+          notes,
+          language: "zh-CN",
+        }),
+      })
+
+      if (!response.ok) {
+        let message = `创建任务失败（${response.status}）`
+        try {
+          const errorPayload = (await response.json()) as {
+            detail?: string | Array<{ msg?: string }>
+          }
+          if (typeof errorPayload.detail === "string" && errorPayload.detail.trim()) {
+            message = errorPayload.detail
+          } else if (Array.isArray(errorPayload.detail)) {
+            const firstMessage = errorPayload.detail[0]?.msg
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage
+            }
+          }
+        } catch {
+          // Keep the fallback message when error payload is not JSON.
+        }
+        throw new Error(message)
+      }
+
+      const payload = (await response.json()) as CreatePrepRunResponse
+      if (!payload.run_id) {
+        throw new Error("后端未返回 run_id，暂时无法进入加载页。")
+      }
+
+      navigate(`/load/${payload.run_id}`)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "创建任务失败，请稍后重试。")
+    } finally {
+      setIsSubmitting(false)
     }
-    navigate("/study", { state })
+  }
+
+  const handleSearchSubmit = () => {
+    void handleSearch()
   }
 
   return (
@@ -230,7 +299,9 @@ export default function HomePage() {
               value={query}
               onValueChange={setQuery}
               className="bg-transparent border-none shadow-none rounded-[24px] focus-within:ring-0 focus-visible:ring-0 px-4 pt-4 pb-2"
-              onSubmit={handleSearch}
+              onSubmit={handleSearchSubmit}
+              isLoading={isSubmitting}
+              disabled={isSubmitting}
             >
               <PromptInputTextarea
                 placeholder="在此输入您的教学目标或授课需求..."
@@ -251,14 +322,14 @@ export default function HomePage() {
                 </PromptInputActions>
                 
                 <PromptInputActions>
-                  <PromptInputAction tooltip="发送请求" side="top">
+                  <PromptInputAction tooltip={isSubmitting ? "正在创建任务..." : "发送请求"} side="top">
                     <Button 
                       size="icon" 
                       className="rounded-full bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 dark:text-zinc-900 text-white transition-all w-10 h-10 shadow-sm"
-                      onClick={handleSearch}
-                      disabled={!query.trim()}
+                      onClick={handleSearchSubmit}
+                      disabled={!query.trim() || isSubmitting}
                     >
-                      <Send className="w-4 h-4" />
+                      {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </Button>
                   </PromptInputAction>
                 </PromptInputActions>
@@ -356,6 +427,16 @@ export default function HomePage() {
             </AnimatePresence>
           </div>
         </motion.div>
+
+        {submitError && (
+          <motion.p
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 text-sm text-rose-500 text-center"
+          >
+            {submitError}
+          </motion.p>
+        )}
 
         {/* Suggestions */}
         <motion.div 
