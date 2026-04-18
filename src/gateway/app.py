@@ -11,6 +11,7 @@ from .routers.assistant import router as assistant_router
 from .routers.code_execution import router as code_execution_router
 from .routers.health import router as health_router
 from .routers.prep_runs import router as prep_runs_router
+from .routers.practice_review import router as practice_review_router
 from .services.run_registry import RunRegistry
 
 
@@ -34,6 +35,10 @@ OPENAPI_TAGS = [
     {
         "name": "代码运行",
         "description": "用于前端编程题在线运行，例如后端执行 Python 代码。",
+    },
+    {
+        "name": "题目批阅",
+        "description": "用于前端在学生提交答案后调用 AI 进行结构化批阅与建议返回。",
     },
 ]
 
@@ -81,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(code_execution_router)
     app.include_router(health_router)
     app.include_router(prep_runs_router)
+    app.include_router(practice_review_router)
 
     @app.get("/docs", include_in_schema=False)
     def redirect_docs() -> RedirectResponse:

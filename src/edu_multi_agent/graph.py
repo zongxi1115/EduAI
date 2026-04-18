@@ -491,6 +491,35 @@ def _append_question_id_mapping(
     return "\n".join([answer_key_markdown.rstrip(), "", *mapping_lines]).strip() + "\n"
 
 
+AI_JUDGE_DEFAULTS: dict[str, bool] = {
+    "FillInTheBlank": False,
+    "MultipleChoice": False,
+    "ShortAnswer": True,
+    "Listening": False,
+    "Coding": True,
+    "Drawing": True,
+}
+
+
+def _resolve_need_ai_judge(item: dict[str, Any]) -> bool:
+    if isinstance(item.get("need_ai_judge"), bool):
+        return bool(item["need_ai_judge"])
+    if isinstance(item.get("requires_ai_judgment"), bool):
+        return bool(item["requires_ai_judgment"])
+    question_type = str(item.get("question_type", "")).strip()
+    return AI_JUDGE_DEFAULTS.get(question_type, False)
+
+
+def _normalize_practice_question(item: dict[str, Any]) -> dict[str, Any]:
+    normalized_item = {
+        key: value
+        for key, value in item.items()
+        if key not in {"id", "question_id", "requires_ai_judgment"}
+    }
+    normalized_item["need_ai_judge"] = _resolve_need_ai_judge(item)
+    return normalized_item
+
+
 def _resolve_manim_validation_command() -> list[str]:
     manim_cli = shutil.which("manim")
     if manim_cli:
@@ -1069,11 +1098,7 @@ def _finalize_practice_files(
         if not isinstance(item, dict):
             raise ValueError(f"practice_questions.json item {index} must be an object.")
 
-        normalized_item = {
-            key: value
-            for key, value in item.items()
-            if key not in {"id", "question_id"}
-        }
+        normalized_item = _normalize_practice_question(item)
         finalized_questions.append(
             {
                 "id": _build_global_question_id(run_id, index),
@@ -1121,6 +1146,20 @@ def _validate_generated_files(
                 if not isinstance(item, dict):
                     raise ValueError(
                         f"practice_questions.json item {index} must be an object."
+                    )
+                if "need_ai_judge" in item and not isinstance(
+                    item.get("need_ai_judge"), bool
+                ):
+                    raise ValueError(
+                        f"practice_questions.json item {index} has invalid "
+                        "need_ai_judge; expected boolean."
+                    )
+                if "requires_ai_judgment" in item and not isinstance(
+                    item.get("requires_ai_judgment"), bool
+                ):
+                    raise ValueError(
+                        f"practice_questions.json item {index} has invalid "
+                        "requires_ai_judgment; expected boolean."
                     )
                 question_type = item.get("question_type")
                 if question_type not in allowed_types:

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -21,10 +21,8 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "@/components/ui/markdown";
-import { Separator } from "@/components/ui/separator";
 import {
   parsePracticeQuestionsPayload,
   PracticeQuestionWorkspace,
@@ -549,7 +547,7 @@ function MaterialFileTree({ materials, handleMaterialAction }: { materials: Stud
                         <div className="shrink-0 transition-opacity">
                           {material.openMode === "markdown" ? (
                             <FileText className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
-                          ) : material.openMode === "html" || material.openMode === "video" ? (
+                          ) : material.openMode === "link" ? (
                             <ExternalLink className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
                           ) : (
                             <Download className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
@@ -765,7 +763,7 @@ export default function StudyArea() {
     const previewType =
       material.openMode === "markdown"
         ? "markdown"
-        : material.openMode === "html" || material.openMode === "link"
+        : material.openMode === "link"
           ? "html"
           : "video";
 
@@ -817,7 +815,7 @@ export default function StudyArea() {
   };
 
   const handleMaterialAction = (material: StudyMaterialItem) => {
-    if (material.openMode === "markdown" || material.openMode === "html" || material.openMode === "link" || material.openMode === "video") {
+    if (material.openMode === "markdown" || material.openMode === "link") {
       void openPreviewTab(material);
       return;
     }

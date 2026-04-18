@@ -1,79 +1,83 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
 from dataclasses import dataclass
+from typing import Any
 
-@dataclass
+
+@dataclass(kw_only=True)
 class BaseQuestion(ABC):
-    """基础题目类"""
+    """基础题目类。"""
+
     id: str
     question: str
     analysis: str
-    requires_ai_judgment: bool = False
-    
+    need_ai_judge: bool = False
+
     @abstractmethod
     def validate_answer(self, answer: Any) -> bool:
-        """验证答案"""
-        pass
+        """验证答案。"""
 
 
-@dataclass
+@dataclass(kw_only=True)
 class FillInTheBlank(BaseQuestion):
-    """填空题"""
+    """填空题。"""
+
     answer: str
-    
+
     def validate_answer(self, answer: str) -> bool:
         return answer.strip() == self.answer.strip()
 
 
-@dataclass
+@dataclass(kw_only=True)
 class MultipleChoice(BaseQuestion):
-    """单选题"""
-    options: List[str]
+    """单选题。"""
+
+    options: list[str]
     correct_answer: str
-    
+
     def validate_answer(self, answer: str) -> bool:
         return answer == self.correct_answer
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ShortAnswer(BaseQuestion):
-    """简答题"""
+    """简答题。"""
+
     reference_answer: str
-    requires_ai_judgment: bool = True
-    
+    need_ai_judge: bool = True
+
     def validate_answer(self, answer: str) -> bool:
-        # 简答题需要AI判断
-        return self.requires_ai_judgment
+        return self.need_ai_judge
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Listening(BaseQuestion):
-    """听力题"""
+    """听力题。"""
+
     audio_src: str
     answer: str
-    
+
     def validate_answer(self, answer: str) -> bool:
         return answer.strip() == self.answer.strip()
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Coding(BaseQuestion):
-    """编程题"""
+    """编程题。"""
+
     reference_code: str
-    test_cases: List[tuple]
-    requires_ai_judgment: bool = True
-    
+    test_cases: list[tuple]
+    need_ai_judge: bool = True
+
     def validate_answer(self, code: str) -> bool:
-        # 编程题需要AI判断和测试
-        return self.requires_ai_judgment
+        return self.need_ai_judge
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Drawing(BaseQuestion):
-    """作图题"""
+    """作图题。"""
+
     reference_image: str
-    requires_ai_judgment: bool = True
-    
+    need_ai_judge: bool = True
+
     def validate_answer(self, answer: Any) -> bool:
-        # 作图题需要AI判断
-        return self.requires_ai_judgment
+        return self.need_ai_judge

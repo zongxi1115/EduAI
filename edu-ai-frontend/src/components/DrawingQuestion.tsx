@@ -5,21 +5,32 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { CheckCircle, Maximize2, Shrink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DraftBoard } from "@/components/DraftBoard";
+import { DraftBoard, type DraftBoardExportApi } from "@/components/DraftBoard";
+
+export interface DrawingSubmission {
+  imageDataUrl: string | null;
+  hasDrawingContent: boolean;
+}
 
 export interface DrawingQuestionProps {
   questionContent: string;
-  onSubmit?: () => void;
+  onSubmit?: (submission: DrawingSubmission) => void;
 }
 
 export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [draftBoardExportApi, setDraftBoardExportApi] = useState<DraftBoardExportApi | null>(null);
 
   const handleSubmit = () => {
+    const submission: DrawingSubmission = {
+      imageDataUrl: draftBoardExportApi?.exportImageDataUrl() ?? null,
+      hasDrawingContent: draftBoardExportApi?.hasContent ?? false,
+    };
+
     if (onSubmit) {
-      onSubmit();
+      onSubmit(submission);
     } else {
-      console.log("提交的作图题");
+      console.log("提交的作图题", submission);
       alert("作图题提交成功！");
     }
   };
@@ -68,7 +79,10 @@ export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionPr
 
         {/* Instead of redefining DraftBoard and unmounting, we just re-render within the same container. 
             Because its parent div changed CSS, it automatically resizes. */}
-        <DraftBoard questionContent={isFullscreen ? questionContent : undefined} />
+        <DraftBoard
+          questionContent={isFullscreen ? questionContent : undefined}
+          onExportReady={setDraftBoardExportApi}
+        />
       </div>
 
       <div className="pt-4 border-t flex justify-end">
