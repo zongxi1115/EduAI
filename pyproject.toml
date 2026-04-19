@@ -19,6 +19,11 @@ dependencies = [
   "httpx[socks]>=0.28.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0.0",
+]
+
 [project.scripts]
 edu-prep = "edu_multi_agent.main:main"
 edu-prep-api = "gateway.main:main"
