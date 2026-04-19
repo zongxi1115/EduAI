@@ -5,6 +5,7 @@ import { Pencil, Eraser, Minus, Settings2, Circle, Square, Undo2, Redo2, Type } 
 import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -28,17 +29,28 @@ interface DraftBoardProps {
 export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
+
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [history, setHistory] = useState<Stroke[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
-  const [activeText, setActiveText] = useState<{x: number, y: number, text: string} | null>(null);
-  
+  const [activeText, setActiveText] = useState<{ x: number, y: number, text: string } | null>(null);
+
   const [tool, setTool] = useState<Tool>("pencil");
   const [eraserType, setEraserType] = useState<EraserType>("pixel");
-  const [color, setColor] = useState("#000000");
+  const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains("dark"));
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  const resolveColor = (c: string) => (c === "foreground" || c === "#000000") ? (isDarkMode ? "#ffffff" : "#000000") : c;
+
+  const [color, setColor] = useState("foreground");
   const [size, setSize] = useState(8);
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -73,7 +85,7 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
-    
+
     window.addEventListener("resize", handleResize);
 
     return () => {
@@ -88,7 +100,7 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
   // Redraw strokes
   useEffect(() => {
     redraw();
-  }, [strokes, currentStroke, color, size, tool, activeText, canvasSizeRenderBust]);
+  }, [strokes, currentStroke, color, size, tool, activeText, canvasSizeRenderBust, isDarkMode]);
 
   const redraw = () => {
     const canvas = canvasRef.current;
@@ -115,19 +127,19 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
         const strokePath = getSvgPathFromStroke(
           getStroke(s.points, { size: s.size, thinning: 0.5, smoothing: 0.5, streamline: 0.5 })
         );
-        ctx.fillStyle = s.tool === "eraser" ? "#000" : s.color;
+        ctx.fillStyle = s.tool === "eraser" ? "#000" : resolveColor(s.color);
         ctx.fill(new Path2D(strokePath));
       } else if (s.tool === "line" || s.tool === "circle" || s.tool === "rectangle") {
         if (s.points.length < 2) return;
         const start = s.points[0];
         const end = s.points[s.points.length - 1];
-        
+
         ctx.beginPath();
-        ctx.strokeStyle = s.color;
+        ctx.strokeStyle = resolveColor(s.color);
         ctx.lineWidth = s.size;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        
+
         if (s.tool === "line") {
           ctx.moveTo(start[0], start[1]);
           ctx.lineTo(end[0], end[1]);
@@ -137,15 +149,15 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
           const radius = Math.sqrt(Math.pow(end[0] - start[0], 2) + Math.pow(end[1] - start[1], 2));
           ctx.arc(start[0], start[1], radius, 0, 2 * Math.PI);
         }
-        
+
         ctx.stroke();
       } else if (s.tool === "text" && s.text) {
         ctx.font = `${s.size * 2}px sans-serif`;
         ctx.textBaseline = "top";
-        ctx.fillStyle = s.color;
+        ctx.fillStyle = resolveColor(s.color);
         // Basic multi-line support
         s.text.split('\n').forEach((line, i) => {
-           ctx.fillText(line, s.points[0][0], s.points[0][1] + i * (s.size * 2 * 1.5));
+          ctx.fillText(line, s.points[0][0], s.points[0][1] + i * (s.size * 2 * 1.5));
         });
       }
     };
@@ -153,13 +165,13 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
     strokes.forEach(drawStroke);
 
     if (currentStroke.length > 0) {
-      drawStroke({ points: currentStroke, color, size, tool });
+      drawStroke({ points: currentStroke, color: color, size, tool });
     }
-    
+
     if (activeText && activeText.text) {
-      drawStroke({ points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text });
+      drawStroke({ points: [[activeText.x, activeText.y, 0]], color: color, size, tool: "text", text: activeText.text });
     }
-    
+
     ctx.restore();
   };
 
@@ -171,7 +183,7 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
 
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const pt = getPoint(e);
-    
+
     if (activeText) {
       if (activeText.text.trim()) {
         commitAction([...strokes, { points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text }]);
@@ -330,16 +342,19 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
   }, [activeText?.text, currentStroke.length, onExportReady, strokes.length]);
 
   return (
-    <div ref={containerRef} className="relative w-full flex-1 h-full min-h-[400px] border rounded-xl overflow-hidden bg-slate-50 shadow-inner">
+    <div ref={containerRef} className="relative w-full flex-1 h-full min-h-[400px] border rounded-xl overflow-hidden bg-muted/30 shadow-inner">
+      <div className="absolute top-4 right-[4.5rem] z-50 pointer-events-auto">
+        <ThemeToggle />
+      </div>
       {/* Question content rendered underneath the canvas like a printed worksheet */}
       {questionContent && (
-        <div className="absolute top-0 left-0 w-full p-6 pb-24 prose prose-slate max-w-none pointer-events-none select-none z-0">
+        <div className="absolute top-0 left-0 w-full p-6 pb-24 prose prose-slate dark:prose-invert max-w-none pointer-events-none select-none z-0">
           <ReactMarkdown
-             remarkPlugins={[remarkMath]}
-             rehypePlugins={[rehypeKatex]}
-             components={{
-               p: ({node, ...props}) => <p className="text-base text-slate-800 m-0 mb-4" {...props} />,
-             }}
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={{
+              p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
+            }}
           >
             {questionContent}
           </ReactMarkdown>
@@ -364,11 +379,11 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
             }
           }}
           placeholder="输入文字..."
-          className="absolute z-30 bg-white/80 backdrop-blur-sm border-2 border-primary border-dashed rounded-md outline-none resize-none p-1 overflow-hidden break-words whitespace-pre shadow-lg"
+          className="absolute z-30 bg-background/80 backdrop-blur-sm border-2 border-primary border-dashed rounded-md outline-none resize-none p-1 overflow-hidden break-words whitespace-pre shadow-lg"
           style={{
             left: activeText.x,
             top: activeText.y,
-            color: color,
+            color: resolveColor(color),
             fontSize: `${size * 2}px`,
             lineHeight: 1.5,
             fontFamily: "sans-serif",
@@ -378,11 +393,11 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
           value={activeText.text}
           onPointerDown={stopCanvasInteraction}
           onChange={(e) => {
-             setActiveText({ ...activeText, text: e.target.value });
-             e.target.style.height = "auto";
-             e.target.style.height = e.target.scrollHeight + "px";
-             e.target.style.width = "auto";
-             e.target.style.width = Math.max(120, e.target.scrollWidth) + "px";
+            setActiveText({ ...activeText, text: e.target.value });
+            e.target.style.height = "auto";
+            e.target.style.height = e.target.scrollHeight + "px";
+            e.target.style.width = "auto";
+            e.target.style.width = Math.max(120, e.target.scrollWidth) + "px";
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -393,16 +408,16 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
             }
           }}
           onBlur={() => {
-             if (activeText.text.trim()) {
-               commitAction([...strokes, { points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text }]);
-             }
-             setActiveText(null);
+            if (activeText.text.trim()) {
+              commitAction([...strokes, { points: [[activeText.x, activeText.y, 0]], color, size, tool: "text", text: activeText.text }]);
+            }
+            setActiveText(null);
           }}
         />
       )}
 
       {/* Toolbox Menu */}
-      <div 
+      <div
         className="absolute z-20 select-none touch-none"
         style={{ left: menuPos.x, top: menuPos.y }}
         onPointerDown={onMenuPointerDown}
@@ -410,9 +425,9 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
         onPointerUp={onMenuPointerUp}
         onPointerCancel={onMenuPointerUp}
       >
-        <FlowerMenu 
-          menuItems={menuItems} 
-          iconColor="#0f172a" 
+        <FlowerMenu
+          menuItems={menuItems}
+          iconColor="#0f172a"
           backgroundColor="#e2e8f0"
           togglerSize={40}
         />
@@ -420,25 +435,25 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
 
       {/* Floating Toolbar for Settings */}
       <div
-        className="absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border bg-white/80 p-2 shadow-md backdrop-blur"
+        className="absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border bg-background/80 p-2 shadow-md backdrop-blur"
         onPointerDown={stopCanvasInteraction}
       >
-        
+
         <div className="px-3 flex gap-2 font-medium text-sm text-muted-foreground items-center">
-           {tool === "pencil" && <><Pencil className="w-4 h-4"/> 铅笔</>}
-           {tool === "eraser" && <><Eraser className="w-4 h-4"/> 橡皮擦</>}
-           {(tool === "line" || tool === "circle" || tool === "rectangle") && <><Minus className="w-4 h-4"/> 形状</>}
-           {tool === "text" && <><Type className="w-4 h-4"/> 文字</>}
+          {tool === "pencil" && <><Pencil className="w-4 h-4" /> 铅笔</>}
+          {tool === "eraser" && <><Eraser className="w-4 h-4" /> 橡皮擦</>}
+          {(tool === "line" || tool === "circle" || tool === "rectangle") && <><Minus className="w-4 h-4" /> 形状</>}
+          {tool === "text" && <><Type className="w-4 h-4" /> 文字</>}
         </div>
 
         <div className="h-4 w-px bg-border mx-1"></div>
         <div className="flex items-center gap-1 px-1">
-           <Button variant="ghost" size="icon" className="rounded-full" onClick={undo} disabled={historyIndex <= 0}>
-             <Undo2 className="w-4 h-4" />
-           </Button>
-           <Button variant="ghost" size="icon" className="rounded-full" onClick={redo} disabled={historyIndex >= history.length - 1}>
-             <Redo2 className="w-4 h-4" />
-           </Button>
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={undo} disabled={historyIndex <= 0}>
+            <Undo2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="rounded-full" onClick={redo} disabled={historyIndex >= history.length - 1}>
+            <Redo2 className="w-4 h-4" />
+          </Button>
         </div>
 
         <div className="h-4 w-px bg-border mx-1"></div>
@@ -449,54 +464,54 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-72" side="top" align="center">
-             <div className="space-y-4">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{tool === "text" ? "字体大小" : "笔迹粗细"}: {size}</label>
+                <Slider min={2} max={32} step={1} value={[size]} onValueChange={(v: number[]) => setSize(v[0])} />
+              </div>
+
+              {tool === "eraser" && (
                 <div className="space-y-2">
-                    <label className="text-sm font-medium">{tool === "text" ? "字体大小" : "笔迹粗细"}: {size}</label>
-                    <Slider min={2} max={32} step={1} value={[size]} onValueChange={(v: number[]) => setSize(v[0])} />
+                  <label className="text-sm font-medium">擦除模式</label>
+                  <div className="flex gap-2">
+                    <Button variant={eraserType === "pixel" ? "default" : "outline"} size="sm" onClick={() => setEraserType("pixel")}>涂抹区域</Button>
+                    <Button variant={eraserType === "stroke" ? "default" : "outline"} size="sm" onClick={() => setEraserType("stroke")}>擦除整笔</Button>
+                  </div>
                 </div>
-                
-                {tool === "eraser" && (
-                  <div className="space-y-2">
-                      <label className="text-sm font-medium">擦除模式</label>
-                      <div className="flex gap-2">
-                         <Button variant={eraserType === "pixel" ? "default" : "outline"} size="sm" onClick={() => setEraserType("pixel")}>涂抹区域</Button>
-                         <Button variant={eraserType === "stroke" ? "default" : "outline"} size="sm" onClick={() => setEraserType("stroke")}>擦除整笔</Button>
-                      </div>
-                  </div>
-                )}
+              )}
 
-                {tool !== "eraser" && (
-                  <div className="space-y-2">
-                      <label className="text-sm font-medium">颜色</label>
-                      <div className="flex gap-2">
-                          {["#000000", "#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"].map(c => (
-                              <button
-                                key={c}
-                                className={`w-6 h-6 rounded-full border-2 ${color === c ? "border-primary" : "border-transparent"}`}
-                                style={{ backgroundColor: c }}
-                                onClick={() => setColor(c)}
-                              />
-                          ))}
-                      </div>
+              {tool !== "eraser" && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">颜色</label>
+                  <div className="flex gap-2">
+                    {["foreground", "#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"].map(c => (
+                      <button
+                        key={c}
+                        className={`w-6 h-6 rounded-full border-2 ${color === c ? "border-primary" : "border-transparent"}`}
+                        style={{ backgroundColor: resolveColor(c) }}
+                        onClick={() => setColor(c)}
+                      />
+                    ))}
                   </div>
-                )}
+                </div>
+              )}
 
-                {(tool === "line" || tool === "circle" || tool === "rectangle") && (
-                  <div className="space-y-2">
-                      <label className="text-sm font-medium">形状</label>
-                      <div className="flex gap-2">
-                         <Button variant={tool === "line" ? "default" : "outline"} size="icon" onClick={() => setTool("line")}><Minus className="w-4 h-4" /></Button>
-                         <Button variant={tool === "rectangle" ? "default" : "outline"} size="icon" onClick={() => setTool("rectangle")}><Square className="w-4 h-4" /></Button>
-                         <Button variant={tool === "circle" ? "default" : "outline"} size="icon" onClick={() => setTool("circle")}><Circle className="w-4 h-4" /></Button>
-                      </div>
+              {(tool === "line" || tool === "circle" || tool === "rectangle") && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">形状</label>
+                  <div className="flex gap-2">
+                    <Button variant={tool === "line" ? "default" : "outline"} size="icon" onClick={() => setTool("line")}><Minus className="w-4 h-4" /></Button>
+                    <Button variant={tool === "rectangle" ? "default" : "outline"} size="icon" onClick={() => setTool("rectangle")}><Square className="w-4 h-4" /></Button>
+                    <Button variant={tool === "circle" ? "default" : "outline"} size="icon" onClick={() => setTool("circle")}><Circle className="w-4 h-4" /></Button>
                   </div>
-                )}
-             </div>
+                </div>
+              )}
+            </div>
           </PopoverContent>
         </Popover>
 
         <Button variant="destructive" size="sm" className="rounded-full px-4" onClick={() => commitAction([])}>
-            清空草稿纸
+          清空草稿纸
         </Button>
       </div>
 

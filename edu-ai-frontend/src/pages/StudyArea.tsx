@@ -30,6 +30,7 @@ import {
 import type { PracticeQuestionRecord } from "@/components/PracticeQuestionWorkspace";
 import { FloatingAIInput } from "@/components/FloatingAIInput";
 import { Battery as CircularProgressWidget } from "@/components/ui/battery";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
 type MaterialOpenMode = "markdown" | "link" | "download";
@@ -344,7 +345,7 @@ function classifyMaterial(fileName: string) {
     return { label: "文档", colorClass: "text-emerald-600", openMode: "download" as const, priority: 78 };
   }
   if (lowerName.endsWith(".md")) {
-    return { label: "Markdown", colorClass: "text-slate-600", openMode: "markdown" as const, priority: 74 };
+    return { label: "Markdown", colorClass: "text-muted-foreground", openMode: "markdown" as const, priority: 74 };
   }
   if (lowerName.endsWith(".json")) {
     return { label: "数据文件", colorClass: "text-amber-600", openMode: "download" as const, priority: 72 };
@@ -498,37 +499,36 @@ function MaterialFileTree({ materials, handleMaterialAction }: { materials: Stud
     <div className="flex flex-col gap-1 w-full text-sm">
       {Object.entries(groupedMaterials).map(([folderName, files]) => {
         const isOpen = openFolders[folderName] !== false;
-        
+
         return (
           <div key={folderName} className="flex flex-col">
-            <div 
-              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md hover:bg-muted/60 transition-colors text-slate-700 font-medium"
+            <div
+              className="flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md hover:bg-muted/60 transition-colors text-foreground font-medium"
               onClick={() => toggleFolder(folderName)}
             >
               {isOpen ? <FolderOpen className="w-4 h-4 text-sky-500 fill-sky-200" /> : <Folder className="w-4 h-4 text-sky-500 fill-sky-200" />}
               <span className="truncate">{folderName}</span>
               {isOpen ? <ChevronDown className="w-3.5 h-3.5 ml-auto opacity-50" /> : <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-50" />}
             </div>
-            
+
             <AnimatePresence initial={false}>
               {isOpen && (
-                <motion.div 
+                <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.2, ease: "easeOut" }}
                   className="flex flex-col overflow-hidden"
                 >
-                  <div className="flex flex-col gap-0.5 mt-0.5 mb-2 ml-3 pl-3 border-l border-slate-200/60">
+                  <div className="flex flex-col gap-0.5 mt-0.5 mb-2 ml-3 pl-3 border-l border-border/60">
                     {files.map((material, i) => (
                       <motion.div
                         key={material.id}
                         initial={{ opacity: 0, x: -5 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.2, delay: i * 0.04, ease: "easeOut" }}
-                        className={`flex items-center justify-between gap-3 px-2 py-1.5 rounded-md transition-colors border border-transparent hover:border-border hover:bg-muted/60 group/file ${
-                          isPreviewableMaterial(material.openMode) ? "cursor-pointer" : ""
-                        }`}
+                        className={`flex items-center justify-between gap-3 px-2 py-1.5 rounded-md transition-colors border border-transparent hover:border-border hover:bg-muted/60 group/file ${isPreviewableMaterial(material.openMode) ? "cursor-pointer" : ""
+                          }`}
                         onClick={() => handleMaterialAction(material)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
@@ -541,16 +541,16 @@ function MaterialFileTree({ materials, handleMaterialAction }: { materials: Stud
                       >
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <FileText className={`w-4 h-4 shrink-0 opacity-80 ${material.colorClass}`} />
-                          <span className="truncate text-slate-600 group-hover/file:text-slate-900 transition-colors">{material.name}</span>
+                          <span className="truncate text-muted-foreground group-hover/file:text-foreground transition-colors">{material.name}</span>
                         </div>
 
                         <div className="shrink-0 transition-opacity">
                           {material.openMode === "markdown" ? (
-                            <FileText className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                            <FileText className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
                           ) : material.openMode === "link" ? (
-                            <ExternalLink className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
                           ) : (
-                            <Download className="w-3.5 h-3.5 text-slate-500 hover:text-slate-700" />
+                            <Download className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
                           )}
                         </div>
                       </motion.div>
@@ -621,14 +621,14 @@ export default function StudyArea() {
         const artifactData = artifactsResponse.ok
           ? ((await artifactsResponse.json()) as ArtifactListResponse)
           : {
-              run_id: statusData.run_id,
-              status: statusData.status,
-              plan_file: null,
-              report_file: null,
-              manifest_file: null,
-              artifacts: [],
-              bundle_download_url: statusData.links.bundle,
-            };
+            run_id: statusData.run_id,
+            status: statusData.status,
+            plan_file: null,
+            report_file: null,
+            manifest_file: null,
+            artifacts: [],
+            bundle_download_url: statusData.links.bundle,
+          };
 
         let nextPracticeQuestions: PracticeQuestionRecord[] = [];
         let nextPracticeQuestionsError: string | null = null;
@@ -846,11 +846,11 @@ export default function StudyArea() {
     }
 
     return (
-      <div className="h-full min-h-0 overflow-hidden rounded-2xl border bg-white shadow-sm">
+      <div className="h-full min-h-0 overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm">
         <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-800 truncate">{activeTab.title}</p>
-            <p className="text-xs text-slate-500">在线预览</p>
+            <p className="text-sm font-semibold text-foreground truncate">{activeTab.title}</p>
+            <p className="text-xs text-muted-foreground">在线预览</p>
           </div>
 
           {activeTab.downloadUrl && activeTab.downloadUrl !== "#" && (
@@ -870,11 +870,11 @@ export default function StudyArea() {
                 <iframe
                   title={activeTab.title}
                   src={activeTab.sourceUrl}
-                  className="h-full w-full border-0 bg-white"
+                  className="h-full w-full border-0 bg-card text-card-foreground"
                   sandbox="allow-scripts allow-same-origin"
                 />
               ) : (
-                <div className="px-6 py-5 text-sm text-slate-500">当前网页素材没有可用的预览地址。</div>
+                <div className="px-6 py-5 text-sm text-muted-foreground">当前网页素材没有可用的预览地址。</div>
               )
             ) : activeTab.sourceUrl ? (
               <div className="flex h-full items-center justify-center bg-black p-4 md:p-6">
@@ -883,13 +883,13 @@ export default function StudyArea() {
                 </video>
               </div>
             ) : (
-              <div className="px-6 py-5 text-sm text-slate-500">当前视频素材没有可用的播放地址。</div>
+              <div className="px-6 py-5 text-sm text-muted-foreground">当前视频素材没有可用的播放地址。</div>
             )}
           </div>
         ) : (
           <ScrollArea className="h-[calc(100%-61px)] px-6 py-5">
             {activeTab.status === "loading" && (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="w-4 h-4 animate-spin" />
                 正在加载内容...
               </div>
@@ -902,7 +902,7 @@ export default function StudyArea() {
             )}
 
             {activeTab.status === "ready" && (
-              <Markdown className="prose prose-slate max-w-none [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_pre]:overflow-x-auto">
+              <Markdown className="prose prose-slate max-w-none [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_pre]:overflow-x-auto">
                 {activeTab.content || "# 空文档\n\n当前文档没有可展示的内容。"}
               </Markdown>
             )}
@@ -926,17 +926,19 @@ export default function StudyArea() {
               </div>
             </div>
           </div>
+          <div className="ml-auto flex items-center pr-2">
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="flex flex-1 overflow-hidden relative">
           <div className="flex-1 flex flex-col min-w-0 bg-background">
             <div className="flex items-center px-4 h-11 border-b shrink-0 bg-muted/10 gap-2 overflow-x-auto">
               <button
-                className={`flex items-center gap-2 h-full px-2 border-b-2 font-medium text-sm transition-colors ${
-                  activeTabId === WORKSPACE_TAB_ID
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
+                className={`flex items-center gap-2 h-full px-2 border-b-2 font-medium text-sm transition-colors ${activeTabId === WORKSPACE_TAB_ID
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
                 onClick={() => setActiveTabId(WORKSPACE_TAB_ID)}
               >
                 <LayoutDashboard className="w-4 h-4" />
@@ -948,9 +950,8 @@ export default function StudyArea() {
                 .map((tab) => (
                   <div
                     key={tab.id}
-                    className={`flex items-center gap-1 rounded-lg px-2 py-1 transition-colors ${
-                      activeTabId === tab.id ? "bg-primary/8 text-primary" : "text-muted-foreground"
-                    }`}
+                    className={`flex items-center gap-1 rounded-lg px-2 py-1 transition-colors ${activeTabId === tab.id ? "bg-primary/8 text-primary" : "text-muted-foreground"
+                      }`}
                   >
                     <button
                       className="flex items-center gap-2 text-sm min-w-0"
@@ -976,9 +977,8 @@ export default function StudyArea() {
           </div>
 
           <div
-            className={`shrink-0 overflow-hidden relative shadow-sm z-10 ${
-              isDragging ? "transition-none" : "transition-all duration-300 ease-in-out"
-            }`}
+            className={`shrink-0 overflow-hidden relative shadow-sm z-10 ${isDragging ? "transition-none" : "transition-all duration-300 ease-in-out"
+              }`}
             style={{ width: activePanel ? drawerWidth : 0 }}
           >
             <div
@@ -1116,11 +1116,10 @@ export default function StudyArea() {
                 <Button
                   variant={activePanel === "goals" ? "secondary" : "ghost"}
                   size="icon"
-                  className={`w-10 h-10 rounded-xl ${
-                    activePanel === "goals"
-                      ? "bg-primary/10 text-primary hover:bg-primary/20"
-                      : "text-muted-foreground"
-                  }`}
+                  className={`w-10 h-10 rounded-xl ${activePanel === "goals"
+                    ? "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "text-muted-foreground"
+                    }`}
                   onClick={() => togglePanel("goals")}
                 >
                   <Target className="w-5 h-5" />
@@ -1136,11 +1135,10 @@ export default function StudyArea() {
                 <Button
                   variant={activePanel === "materials" ? "secondary" : "ghost"}
                   size="icon"
-                  className={`w-10 h-10 rounded-xl ${
-                    activePanel === "materials"
-                      ? "bg-primary/10 text-primary hover:bg-primary/20"
-                      : "text-muted-foreground"
-                  }`}
+                  className={`w-10 h-10 rounded-xl ${activePanel === "materials"
+                    ? "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "text-muted-foreground"
+                    }`}
                   onClick={() => togglePanel("materials")}
                 >
                   <FileText className="w-5 h-5" />
@@ -1158,11 +1156,10 @@ export default function StudyArea() {
                 <Button
                   variant={activePanel === "progress" ? "secondary" : "ghost"}
                   size="icon"
-                  className={`w-10 h-10 rounded-xl ${
-                    activePanel === "progress"
-                      ? "bg-primary/10 text-primary hover:bg-primary/20"
-                      : "text-muted-foreground"
-                  }`}
+                  className={`w-10 h-10 rounded-xl ${activePanel === "progress"
+                    ? "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "text-muted-foreground"
+                    }`}
                   onClick={() => togglePanel("progress")}
                 >
                   <Activity className="w-5 h-5" />

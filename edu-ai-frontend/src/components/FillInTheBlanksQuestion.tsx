@@ -13,20 +13,20 @@ import { X } from "lucide-react";
 const BlankContext = createContext<{
   answers: string[];
   onChange: (index: number, value: string) => void;
-}>({ answers: [], onChange: () => {} });
+}>({ answers: [], onChange: () => { } });
 
 const CodeRenderer = ({ node, inline, className, children, ...props }: any) => {
   const { answers, onChange } = useContext(BlankContext);
   const text = String(children);
   const match = text.match(/^__BLANK__(\d+)$/);
   const mfRef = useRef<any>(null);
-  
+
   const blankIndex = match ? parseInt(match[1], 10) : -1;
 
   useEffect(() => {
     if (!mfRef.current || blankIndex === -1) return;
     const mf = mfRef.current;
-    
+
     // Prevent cursor resetting unless value actually changed externally
     if (mf.value !== (answers[blankIndex] || "")) {
       mf.value = answers[blankIndex] || "";
@@ -50,7 +50,8 @@ const CodeRenderer = ({ node, inline, className, children, ...props }: any) => {
           padding: "0.25rem 0.5rem",
           margin: "0 0.5rem",
           border: "none",
-          borderBottom: "2px solid #cbd5e1",
+          borderBottom: "2px solid hsl(var(--foreground) / 0.2)",
+            color: "hsl(var(--foreground))",
           background: "transparent",
           fontSize: "1.125rem",
           transform: "translateY(5px)",
@@ -63,7 +64,7 @@ const CodeRenderer = ({ node, inline, className, children, ...props }: any) => {
 };
 
 const markdownComponents = {
-  p: ({ node, ...props }: any) => <p className="text-base text-slate-800 m-0 mb-4" {...props} />,
+  p: ({ node, ...props }: any) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
   code: CodeRenderer,
 };
 
@@ -90,8 +91,8 @@ export function FillInTheBlanksQuestion({ questionContent, onSubmit }: FillInThe
     setAnswers(prev => {
       const next = [...prev];
       if (next.length < blankCount) {
-         next.length = blankCount;
-         for (let i = 0; i < next.length; i++) if (next[i] === undefined) next[i] = "";
+        next.length = blankCount;
+        for (let i = 0; i < next.length; i++) if (next[i] === undefined) next[i] = "";
       }
       next[index] = value;
       return next;
@@ -108,7 +109,7 @@ export function FillInTheBlanksQuestion({ questionContent, onSubmit }: FillInThe
   };
 
   return (
-    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-white border rounded-xl shadow-sm overflow-y-auto">
+    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto">
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <BlankContext.Provider value={{ answers, onChange: handleInputChange }}>
@@ -138,7 +139,7 @@ export function FillInTheBlanksQuestion({ questionContent, onSubmit }: FillInThe
                 <Button
                   variant="secondary"
                   size="icon"
-                  className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-white/80 backdrop-blur-sm"
+                  className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-background/80 backdrop-blur-sm"
                 >
                   <X className="w-5 h-5" />
                   <span className="sr-only">关闭全屏草稿纸</span>

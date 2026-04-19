@@ -429,11 +429,11 @@ export function ProgrammingQuestion({
   };
 
   return (
-    <div className="w-full flex-1 max-w-6xl mx-auto bg-white border rounded-xl shadow-sm h-[800px] flex flex-col md:flex-row overflow-hidden">
+    <div className="w-full flex-1 max-w-6xl mx-auto bg-card text-card-foreground border rounded-xl shadow-sm h-[800px] flex flex-col md:flex-row overflow-hidden">
       {/* Left side: Problem Description */}
-      <div className="w-full md:w-1/2 flex flex-col h-full min-h-0 bg-slate-50 border-r relative z-10 shrink-0">
-        <div className="flex items-center justify-between p-4 border-b bg-white shrink-0 shadow-sm z-20">
-          <h3 className="font-semibold text-slate-800">题目描述</h3>
+      <div className="w-full md:w-1/2 flex flex-col h-full min-h-0 bg-muted/50 border-r relative z-10 shrink-0">
+        <div className="flex items-center justify-between p-4 border-b bg-card text-card-foreground shrink-0 shadow-sm z-20">
+          <h3 className="font-semibold text-foreground">题目描述</h3>
           <Dialog>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 gap-2 text-primary border-primary/20 hover:bg-primary/10 transition-colors">
@@ -443,29 +443,29 @@ export function ProgrammingQuestion({
             </DialogTrigger>
             {/* @ts-ignore */}
             <DialogContent className="fixed inset-0 m-0 max-w-none max-h-none h-[100dvh] w-[100dvw] p-0 flex flex-col rounded-none overflow-hidden border-none top-0 left-0 translate-x-0 translate-y-0 sm:max-w-none" showCloseButton={false}>
-               <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
-               <div className="flex-1 w-full h-full relative">
-                 <DraftBoard questionContent={questionContent} />
-                 <DialogClose asChild>
-                   <Button 
-                     variant="secondary" 
-                     size="icon" 
-                     className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-white/80 backdrop-blur-sm"
-                   >
-                     <X className="w-5 h-5" />
-                     <span className="sr-only">关闭全屏草稿纸</span>
-                   </Button>
-                 </DialogClose>
-               </div>
+              <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
+              <div className="flex-1 w-full h-full relative">
+                <DraftBoard questionContent={questionContent} />
+                <DialogClose asChild>
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-background/80 backdrop-blur-sm"
+                  >
+                    <X className="w-5 h-5" />
+                    <span className="sr-only">关闭全屏草稿纸</span>
+                  </Button>
+                </DialogClose>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
         <div className="p-6 overflow-y-auto flex-1 prose prose-slate max-w-none">
           <ReactMarkdown
-             remarkPlugins={[remarkMath]}
-             rehypePlugins={[rehypeKatex]}
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
           >
-             {questionContent}
+            {questionContent}
           </ReactMarkdown>
         </div>
       </div>
@@ -473,12 +473,12 @@ export function ProgrammingQuestion({
       {/* Right side: Code Editor */}
       <div className="w-full md:w-1/2 flex flex-col h-full min-h-0 bg-[#1e1e1e] relative z-20">
         <div className="flex items-center justify-between p-3 pl-5 border-b border-white/10 shrink-0 bg-[#252526]">
-          <span className="text-xs font-semibold text-slate-400  tracking-widest">{language}</span>
+          <span className="text-xs font-semibold text-muted-foreground  tracking-widest">{language}</span>
           <div className="flex gap-3">
             <Button
               variant="secondary"
               size="sm"
-              className="h-8 text-xs bg-white/10 hover:bg-white/20 text-white border-0 gap-1.5 transition-colors disabled:bg-white/10 disabled:text-slate-400"
+              className="h-8 text-xs bg-white/10 hover:bg-white/20 text-white border-0 gap-1.5 transition-colors disabled:bg-white/10 disabled:text-muted-foreground"
               onClick={handleRun}
               disabled={isRunning}
             >
@@ -510,9 +510,8 @@ export function ProgrammingQuestion({
           />
         </div>
         <div
-          className={`shrink-0 overflow-hidden ${
-            isResizingRunnerPanel ? "transition-none" : "transition-[height,opacity] duration-300 ease-out"
-          }`}
+          className={`shrink-0 overflow-hidden ${isResizingRunnerPanel ? "transition-none" : "transition-[height,opacity] duration-300 ease-out"
+            }`}
           style={{
             height: isRunnerPanelVisible ? `${runnerPanelHeight + 14}px` : "0px",
             opacity: isRunnerPanelVisible ? 1 : 0,
@@ -534,7 +533,7 @@ export function ProgrammingQuestion({
             <div className="flex h-full min-h-0 flex-col p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <TerminalSquare className="w-4 h-4 text-slate-400" />
+                  <TerminalSquare className="w-4 h-4 text-muted-foreground" />
                   <div>
                     <p className="text-sm font-semibold text-slate-100">在线运行</p>
                   </div>
@@ -555,15 +554,15 @@ export function ProgrammingQuestion({
 
               <div className="mt-4 flex-1 min-h-0 space-y-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-medium tracking-wide text-slate-400">测试代码</label>
+                  <label className="text-xs font-medium tracking-wide text-muted-foreground">测试代码</label>
                   <Textarea
                     value={runnerCode}
                     onChange={(event) => setRunnerCode(event.target.value)}
                     placeholder={buildRunnerPlaceholder(language)}
-                    className="min-h-24 resize-y border-white/10 bg-white/5 text-sm text-slate-100 placeholder:text-slate-500 font-mono focus-visible:border-primary/60 focus-visible:ring-primary/20"
+                    className="min-h-24 resize-y border-white/10 bg-white/5 text-sm text-slate-100 placeholder:text-muted-foreground font-mono focus-visible:border-primary/60 focus-visible:ring-primary/20"
                     spellCheck={false}
                   />
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-muted-foreground">
                     示例：<code>{runnerExamples.returnExample}</code> 或 <code>{runnerExamples.printExample}</code>
                     <span className="ml-2">{runnerExamples.metaText}</span>
                   </p>
@@ -571,9 +570,9 @@ export function ProgrammingQuestion({
 
                 <div className="flex min-h-0 flex-1 flex-col space-y-2">
                   <div className="flex items-center justify-between gap-3">
-                    <label className="text-xs font-medium tracking-wide text-slate-400">运行结果</label>
+                    <label className="text-xs font-medium tracking-wide text-muted-foreground">运行结果</label>
                     {runDurationMs !== null ? (
-                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">{runDurationMs} ms</span>
+                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-muted-foreground">{runDurationMs} ms</span>
                     ) : null}
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-sm">
@@ -590,7 +589,7 @@ export function ProgrammingQuestion({
                                   : line.type === "result"
                                     ? "text-emerald-300"
                                     : line.type === "meta"
-                                      ? "text-slate-500"
+                                      ? "text-muted-foreground"
                                       : "text-slate-200"
                             }
                           >
@@ -599,7 +598,7 @@ export function ProgrammingQuestion({
                         ))}
                       </div>
                     ) : (
-                      <div className="text-slate-500">点击“运行”后，这里会显示 console 输出、返回值或报错信息。</div>
+                      <div className="text-muted-foreground">点击“运行”后，这里会显示 console 输出、返回值或报错信息。</div>
                     )}
                   </div>
                 </div>

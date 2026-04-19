@@ -7,6 +7,7 @@ import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ThemeToggle } from "@/components/ThemeToggle"
 
 const SUGGESTIONS = [
   { text: "帮我总结一下昨天刚学的牛顿三大定律", icon: Lightbulb },
@@ -18,10 +19,10 @@ const SUGGESTIONS = [
 ]
 
 const PHRASES = [
-    "你的全能AI学习助手",
-    "随时答疑，高效提分",
-    "攻克难题，轻松拿高分"
-  ]
+  "你的全能AI学习助手",
+  "随时答疑，高效提分",
+  "攻克难题，轻松拿高分"
+]
 const INITIAL_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理"]
 const INITIAL_GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
 const INITIAL_TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
@@ -45,9 +46,9 @@ function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
 
   if (isEditing) {
     return (
-      <input 
+      <input
         autoFocus
-        className="px-3 py-[2px] text-sm rounded-full border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 h-7 text-zinc-900 dark:text-zinc-100"
+        className="px-3 py-[2px] text-sm rounded-full border border-zinc-300 dark:border-zinc-700 bg-card text-card-foreground dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 h-7 text-zinc-900 dark:text-zinc-100"
         value={value}
         onChange={e => setValue(e.target.value)}
         onBlur={() => {
@@ -70,7 +71,7 @@ function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
   }
 
   return (
-    <Badge 
+    <Badge
       variant="outline"
       className="cursor-pointer px-3 py-1 font-normal border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors bg-transparent h-7"
       onClick={() => setIsEditing(true)}
@@ -92,16 +93,16 @@ export default function HomePage() {
   const [subjects, setSubjects] = useState(INITIAL_SUBJECTS)
   const [grades, setGrades] = useState(INITIAL_GRADES)
   const [teacherStyles, setTeacherStyles] = useState(INITIAL_TEACHER_STYLES)
-  
+
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([])
   const [selectedGrades, setSelectedGrades] = useState<string[]>([])
   const [selectedStyles, setSelectedStyles] = useState<string[]>([])
   const [customReq, setCustomReq] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  
+
   const navigate = useNavigate()
-  
+
   // Phasing Title setup
   const [phraseIndex, setPhraseIndex] = useState(0)
   useEffect(() => {
@@ -131,7 +132,7 @@ export default function HomePage() {
     }
 
     void fetchHistory()
-    
+
     const histInterval = setInterval(() => {
       if (isSidebarOpen) {
         void fetchHistory()
@@ -146,7 +147,7 @@ export default function HomePage() {
 
   // Fly animation setup
   const [flyingSuggestion, setFlyingSuggestion] = useState<{ text: string, x: number, y: number, w: number, h: number } | null>(null)
-  
+
   const handleSuggestionClick = (e: React.MouseEvent, text: string) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setFlyingSuggestion({ text, x: rect.left, y: rect.top, w: rect.width, h: rect.height })
@@ -160,10 +161,10 @@ export default function HomePage() {
     if (arr[0] === item) setArr([])
     else setArr([item])
   }
-  
+
   const handleAddCustom = (
-    val: string, 
-    sourceArr: string[], 
+    val: string,
+    sourceArr: string[],
     setSourceArr: React.Dispatch<React.SetStateAction<string[]>>,
     setSelectedArr: React.Dispatch<React.SetStateAction<string[]>>
   ) => {
@@ -276,9 +277,8 @@ export default function HomePage() {
           variant="ghost"
           size="icon"
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className={`text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl transition-all duration-300 shadow-sm ${
-            isSidebarOpen ? 'opacity-0 pointer-events-none translate-x-[-10px]' : 'opacity-100 translate-x-0'
-          }`}
+          className={`text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl transition-all duration-300 shadow-sm ${isSidebarOpen ? 'opacity-0 pointer-events-none translate-x-[-10px]' : 'opacity-100 translate-x-0'
+            }`}
         >
           <PanelLeft className="w-5 h-5" />
         </Button>
@@ -309,7 +309,7 @@ export default function HomePage() {
                 <PanelLeftClose className="w-4 h-4" />
               </Button>
             </div>
-            
+
             {/* Content list */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
               {isLoadingHistory ? (
@@ -337,7 +337,7 @@ export default function HomePage() {
                     className="p-3.5 rounded-xl bg-white/70 dark:bg-zinc-950/50 border border-zinc-200/50 dark:border-zinc-800/60 shadow-[0_2px_10px_rgb(0,0,0,0.02)] hover:shadow-md hover:bg-white/90 dark:hover:bg-zinc-900/80 hover:border-blue-300/60 dark:hover:border-blue-900/50 cursor-pointer transition-all duration-300 flex flex-col gap-2.5 group relative overflow-hidden"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/0 to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    
+
                     {/* Delete Action Button */}
                     <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button
@@ -347,41 +347,41 @@ export default function HomePage() {
                         className="w-7 h-7 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                         title="删除记录"
                       >
-                        <motion.svg 
-                          width="14" 
-                          height="14" 
-                          viewBox="0 0 24 24" 
-                          fill="none" 
-                          stroke="currentColor" 
-                          strokeWidth="2" 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round" 
+                        <motion.svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
                           className="overflow-visible"
                         >
-                          <motion.path 
-                            d="M3 6h18" 
-                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.16 }} 
+                          <motion.path
+                            d="M3 6h18"
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }}
+                            transition={{ duration: 0.16 }}
                           />
-                          <motion.path 
-                            d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" 
-                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.22, delay: 0.04 }} 
+                          <motion.path
+                            d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }}
+                            transition={{ duration: 0.22, delay: 0.04 }}
                           />
-                          <motion.path 
-                            d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" 
-                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.18, delay: 0.08 }} 
+                          <motion.path
+                            d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }}
+                            transition={{ duration: 0.18, delay: 0.08 }}
                           />
-                          <motion.line 
-                            x1="10" y1="11" x2="10" y2="17" 
-                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.14, delay: 0.1 }} 
+                          <motion.line
+                            x1="10" y1="11" x2="10" y2="17"
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }}
+                            transition={{ duration: 0.14, delay: 0.1 }}
                           />
-                          <motion.line 
-                            x1="14" y1="11" x2="14" y2="17" 
-                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.14, delay: 0.1 }} 
+                          <motion.line
+                            x1="14" y1="11" x2="14" y2="17"
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }}
+                            transition={{ duration: 0.14, delay: 0.1 }}
                           />
                         </motion.svg>
                       </Button>
@@ -392,13 +392,13 @@ export default function HomePage() {
                         {run.request?.learning_goal || run.run_id}
                       </span>
                     </div>
-                    
+
                     <div className="flex items-center justify-between mt-1">
                       <div className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 relative z-10">
                         <Clock className="w-3 h-3" />
                         {new Date(run.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </div>
-                      
+
                       {run.status === "running" || run.status === "queued" ? (
                         <div className="flex items-center text-[10px] font-medium text-blue-500 bg-blue-50/80 dark:bg-blue-500/10 px-2 py-0.5 rounded-md shrink-0">
                           <LoaderCircle className="w-3 h-3 animate-spin mr-1" />
@@ -498,315 +498,315 @@ export default function HomePage() {
             className="absolute -bottom-[20%] left-[20%] w-[60%] h-[60%] rounded-full bg-sky-400/20 dark:bg-sky-600/20 blur-[120px] mix-blend-multiply dark:mix-blend-lighten animate-[blob_7s_infinite_4s]"
           />
         </div>
-        
+
         {/* Decorative Grid */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] dark:bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] z-0 [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]"></div>
 
-      {flyingSuggestion && (
-        <FlyingText 
-          flyingData={flyingSuggestion}
-          onComplete={() => {
-            setQuery(flyingSuggestion.text)
-            setFlyingSuggestion(null)
-          }}
-        />
-      )}
-
-      <motion.div 
-        className="w-full max-w-5xl flex flex-col items-center relative z-10"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-      >
-        {/* Title */}
-        <motion.div 
-          className="mb-10 flex flex-col items-center"
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: isExpanded ? 0.75 : 1, y: isExpanded ? 20 : 0 }}
-          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        >
-                    <h1 className="text-6xl sm:text-7xl md:text-8xl xl:text-9xl tracking-tighter text-zinc-900 dark:text-white mb-4 flex items-center justify-center">
-            {["A", "I"].map((char, i) => (
-              <motion.span
-                key={i}
-                initial={{ opacity: 0, filter: "blur(12px)", y: 20 }}
-                animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-                transition={{ duration: 0.8, delay: 0.1 + i * 0.05, ease: "easeOut" }}
-                className="font-black"
-              >
-                {char}
-              </motion.span>
-            ))}
-            <motion.span
-              initial={{ opacity: 0, filter: "blur(12px)", y: 20 }}
-              animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-              transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
-              className="ml-3 sm:ml-5 font-normal"
-            >
-              I
-            </motion.span>
-            <motion.span
-              initial={{ opacity: 0, filter: "blur(12px)", y: 20 }}
-              animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-              transition={{ duration: 0.8, delay: 0.25, ease: "easeOut" }}
-              className="font-normal"
-            >
-              n
-            </motion.span>
-            <motion.span 
-              initial={{ opacity: 0, filter: "blur(12px)", y: 20, scale: 0.85 }}
-              animate={{ opacity: 1, filter: "blur(0px)", y: 0, scale: 1 }}
-              transition={{ duration: 1, delay: 0.4, ease: "easeOut" }}
-              className="relative inline-block ml-3 sm:ml-5"
-            >
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-purple-600 to-pink-500 font-bold tracking-tight">
-                Edu
-              </span>
-              <svg className="absolute -bottom-4 left-0 w-full h-6 pointer-events-none overflow-visible" viewBox="0 0 100 20" preserveAspectRatio="none">
-                <motion.path 
-                  d="M0,10 Q25,0 50,10 T100,10" 
-                  fill="none" 
-                  stroke="url(#gradient2)" 
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                  initial={{ pathLength: 0, opacity: 0 }}
-                  animate={{ pathLength: 1, opacity: 0.8 }}
-                  transition={{ duration: 1.5, delay: 1, ease: 'easeOut' }}
-                />
-                <motion.path 
-                  d="M0,15 Q25,25 50,15 T100,15" 
-                  fill="none" 
-                  stroke="url(#gradient3)" 
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  initial={{ pathLength: 0, opacity: 0 }}
-                  animate={{ pathLength: 1, opacity: 0.6 }}
-                  transition={{ duration: 1.5, delay: 1.2, ease: 'easeOut' }}
-                />
-                <defs>
-                  <linearGradient id="gradient2" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="50%" stopColor="#a855f7" />
-                    <stop offset="100%" stopColor="#ec4899" />
-                  </linearGradient>
-                  <linearGradient id="gradient3" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#60a5fa" />
-                    <stop offset="50%" stopColor="#c084fc" />
-                    <stop offset="100%" stopColor="#f472b6" />
-                  </linearGradient>
-                </defs>
-              </svg>
-            </motion.span>
-          </h1>
-          
-          <div className="h-6 mt-4 relative w-full flex justify-center items-center">
-            <AnimatePresence mode="popLayout">
-              <motion.p
-                key={phraseIndex}
-                initial={{ opacity: 0, y: 15, filter: "blur(4px)" }}
-                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
-                transition={{ duration: 0.8, ease: "easeInOut" }}
-                className="text-zinc-500 dark:text-zinc-400 text-center text-xl sm:text-2xl font-medium tracking-wide absolute"
-              >
-                {PHRASES[phraseIndex]}
-              </motion.p>
-            </AnimatePresence>
-          </div>
-        </motion.div>
-
-        {/* Input Container */}
-        <motion.div 
-          className="w-full w-[95%] sm:w-full relative group"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        >
-          {/* Animated Glow Border Fix */}
-          <div className="absolute -inset-[1px] rounded-[24px] overflow-hidden opacity-50 group-hover:opacity-100 transition-all duration-700 pointer-events-none z-0">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[2500px] h-[2500px] animate-[spin_8s_linear_infinite] opacity-40 dark:opacity-80 aspect-square" 
-                 style={{ background: "conic-gradient(from 90deg at 50% 50%, #e2e8f0 0%, #3b82f6 25%, #8b5cf6 50%, #ec4899 75%, #e2e8f0 100%)" }} />
-          </div>
-
-          <div id="main-input-box" className="relative flex flex-col bg-white dark:bg-zinc-950 rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] border border-zinc-100 dark:border-zinc-800 transition-all duration-300 z-10">
-            <PromptInput
-              value={query}
-              onValueChange={setQuery}
-              className="bg-transparent border-none shadow-none rounded-[24px] focus-within:ring-0 focus-visible:ring-0 px-4 pt-4 pb-2"
-              onSubmit={handleSearchSubmit}
-              isLoading={isSubmitting}
-              disabled={isSubmitting}
-            >
-              <PromptInputTextarea
-                id="prompt-main-textarea"
-                placeholder="在此输入你今天想学的内容..."
-                className="text-base sm:text-lg min-h-14 py-2 text-black dark:text-black placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed font-medium"
-              />
-              
-              <div className="flex justify-between items-center w-full px-1 pb-1 pt-3 mt-2">
-                <PromptInputActions>
-                  <Button
-                    variant="ghost" 
-                    size="sm"
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-full flex items-center gap-1.5 group px-3 h-9 transition-colors"
-                  >
-                    <span className="text-sm font-normal">展开选项</span>
-                    {!isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                  </Button>
-                </PromptInputActions>
-                
-                <PromptInputActions>
-                  <PromptInputAction tooltip={isSubmitting ? "正在创建任务..." : "发送请求"} side="top">
-                    <Button 
-                      size="icon" 
-                      className="rounded-full bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 dark:text-zinc-900 text-white transition-all w-10 h-10 shadow-sm"
-                      onClick={handleSearchSubmit}
-                      disabled={!query.trim() || isSubmitting}
-                    >
-                      {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </Button>
-                  </PromptInputAction>
-                </PromptInputActions>
-              </div>
-            </PromptInput>
-            
-            {/* Expandable Options */}
-            <AnimatePresence>
-              {isExpanded && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="overflow-hidden"
-                >
-                  <div className="px-5 sm:px-7 pb-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 w-full">
-                    <div className="space-y-6">
-                      
-                      <div className="space-y-3">
-                        <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" />学科领域</h4>
-                        <div className="flex flex-wrap gap-2 items-center">
-                          {subjects.map(sub => (
-                            <Badge 
-                              key={sub}
-                              variant={selectedSubjects.includes(sub) ? "default" : "secondary"}
-                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
-                                selectedSubjects.includes(sub) 
-                                  ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
-                              onClick={() => toggleSingle(selectedSubjects, setSelectedSubjects, sub)}
-                            >
-                              {sub}
-                            </Badge>
-                          ))}
-                          <CustomEditableTag 
-                            onAdd={(val) => handleAddCustom(val, subjects, setSubjects, setSelectedSubjects)}
-                          />
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5" />适用年级</h4>
-                        <div className="flex flex-wrap gap-2 items-center">
-                          {grades.map(grade => (
-                            <Badge 
-                              key={grade}
-                              variant={selectedGrades.includes(grade) ? "default" : "secondary"}
-                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
-                                selectedGrades.includes(grade) 
-                                  ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
-                              onClick={() => toggleSingle(selectedGrades, setSelectedGrades, grade)}
-                            >
-                              {grade}
-                            </Badge>
-                          ))}
-                          <CustomEditableTag 
-                            onAdd={(val) => handleAddCustom(val, grades, setGrades, setSelectedGrades)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><User2 className="w-3.5 h-3.5" />教师风格</h4>
-                        <div className="flex flex-wrap gap-2 items-center">
-                          {teacherStyles.map(style => (
-                            <Badge 
-                              key={style}
-                              variant={selectedStyles.includes(style) ? "default" : "secondary"}
-                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
-                                selectedStyles.includes(style) 
-                                  ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
-                              onClick={() => toggleSingle(selectedStyles, setSelectedStyles, style)}
-                            >
-                              {style}
-                            </Badge>
-                          ))}
-                          <CustomEditableTag 
-                            onAdd={(val) => handleAddCustom(val, teacherStyles, setTeacherStyles, setSelectedStyles)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><Settings2 className="w-3.5 h-3.5" />自定义要求</h4>
-                        <textarea 
-                          rows={2}
-                          placeholder="额外说明，例如：用简单的语言解释、注重实际案例..."
-                          className="w-full bg-zinc-50/50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-700 transition-colors resize-none placeholder:text-zinc-400"
-                          value={customReq}
-                          onChange={(e) => setCustomReq(e.target.value)}
-                        />
-                      </div>
-
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-
-        {submitError && (
-          <motion.p
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-4 text-sm text-rose-500 text-center"
-          >
-            {submitError}
-          </motion.p>
+        {flyingSuggestion && (
+          <FlyingText
+            flyingData={flyingSuggestion}
+            onComplete={() => {
+              setQuery(flyingSuggestion.text)
+              setFlyingSuggestion(null)
+            }}
+          />
         )}
 
-        {/* Suggestions */}
-        <motion.div 
-          className="w-full max-w-5xl mt-8 px-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.8, delay: 0.4 }}
+        <motion.div
+          className="w-full max-w-5xl flex flex-col items-center relative z-10"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="flex flex-wrap items-center justify-center gap-2 relative z-10">
-            {SUGGESTIONS.map((suggestion, idx) => (
-              <motion.div
-                key={idx}
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.98 }}
+          {/* Title */}
+          <motion.div
+            className="mb-10 flex flex-col items-center"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: isExpanded ? 0.75 : 1, y: isExpanded ? 20 : 0 }}
+            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <h1 className="text-6xl sm:text-7xl md:text-8xl xl:text-9xl tracking-tighter text-zinc-900 dark:text-white mb-4 flex items-center justify-center">
+              {["A", "I"].map((char, i) => (
+                <motion.span
+                  key={i}
+                  initial={{ opacity: 0, filter: "blur(12px)", y: 20 }}
+                  animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+                  transition={{ duration: 0.8, delay: 0.1 + i * 0.05, ease: "easeOut" }}
+                  className="font-black"
+                >
+                  {char}
+                </motion.span>
+              ))}
+              <motion.span
+                initial={{ opacity: 0, filter: "blur(12px)", y: 20 }}
+                animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+                transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
+                className="ml-3 sm:ml-5 font-normal"
               >
-                <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
-                  <PromptSuggestion
-                    className="bg-white dark:bg-white backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-400 text-black dark:text-black hover:text-black dark:hover:text-black px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
-                  >
-                    
-                    <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
-                    <span>{suggestion.text}</span>
-                  </PromptSuggestion>
+                I
+              </motion.span>
+              <motion.span
+                initial={{ opacity: 0, filter: "blur(12px)", y: 20 }}
+                animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+                transition={{ duration: 0.8, delay: 0.25, ease: "easeOut" }}
+                className="font-normal"
+              >
+                n
+              </motion.span>
+              <motion.span
+                initial={{ opacity: 0, filter: "blur(12px)", y: 20, scale: 0.85 }}
+                animate={{ opacity: 1, filter: "blur(0px)", y: 0, scale: 1 }}
+                transition={{ duration: 1, delay: 0.4, ease: "easeOut" }}
+                className="relative inline-block ml-3 sm:ml-5"
+              >
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-purple-600 to-pink-500 font-bold tracking-tight">
+                  Edu
+                </span>
+                <svg className="absolute -bottom-4 left-0 w-full h-6 pointer-events-none overflow-visible" viewBox="0 0 100 20" preserveAspectRatio="none">
+                  <motion.path
+                    d="M0,10 Q25,0 50,10 T100,10"
+                    fill="none"
+                    stroke="url(#gradient2)"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    initial={{ pathLength: 0, opacity: 0 }}
+                    animate={{ pathLength: 1, opacity: 0.8 }}
+                    transition={{ duration: 1.5, delay: 1, ease: 'easeOut' }}
+                  />
+                  <motion.path
+                    d="M0,15 Q25,25 50,15 T100,15"
+                    fill="none"
+                    stroke="url(#gradient3)"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    initial={{ pathLength: 0, opacity: 0 }}
+                    animate={{ pathLength: 1, opacity: 0.6 }}
+                    transition={{ duration: 1.5, delay: 1.2, ease: 'easeOut' }}
+                  />
+                  <defs>
+                    <linearGradient id="gradient2" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#3b82f6" />
+                      <stop offset="50%" stopColor="#a855f7" />
+                      <stop offset="100%" stopColor="#ec4899" />
+                    </linearGradient>
+                    <linearGradient id="gradient3" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#60a5fa" />
+                      <stop offset="50%" stopColor="#c084fc" />
+                      <stop offset="100%" stopColor="#f472b6" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </motion.span>
+            </h1>
+
+            <div className="h-6 mt-4 relative w-full flex justify-center items-center">
+              <AnimatePresence mode="popLayout">
+                <motion.p
+                  key={phraseIndex}
+                  initial={{ opacity: 0, y: 15, filter: "blur(4px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
+                  transition={{ duration: 0.8, ease: "easeInOut" }}
+                  className="text-zinc-500 dark:text-zinc-400 text-center text-xl sm:text-2xl font-medium tracking-wide absolute"
+                >
+                  {PHRASES[phraseIndex]}
+                </motion.p>
+              </AnimatePresence>
+            </div>
+          </motion.div>
+
+          {/* Input Container */}
+          <motion.div
+            className="w-full w-[95%] sm:w-full relative group"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {/* Animated Glow Border Fix */}
+            <div className="absolute -inset-[1px] rounded-[24px] overflow-hidden opacity-50 group-hover:opacity-100 transition-all duration-700 pointer-events-none z-0">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[2500px] h-[2500px] animate-[spin_8s_linear_infinite] opacity-40 dark:opacity-80 aspect-square"
+                style={{ background: "conic-gradient(from 90deg at 50% 50%, #e2e8f0 0%, #3b82f6 25%, #8b5cf6 50%, #ec4899 75%, #e2e8f0 100%)" }} />
+            </div>
+
+            <div id="main-input-box" className="relative flex flex-col bg-card text-card-foreground dark:bg-zinc-950 rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] border border-zinc-100 dark:border-zinc-800 transition-all duration-300 z-10">
+              <PromptInput
+                value={query}
+                onValueChange={setQuery}
+                className="bg-transparent border-none shadow-none rounded-[24px] focus-within:ring-0 focus-visible:ring-0 px-4 pt-4 pb-2"
+                onSubmit={handleSearchSubmit}
+                isLoading={isSubmitting}
+                disabled={isSubmitting}
+              >
+                <PromptInputTextarea
+                  id="prompt-main-textarea"
+                  placeholder="在此输入你今天想学的内容..."
+                  className="text-base sm:text-lg min-h-14 py-2 text-foreground placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed font-medium"
+                />
+
+                <div className="flex justify-between items-center w-full px-1 pb-1 pt-3 mt-2">
+                  <PromptInputActions>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsExpanded(!isExpanded)}
+                      className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-full flex items-center gap-1.5 group px-3 h-9 transition-colors"
+                    >
+                      <span className="text-sm font-normal">展开选项</span>
+                      {!isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                    </Button>
+                  </PromptInputActions>
+
+                  <PromptInputActions>
+                    <PromptInputAction tooltip={isSubmitting ? "正在创建任务..." : "发送请求"} side="top">
+                      <Button
+                        size="icon"
+                        className="rounded-full bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 text-white transition-all w-10 h-10 shadow-sm"
+                        onClick={handleSearchSubmit}
+                        disabled={!query.trim() || isSubmitting}
+                      >
+                        {isSubmitting ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      </Button>
+                    </PromptInputAction>
+                  </PromptInputActions>
                 </div>
-              </motion.div>
-            ))}
-          </div>
+              </PromptInput>
+
+              {/* Expandable Options */}
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-5 sm:px-7 pb-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 w-full">
+                      <div className="space-y-6">
+
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" />学科领域</h4>
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {subjects.map(sub => (
+                              <Badge
+                                key={sub}
+                                variant={selectedSubjects.includes(sub) ? "default" : "secondary"}
+                                className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
+                                  selectedSubjects.includes(sub)
+                                    ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
+                                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
+                                onClick={() => toggleSingle(selectedSubjects, setSelectedSubjects, sub)}
+                              >
+                                {sub}
+                              </Badge>
+                            ))}
+                            <CustomEditableTag
+                              onAdd={(val) => handleAddCustom(val, subjects, setSubjects, setSelectedSubjects)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5" />适用年级</h4>
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {grades.map(grade => (
+                              <Badge
+                                key={grade}
+                                variant={selectedGrades.includes(grade) ? "default" : "secondary"}
+                                className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
+                                  selectedGrades.includes(grade)
+                                    ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
+                                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
+                                onClick={() => toggleSingle(selectedGrades, setSelectedGrades, grade)}
+                              >
+                                {grade}
+                              </Badge>
+                            ))}
+                            <CustomEditableTag
+                              onAdd={(val) => handleAddCustom(val, grades, setGrades, setSelectedGrades)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><User2 className="w-3.5 h-3.5" />教师风格</h4>
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {teacherStyles.map(style => (
+                              <Badge
+                                key={style}
+                                variant={selectedStyles.includes(style) ? "default" : "secondary"}
+                                className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
+                                  selectedStyles.includes(style)
+                                    ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900"
+                                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
+                                onClick={() => toggleSingle(selectedStyles, setSelectedStyles, style)}
+                              >
+                                {style}
+                              </Badge>
+                            ))}
+                            <CustomEditableTag
+                              onAdd={(val) => handleAddCustom(val, teacherStyles, setTeacherStyles, setSelectedStyles)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><Settings2 className="w-3.5 h-3.5" />自定义要求</h4>
+                          <textarea
+                            rows={2}
+                            placeholder="额外说明，例如：用简单的语言解释、注重实际案例..."
+                            className="w-full bg-zinc-50/50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-700 transition-colors resize-none placeholder:text-zinc-400"
+                            value={customReq}
+                            onChange={(e) => setCustomReq(e.target.value)}
+                          />
+                        </div>
+
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+
+          {submitError && (
+            <motion.p
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 text-sm text-rose-500 text-center"
+            >
+              {submitError}
+            </motion.p>
+          )}
+
+          {/* Suggestions */}
+          <motion.div
+            className="w-full max-w-5xl mt-8 px-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+          >
+            <div className="flex flex-wrap items-center justify-center gap-2 relative z-10">
+              {SUGGESTIONS.map((suggestion, idx) => (
+                <motion.div
+                  key={idx}
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                    <PromptSuggestion
+                      className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
+                    >
+
+                      <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                      <span>{suggestion.text}</span>
+                    </PromptSuggestion>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
         </motion.div>
-      </motion.div>
       </div>
     </div>
   )
@@ -924,7 +924,7 @@ function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x:
           className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
         >
           <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
-            <motion.div 
+            <motion.div
               initial={{ left: "-100%" }}
               animate={{ left: "200%" }}
               transition={{ duration: beamDuration, ease: "linear" }}
@@ -940,18 +940,18 @@ function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x:
 
 function AnimatedTrashIcon() {
   return (
-    <motion.div 
+    <motion.div
       className="relative w-16 h-16 flex items-center justify-center rounded-2xl bg-red-50/50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 shadow-sm mx-auto mb-1 overflow-visible"
     >
-      <svg 
-        width="28" 
-        height="28" 
-        viewBox="0 0 24 24" 
-        fill="none" 
-        stroke="currentColor" 
-        strokeWidth="2" 
-        strokeLinecap="round" 
-        strokeLinejoin="round" 
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         className="text-red-500/80 transition-colors overflow-visible"
       >
         {/* Animated Lid */}
@@ -963,14 +963,14 @@ function AnimatedTrashIcon() {
           style={{ transformOrigin: "2px 6px" }}
           transition={{ type: "spring", stiffness: 520, damping: 22 }}
         >
-          <motion.path 
-            d="M3 6h18" 
+          <motion.path
+            d="M3 6h18"
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 1 }}
             transition={{ duration: 0.26, delay: 0.02, ease: "easeOut" }}
           />
-          <motion.path 
-            d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" 
+          <motion.path
+            d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 1 }}
             transition={{ duration: 0.26, delay: 0.06, ease: "easeOut" }}
@@ -978,20 +978,20 @@ function AnimatedTrashIcon() {
         </motion.g>
 
         {/* Bin Body */}
-        <motion.path 
-          d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" 
+        <motion.path
+          d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
           transition={{ duration: 0.34, ease: "easeOut" }}
         />
-        <motion.line 
-          x1="10" y1="11" x2="10" y2="17" 
+        <motion.line
+          x1="10" y1="11" x2="10" y2="17"
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
           transition={{ duration: 0.18, delay: 0.08, ease: "easeOut" }}
         />
-        <motion.line 
-          x1="14" y1="11" x2="14" y2="17" 
+        <motion.line
+          x1="14" y1="11" x2="14" y2="17"
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
           transition={{ duration: 0.18, delay: 0.12, ease: "easeOut" }}

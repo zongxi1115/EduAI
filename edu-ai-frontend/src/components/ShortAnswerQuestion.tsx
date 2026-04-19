@@ -28,14 +28,14 @@ export function ShortAnswerQuestion({ questionContent, onSubmit }: ShortAnswerQu
   };
 
   return (
-    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-white border rounded-xl shadow-sm overflow-y-auto mt-6">
+    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto mt-6">
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
             rehypePlugins={[rehypeKatex]}
             components={{
-              p: ({ node, ...props }) => <p className="text-base text-slate-800 m-0 mb-4" {...props} />,
+              p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
             }}
           >
             {questionContent}
@@ -58,7 +58,7 @@ export function ShortAnswerQuestion({ questionContent, onSubmit }: ShortAnswerQu
                 <Button
                   variant="secondary"
                   size="icon"
-                  className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-white/80 backdrop-blur-sm"
+                  className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-background/80 backdrop-blur-sm"
                 >
                   <X className="w-5 h-5" />
                   <span className="sr-only">关闭全屏草稿纸</span>
@@ -70,8 +70,8 @@ export function ShortAnswerQuestion({ questionContent, onSubmit }: ShortAnswerQu
       </div>
 
       <div className="mt-4 mb-6">
-        <Textarea 
-          placeholder="请输入你的答案..." 
+        <Textarea
+          placeholder="请输入你的答案..."
           className="min-h-[150px] resize-y p-4 text-base leading-relaxed focus-visible:ring-primary/50"
           value={answer}
           onChange={e => setAnswer(e.target.value)}

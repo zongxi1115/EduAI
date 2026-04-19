@@ -142,8 +142,8 @@ const CORRECTNESS_META: Record<
   },
   ungradable: {
     label: "暂无法判定",
-    badgeClassName: "border-slate-200 bg-slate-50 text-slate-700",
-    summaryClassName: "text-slate-700",
+    badgeClassName: "border-border bg-muted/50 text-foreground",
+    summaryClassName: "text-foreground",
   },
 };
 
@@ -316,7 +316,7 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
       const isCorrect =
         normalizeText(submitted) === normalizeText(question.correct_answer) ||
         normalizeText(submitted.replace(/^[A-Z][\.\s、:：-]*/, "")) ===
-          normalizeText(question.correct_answer);
+        normalizeText(question.correct_answer);
 
       return {
         correctness: isCorrect ? "correct" : "incorrect",
@@ -585,10 +585,10 @@ function buildRunnerCode(question: CodingPracticeQuestion, language: string) {
   const rawInput = firstCase[0];
   const args = Array.isArray(rawInput)
     ? rawInput
-        .map((item) =>
-          language === "python" ? toPythonLiteral(item) : toJavaScriptLiteral(item)
-        )
-        .join(", ")
+      .map((item) =>
+        language === "python" ? toPythonLiteral(item) : toJavaScriptLiteral(item)
+      )
+      .join(", ")
     : language === "python"
       ? toPythonLiteral(rawInput)
       : toJavaScriptLiteral(rawInput);
@@ -622,14 +622,14 @@ function ListeningQuestionCard({
               当前浏览器不支持音频播放。
             </audio>
           ) : (
-            <div className="rounded-xl border border-dashed bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            <div className="rounded-xl border border-dashed bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
               当前题目没有可直接播放的音频地址。
             </div>
           )}
         </div>
 
         <div className="space-y-2">
-          <p className="text-sm font-medium text-slate-700">作答区</p>
+          <p className="text-sm font-medium text-foreground">作答区</p>
           <Textarea
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}
@@ -665,13 +665,13 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
         <CardContent className="flex items-start gap-3 p-5">
           <LoaderCircle className="mt-0.5 h-4 w-4 animate-spin text-primary" />
           <div className="space-y-1.5 text-sm">
-            <p className="font-medium text-slate-900">
+            <p className="font-medium text-foreground">
               {state.mode === "ai" ? "AI 正在批阅这道题..." : "正在进行自动判题..."}
             </p>
             {state.answerPreview ? (
-              <p className="text-slate-600">已提交：{state.answerPreview}</p>
+              <p className="text-muted-foreground">已提交：{state.answerPreview}</p>
             ) : (
-              <p className="text-slate-500">已收到本次提交，正在生成反馈。</p>
+              <p className="text-muted-foreground">已收到本次提交，正在生成反馈。</p>
             )}
           </div>
         </CardContent>
@@ -725,17 +725,17 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
             <Badge variant="outline" className={meta.badgeClassName}>
               {meta.label}
             </Badge>
-            <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+            <Badge variant="outline" className="border-border bg-muted/50 text-foreground">
               {state.review.score} 分
             </Badge>
             {state.review.judged_at ? (
-              <span className="text-xs text-slate-400">{new Date(state.review.judged_at).toLocaleString()}</span>
+              <span className="text-xs text-muted-foreground">{new Date(state.review.judged_at).toLocaleString()}</span>
             ) : null}
           </div>
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 rounded-full px-3 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            className="h-8 rounded-full px-3 text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={() => setIsCollapsed((previous) => !previous)}
           >
             {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -745,7 +745,7 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         <div className="space-y-1">
           <p className={`text-sm font-semibold ${meta.summaryClassName}`}>{state.review.summary}</p>
-          {state.answerPreview ? <p className="text-sm text-slate-500">你的提交：{state.answerPreview}</p> : null}
+          {state.answerPreview ? <p className="text-sm text-muted-foreground">你的提交：{state.answerPreview}</p> : null}
         </div>
 
         {!isCollapsed && state.review.review_advice.length > 0 ? (
@@ -754,7 +754,7 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
               <Sparkles className="h-4 w-4" />
               审阅建议
             </div>
-            <ul className="space-y-1 text-sm text-slate-700">
+            <ul className="space-y-1 text-sm text-foreground">
               {state.review.review_advice.map((item, index) => (
                 <li key={`${item}-${index}`}>- {item}</li>
               ))}
@@ -764,8 +764,8 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         {!isCollapsed && state.review.strengths.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-slate-800">做得好的地方</p>
-            <ul className="space-y-1 text-sm text-slate-600">
+            <p className="text-sm font-medium text-foreground">做得好的地方</p>
+            <ul className="space-y-1 text-sm text-muted-foreground">
               {state.review.strengths.map((item, index) => (
                 <li key={`${item}-${index}`}>- {item}</li>
               ))}
@@ -775,8 +775,8 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         {!isCollapsed && state.review.issues.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-slate-800">还需要关注</p>
-            <ul className="space-y-1 text-sm text-slate-600">
+            <p className="text-sm font-medium text-foreground">还需要关注</p>
+            <ul className="space-y-1 text-sm text-muted-foreground">
               {state.review.issues.map((item, index) => (
                 <li key={`${item}-${index}`}>- {item}</li>
               ))}
@@ -786,8 +786,8 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         {!isCollapsed && state.review.reference_points.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-slate-800">参考要点</p>
-            <ul className="space-y-1 text-sm text-slate-600">
+            <p className="text-sm font-medium text-foreground">参考要点</p>
+            <ul className="space-y-1 text-sm text-muted-foreground">
               {state.review.reference_points.map((item, index) => (
                 <li key={`${item}-${index}`}>- {item}</li>
               ))}
@@ -796,9 +796,9 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
         ) : null}
 
         {!isCollapsed && state.review.limitations.length > 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="mb-2 text-sm font-medium text-slate-700">判定说明</p>
-            <ul className="space-y-1 text-sm text-slate-500">
+          <div className="rounded-2xl border border-border bg-muted/50 px-4 py-3">
+            <p className="mb-2 text-sm font-medium text-foreground">判定说明</p>
+            <ul className="space-y-1 text-sm text-muted-foreground">
               {state.review.limitations.map((item, index) => (
                 <li key={`${item}-${index}`}>- {item}</li>
               ))}
@@ -1071,11 +1071,11 @@ export function PracticeQuestionWorkspace({
 
   return (
     <div className="w-full h-full flex flex-col gap-8 overflow-y-auto pr-4">
-      <div className="rounded-3xl border bg-white px-5 py-5 shadow-sm">
+      <div className="rounded-3xl border bg-card text-card-foreground px-5 py-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Practice Goal</p>
-            <p className="max-w-3xl text-sm leading-6 text-slate-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Practice Goal</p>
+            <p className="max-w-3xl text-sm leading-6 text-foreground">
               {learningGoal.trim() || "当前未提供学习目标，系统将按题目内容进行批阅。"}
             </p>
           </div>
@@ -1094,7 +1094,7 @@ export function PracticeQuestionWorkspace({
       </div>
 
       {isLoading ? (
-        <div className="flex items-center gap-2 rounded-2xl border bg-white px-5 py-4 text-sm text-slate-500 shadow-sm">
+        <div className="flex items-center gap-2 rounded-2xl border bg-card text-card-foreground px-5 py-4 text-sm text-muted-foreground shadow-sm">
           <LoaderCircle className="h-4 w-4 animate-spin" />
           正在加载真实题库...
         </div>
@@ -1107,36 +1107,36 @@ export function PracticeQuestionWorkspace({
       ) : null}
 
       {!isLoading && !error && questions.length === 0 ? (
-        <div className="rounded-2xl border border-dashed bg-white px-5 py-8 text-sm text-slate-500 shadow-sm">
+        <div className="rounded-2xl border border-dashed bg-card text-card-foreground px-5 py-8 text-sm text-muted-foreground shadow-sm">
           {emptyHint}
         </div>
       ) : null}
 
       {!isLoading && !error && questions.length > 0
         ? questions.map((question, index) => (
-            <section key={question.id} className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  第 {index + 1} 题
+          <section key={question.id} className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="rounded-full px-3 py-1">
+                第 {index + 1} 题
+              </Badge>
+              <Badge variant="outline" className={QUESTION_TYPE_BADGE_CLASS[question.question_type]}>
+                {QUESTION_TYPE_LABELS[question.question_type]}
+              </Badge>
+              {questionNeedsAIJudge(question) ? (
+                <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
+                  AI 批阅
                 </Badge>
-                <Badge variant="outline" className={QUESTION_TYPE_BADGE_CLASS[question.question_type]}>
-                  {QUESTION_TYPE_LABELS[question.question_type]}
+              ) : (
+                <Badge variant="outline" className="border-border bg-muted/50 text-muted-foreground">
+                  自动判题
                 </Badge>
-                {questionNeedsAIJudge(question) ? (
-                  <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
-                    AI 批阅
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
-                    自动判题
-                  </Badge>
-                )}
-              </div>
+              )}
+            </div>
 
-              {renderQuestionCard(question, handleQuestionSubmit)}
-              <QuestionReviewPanel state={reviewStates[question.id]} />
-            </section>
-          ))
+            {renderQuestionCard(question, handleQuestionSubmit)}
+            <QuestionReviewPanel state={reviewStates[question.id]} />
+          </section>
+        ))
         : null}
     </div>
   );
