@@ -1,0 +1,7 @@
+addReviewers: false
+addAssignees: true
+
+assignees:
+  - zongxi1115
+
+numberOfAssignees: 0
