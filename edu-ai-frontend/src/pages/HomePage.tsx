@@ -99,28 +99,31 @@ export default function HomePage() {
   }, [])
 
   // Fly animation setup
-  const [flyingSuggestion, setFlyingSuggestion] = useState<{ text: string, x: number, y: number, w: number } | null>(null)
+  const [flyingSuggestion, setFlyingSuggestion] = useState<{ text: string, x: number, y: number, w: number, h: number } | null>(null)
   
   const handleSuggestionClick = (e: React.MouseEvent, text: string) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setFlyingSuggestion({ text, x: rect.left, y: rect.top, w: rect.width })
+    setFlyingSuggestion({ text, x: rect.left, y: rect.top, w: rect.width, h: rect.height })
   }
 
-  const toggleArray = (arr: string[], setArr: React.Dispatch<React.SetStateAction<string[]>>, item: string) => {
-    if (arr.includes(item)) setArr(arr.filter(i => i !== item))
-    else setArr([...arr, item])
+  const toggleSingle = (
+    arr: string[],
+    setArr: React.Dispatch<React.SetStateAction<string[]>>,
+    item: string,
+  ) => {
+    if (arr[0] === item) setArr([])
+    else setArr([item])
   }
   
   const handleAddCustom = (
     val: string, 
     sourceArr: string[], 
     setSourceArr: React.Dispatch<React.SetStateAction<string[]>>,
-    selectedArr: string[],
     setSelectedArr: React.Dispatch<React.SetStateAction<string[]>>
   ) => {
     if (!val || sourceArr.includes(val)) return;
     setSourceArr([...sourceArr, val]);
-    setSelectedArr([...selectedArr, val]);
+    setSelectedArr([val]);
   };
 
   const handleSearch = async () => {
@@ -132,12 +135,12 @@ export default function HomePage() {
     const styleText = selectedStyles.join("、")
 
     const learnerProfile =
-      [gradeLevel !== "Unspecified" ? "适用学段：$gradeLevel" : "", styleText ? "希望教学风格：$styleText" : ""]
+      [gradeLevel !== "Unspecified" ? `适用学段：${gradeLevel}` : "", styleText ? `希望教学风格：${styleText}` : ""]
         .filter(Boolean)
         .join("；") || "Mixed-ability class that needs clear guidance, visual explanation, and structured practice."
 
     const notes =
-      [selectedSubjects.length > 0 ? "学科偏好：$subject" : "", customReq.trim() ? "补充要求：${customReq.trim()}" : ""]
+      [selectedSubjects.length > 0 ? `学科偏好：${subject}` : "", customReq.trim() ? `补充要求：${customReq.trim()}` : ""]
         .filter(Boolean)
         .join("；") || "None"
 
@@ -162,7 +165,7 @@ export default function HomePage() {
       })
 
       if (!response.ok) {
-        let message = "创建任务失败（${response.status}）"
+        let message = `创建任务失败（${response.status}）`
         try {
           const errorPayload = (await response.json()) as {
             detail?: string | Array<{ msg?: string }>
@@ -186,7 +189,7 @@ export default function HomePage() {
         throw new Error("后端未返回 run_id，暂时无法进入加载页。")
       }
 
-      navigate("/load/${payload.run_id}")
+      navigate(`/load/${payload.run_id}`)
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "创建任务失败，请稍后重试。")
     } finally {
@@ -362,7 +365,7 @@ export default function HomePage() {
             >
               <PromptInputTextarea
                 placeholder="在此输入你今天想学的内容..."
-                className="text-base sm:text-lg min-h-14 py-2 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 leading-relaxed font-medium"
+                className="text-base sm:text-lg min-h-14 py-2 text-black dark:text-black placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed font-medium"
               />
               
               <div className="flex justify-between items-center w-full px-1 pb-1 pt-3 mt-2">
@@ -417,13 +420,13 @@ export default function HomePage() {
                                 selectedSubjects.includes(sub) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
                                   : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
-                              onClick={() => toggleArray(selectedSubjects, setSelectedSubjects, sub)}
+                              onClick={() => toggleSingle(selectedSubjects, setSelectedSubjects, sub)}
                             >
                               {sub}
                             </Badge>
                           ))}
                           <CustomEditableTag 
-                            onAdd={(val) => handleAddCustom(val, subjects, setSubjects, selectedSubjects, setSelectedSubjects)}
+                            onAdd={(val) => handleAddCustom(val, subjects, setSubjects, setSelectedSubjects)}
                           />
                         </div>
                       </div>
@@ -439,13 +442,13 @@ export default function HomePage() {
                                 selectedGrades.includes(grade) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
                                   : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
-                              onClick={() => toggleArray(selectedGrades, setSelectedGrades, grade)}
+                              onClick={() => toggleSingle(selectedGrades, setSelectedGrades, grade)}
                             >
                               {grade}
                             </Badge>
                           ))}
                           <CustomEditableTag 
-                            onAdd={(val) => handleAddCustom(val, grades, setGrades, selectedGrades, setSelectedGrades)}
+                            onAdd={(val) => handleAddCustom(val, grades, setGrades, setSelectedGrades)}
                           />
                         </div>
                       </div>
@@ -461,13 +464,13 @@ export default function HomePage() {
                                 selectedStyles.includes(style) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
                                   : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
-                              onClick={() => toggleArray(selectedStyles, setSelectedStyles, style)}
+                              onClick={() => toggleSingle(selectedStyles, setSelectedStyles, style)}
                             >
                               {style}
                             </Badge>
                           ))}
                           <CustomEditableTag 
-                            onAdd={(val) => handleAddCustom(val, teacherStyles, setTeacherStyles, selectedStyles, setSelectedStyles)}
+                            onAdd={(val) => handleAddCustom(val, teacherStyles, setTeacherStyles, setSelectedStyles)}
                           />
                         </div>
                       </div>
@@ -517,7 +520,7 @@ export default function HomePage() {
               >
                 <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
                   <PromptSuggestion
-                    className="bg-white dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-200/80 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
+                    className="bg-white dark:bg-white backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-400 text-black dark:text-black hover:text-black dark:hover:text-black px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
                   >
                     
                     <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
@@ -533,49 +536,98 @@ export default function HomePage() {
   )
 }
 
-function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x: number, y: number, w: number }, onComplete: () => void }) {
+function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x: number, y: number, w: number, h: number }, onComplete: () => void }) {
   const [targetRect, setTargetRect] = useState<{ x: number, y: number } | null>(null)
+  const startX = flyingData.x + flyingData.w / 2
+  const startY = flyingData.y + flyingData.h / 2
+  const [trailPoint, setTrailPoint] = useState<{ x: number, y: number }>({ x: startX, y: startY })
 
   useEffect(() => {
     // Attempt to locate input box to fly words to
     const inputArea = document.getElementById('main-input-box')
     if (inputArea) {
       const rect = inputArea.getBoundingClientRect()
-      // approximate target position into the textarea
-      setTargetRect({ x: rect.left + 24, y: rect.top + 24 })
+      // Aim the bubble center to a point inside the textarea to avoid visual offset.
+      const targetAnchorX = rect.left + Math.min(140, rect.width * 0.2)
+      const targetAnchorY = rect.top + Math.min(42, rect.height * 0.45)
+      setTargetRect({
+        x: targetAnchorX - flyingData.w / 2,
+        y: targetAnchorY - flyingData.h / 2,
+      })
     }
-  }, [])
+  }, [flyingData.h, flyingData.w])
+
+  useEffect(() => {
+    setTrailPoint({ x: startX, y: startY })
+  }, [startX, startY])
+
+  const beamDuration = 0.72
+  const deltaX = trailPoint.x - startX
+  const lift = Math.max(56, Math.abs(deltaX) * 0.2)
+  const controlY = Math.min(startY, trailPoint.y) - lift
+  const beamPath = `M ${startX} ${startY} Q ${startX + deltaX * 0.5} ${controlY} ${trailPoint.x} ${trailPoint.y}`
 
   return (
-    <motion.div
-      initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
-      animate={targetRect ? { 
-        x: targetRect.x, 
-        y: targetRect.y, 
-        opacity: [1, 1, 0],
-        scale: 0.8
-      } : {}}
-      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-      onAnimationComplete={onComplete}
-      className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
-    >
-      {/* Light beam / glow trail effect behind the flying text */}
+    <>
+      {targetRect && (
+        <svg className="fixed inset-0 z-40 pointer-events-none overflow-visible" aria-hidden>
+          <path
+            d={beamPath}
+            fill="none"
+            stroke="rgba(56, 189, 248, 0.36)"
+            strokeWidth={2}
+            strokeLinecap="round"
+            opacity={0.32}
+          />
+        </svg>
+      )}
+
       <motion.div
-         initial={{ opacity: 0, scaleY: 0.5 }}
-         animate={{ opacity: [0, 0.8, 0], scaleY: [0.5, 1.5, 0.5], scaleX: [1, 2, 1] }}
-         transition={{ duration: 0.6, ease: "easeInOut" }}
-         className="absolute inset-[-20px] bg-blue-500/30 blur-2xl rounded-full z-0"
-      />
-      <div className="bg-white dark:bg-zinc-900 shadow-[0_0_30px_rgba(59,130,246,0.5)] border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate w-full h-full relative z-10 overflow-hidden">
-        {/* Inner passing beam */}
-        <motion.div 
-          initial={{ left: "-100%" }}
-          animate={{ left: "200%" }}
-          transition={{ duration: 0.6, ease: "linear" }}
-          className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
-        />
-        {flyingData.text}
-      </div>
-    </motion.div>
+        initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
+        animate={targetRect ? {
+          x: targetRect.x,
+          y: targetRect.y,
+          opacity: [1, 1, 0],
+          scale: 0.82
+        } : {}}
+        transition={{ duration: beamDuration, ease: [0.16, 1, 0.3, 1] }}
+        onUpdate={(latest) => {
+          const nextXRaw = latest.x
+          const nextYRaw = latest.y
+          const nextX =
+            typeof nextXRaw === "number"
+              ? nextXRaw
+              : Number.parseFloat(nextXRaw ? String(nextXRaw) : `${flyingData.x}`)
+          const nextY =
+            typeof nextYRaw === "number"
+              ? nextYRaw
+              : Number.parseFloat(nextYRaw ? String(nextYRaw) : `${flyingData.y}`)
+
+          if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return
+
+          const centerX = nextX + flyingData.w / 2
+          const centerY = nextY + flyingData.h / 2
+          setTrailPoint((prev) => {
+            if (Math.abs(prev.x - centerX) < 0.5 && Math.abs(prev.y - centerY) < 0.5) {
+              return prev
+            }
+            return { x: centerX, y: centerY }
+          })
+        }}
+        onAnimationComplete={onComplete}
+        className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
+      >
+        <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
+          {/* Inner passing beam */}
+          <motion.div 
+            initial={{ left: "-100%" }}
+            animate={{ left: "200%" }}
+            transition={{ duration: beamDuration, ease: "linear" }}
+            className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
+          />
+          {flyingData.text}
+        </div>
+      </motion.div>
+    </>
   )
 }
