@@ -21,9 +21,5 @@ coverage/
 outputs/
 .codex
 uv*
-<< ssw
-*.egg-info
-=======
 *.egg-info
 .github/agents/
->> main
