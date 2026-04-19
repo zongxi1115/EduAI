@@ -308,46 +308,28 @@ export default function LoadingPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-gray-800 font-sans selection:bg-[#09f]/20 transition-colors duration-1000 relative">
       
-<< ssw
-      {/* Top Progress Bar */}
-      <div className="fixed top-0 left-0 right-0 h-1 bg-gray-200 z-50 overflow-hidden">
-        <motion.div 
-          className="h-full bg-[#09f] shadow-[0_0_15px_#09f]"
-          initial={{ width: '0%' }}
-          animate={{ width: `${progressPercent}%` }}
-          transition={{ ease: "circOut", duration: 0.5 }}
-        />
-      </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-10 md:py-20 flex items-center justify-center min-h-screen">
-=======
       <div className="max-w-[1600px] w-full mx-auto px-6 py-10 md:py-12 flex gap-6 items-center justify-center min-h-screen">
->>main
+
         
         {/* Left Section - Loading Animation */}
         <AnimatePresence>
           {!showFocusMode && (
             <motion.div
-<<ssw
-              exit={{ opacity: 0, width: 0, scale: 0.95, filter: "blur(20px)" }}
-              transition={{ duration: 0.6, ease: "easeInOut" }}
-              className="w-1/2 flex flex-col items-center justify-center overflow-hidden px-8"
-=======
+
               exit={{ opacity: 0, width: 0, scale: 0.95, filter: "blur(20px)", margin: 0, padding: 0 }}
               transition={{ duration: 0.6, ease: "easeInOut" }}
               className={`shrink-0 flex flex-col items-center justify-center overflow-hidden transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-[320px] lg:w-[400px]' : 'w-[440px] lg:w-[560px]'}`}
->>main
+
             >
               {/* Lottie Animation */}
               <motion.div 
                  initial={{ opacity: 0, y: 30 }}
                  animate={{ opacity: 1, y: 0 }}
                  transition={{ duration: 0.8, ease: "easeOut" }}
-<< ssw
-                 className="relative w-80 h-80 md:w-96 md:h-96 pointer-events-none z-10 mb-6"
-=======
+
                  className={`relative pointer-events-none z-10 mb-6 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-80 h-80 md:w-96 md:h-96' : 'w-[360px] h-[360px] md:w-[480px] md:h-[480px]'}`}
->> main
+
               >
                 <div className="absolute inset-0 bg-[#09f]/5 blur-[80px] rounded-full mx-auto my-auto animate-pulse" />
                 <iframe 
@@ -401,11 +383,9 @@ export default function LoadingPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: "easeOut" }}
-<<ssw
-            className="w-1/2 flex flex-col items-center justify-center px-8"
-=======
+
             className="w-[320px] lg:w-[400px] shrink-0 flex flex-col items-center justify-center px-4"
->>main
+
           >
             <div className="w-20 h-20 mb-6 bg-emerald-50 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/10 border border-emerald-100/50">
               <Check className="w-10 h-10 text-emerald-500" strokeWidth={2.5} />
@@ -430,21 +410,16 @@ export default function LoadingPage() {
           </motion.div>
         )}
 
-<<ssw
-        {/* Right Section - SSE Event Stream Terminal */}
-=======
+
         {/* Middle Section - SSE Event Stream */}
->>main
+
         <motion.div 
           layout
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, type: "spring", bounce: 0.2 }}
-<<ssw
-          className={`${showFocusMode ? 'w-full' : 'w-1/2'} bg-white border border-gray-200/80 rounded-2xl overflow-hidden shadow-2xl shadow-blue-900/5 relative`}
-=======
           className={`flex-1 bg-white/70 backdrop-blur-xl border border-slate-200/50 rounded-3xl overflow-hidden shadow-2xl shadow-slate-200/50 p-8 h-[calc(100vh-160px)] min-h-[500px] flex flex-col relative`}
->>main
+
         >
           <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
             <h3 className="text-lg font-semibold text-slate-800 tracking-tight flex items-center gap-2">
