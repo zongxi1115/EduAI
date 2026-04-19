@@ -283,6 +283,10 @@ File requirements:
   after generation is complete.
 - Besides `question_type`, each item must use the exact field names from the dataclass
   definition of that question type.
+- Use `need_ai_judge` to mark whether the frontend should hand the submission to AI review.
+  Set it to `true` for subjective/open-ended responses such as most ShortAnswer, Coding,
+  and Drawing items, and set it to `false` for questions that can be judged directly.
+- Do not output the legacy field name `requires_ai_judgment`.
 - You must generate exactly {blueprint.total_questions} questions in total.
 - The count of each `question_type` must exactly match the practice blueprint.
 - Follow the blueprint's progression plan and must-cover points instead of reverting

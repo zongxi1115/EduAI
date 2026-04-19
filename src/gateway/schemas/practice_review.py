@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+PracticeQuestionType = Literal[
+    "FillInTheBlank",
+    "MultipleChoice",
+    "ShortAnswer",
+    "Listening",
+    "Coding",
+    "Drawing",
+]
+
+ReviewCorrectness = Literal[
+    "correct",
+    "partially_correct",
+    "incorrect",
+    "ungradable",
+]
+
+
+class PracticeReviewQuestion(BaseModel):
+    """前端提交给 AI 批阅接口的题目快照。"""
+
+    id: str = Field(description="题目唯一标识。")
+    question_type: PracticeQuestionType = Field(description="题型。")
+    question: str = Field(description="题干。")
+    analysis: str = Field(default="", description="题目解析或出题意图。")
+    need_ai_judge: bool = Field(
+        default=True,
+        description="该题是否标记为需要 AI 批阅。",
+    )
+    options: list[str] = Field(default_factory=list, description="选择题选项。")
+    answer: str | None = Field(default=None, description="客观题标准答案。")
+    correct_answer: str | None = Field(default=None, description="单选题正确选项内容。")
+    reference_answer: str | None = Field(default=None, description="简答题参考答案。")
+    reference_code: str | None = Field(default=None, description="编程题参考代码。")
+    test_cases: list[Any] = Field(default_factory=list, description="编程题测试样例。")
+    audio_src: str | None = Field(default=None, description="听力题音频地址。")
+    reference_image: str | None = Field(default=None, description="作图题参考图描述。")
+
+
+class PracticeReviewRequest(BaseModel):
+    """AI 批阅请求。"""
+
+    learning_goal: str | None = Field(
+        default=None,
+        description="当前学习目标，帮助 AI 把建议和目标对齐。",
+    )
+    question: PracticeReviewQuestion = Field(description="题目快照。")
+    student_answer: Any = Field(
+        default=None,
+        description="学生提交内容，可为字符串、数组或对象。",
+    )
+    submission_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="可选附加上下文，例如代码运行结果、作图说明等。",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "learning_goal": "理解二次函数图像与性质",
+                "question": {
+                    "id": "question_demo_001",
+                    "question_type": "ShortAnswer",
+                    "question": "为什么二次项系数为负时抛物线开口向下？",
+                    "analysis": "考查学生是否理解 a 的符号与开口方向关系。",
+                    "need_ai_judge": True,
+                    "reference_answer": "因为 a<0 时函数值随 |x| 增大而整体减小，所以图像向下张开。",
+                },
+                "student_answer": "因为负号会让抛物线朝下。",
+                "submission_context": {},
+            }
+        }
+    )
+
+
+class PracticeReviewResponse(BaseModel):
+    """AI 批阅结果。"""
+
+    correctness: ReviewCorrectness = Field(description="答案整体判断。")
+    score: int = Field(ge=0, le=100, description="建议分数，0-100。")
+    summary: str = Field(description="一句话总结本次作答表现。")
+    strengths: list[str] = Field(default_factory=list, description="作答亮点。")
+    issues: list[str] = Field(default_factory=list, description="主要问题。")
+    review_advice: list[str] = Field(default_factory=list, description="可直接展示给前端的审阅建议。")
+    reference_points: list[str] = Field(default_factory=list, description="参考要点或下一步核对点。")
+    limitations: list[str] = Field(default_factory=list, description="批阅局限或证据不足说明。")
+    judged_at: str | None = Field(default=None, description="服务端完成批阅的时间。")
+
+
+class PracticeReviewCapabilitiesResponse(BaseModel):
+    """题目批阅能力返回。"""
+
+    support_vision: bool = Field(description="当前模型是否开启视觉输入能力。")

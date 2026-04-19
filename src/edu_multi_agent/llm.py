@@ -64,7 +64,7 @@ class LLMClient:
             timeout=settings.request_timeout_seconds,
         )
 
-    def invoke_text(self, system_prompt: str, user_prompt: str) -> str:
+    def invoke_text(self, system_prompt: str, user_prompt: Any) -> str:
         response = self.model.invoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
         )
@@ -87,7 +87,7 @@ class LLMClient:
     def invoke_json(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: Any,
         schema: type[ModelT],
         *,
         max_attempts: int = 3,
@@ -95,7 +95,10 @@ class LLMClient:
         feedback = ""
         last_error: Exception | None = None
         for _ in range(max_attempts):
-            raw_text = self.invoke_text(system_prompt, user_prompt + feedback)
+            raw_text = self.invoke_text(
+                system_prompt,
+                self._append_feedback_to_prompt(user_prompt, feedback),
+            )
             try:
                 payload = json.loads(_extract_json(raw_text))
                 return schema.model_validate(payload)
@@ -107,6 +110,22 @@ class LLMClient:
                 )
 
         raise RuntimeError(f"Failed to parse JSON output: {last_error}") from last_error
+
+    @staticmethod
+    def _append_feedback_to_prompt(user_prompt: Any, feedback: str) -> Any:
+        if not feedback:
+            return user_prompt
+        if isinstance(user_prompt, str):
+            return user_prompt + feedback
+        if isinstance(user_prompt, list):
+            return [
+                *user_prompt,
+                {
+                    "type": "text",
+                    "text": feedback.strip(),
+                },
+            ]
+        return user_prompt
 
     def invoke_bundle(
         self,
