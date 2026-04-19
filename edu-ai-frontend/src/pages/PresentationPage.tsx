@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -140,17 +140,21 @@ export default function PresentationPage() {
 
         const manifestPayload = (await manifestResponse.json()) as SlideManifestResponse;
         const presenterNotesFile = findFileByName(files, "presenter_notes.md");
-        const presenterNotesText = presenterNotesFile
-          ? await fetch(presenterNotesFile.download_url, {
-              signal: controller.signal,
-              headers: { Accept: "text/markdown, text/plain;q=0.9, */*;q=0.8" },
-            }).then(async (response) => (response.ok ? response.text() : ""))
-          : "";
+        let presenterNotesText = "";
+        if (presenterNotesFile) {
+          const presenterNotesResponse = await fetch(presenterNotesFile.download_url, {
+            signal: controller.signal,
+            headers: { Accept: "text/markdown, text/plain;q=0.9, */*;q=0.8" },
+          });
+          if (presenterNotesResponse.ok) {
+            presenterNotesText = await presenterNotesResponse.text();
+          }
+        }
 
         if (!cancelled) {
           setArtifacts(artifactPayload);
           setManifest(manifestPayload);
-          setPresenterNotes(await presenterNotesText);
+          setPresenterNotes(presenterNotesText);
           setCurrentIndex(0);
           setRuntimeState({});
         }
@@ -173,21 +177,6 @@ export default function PresentationPage() {
     };
   }, [runId]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "ArrowRight" || event.key === " ") {
-        event.preventDefault();
-        handleNext();
-      } else if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        handlePrev();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  });
-
   const getSlideRuntime = (): EduSlideRuntime | null => {
     const iframeWindow = iframeRef.current?.contentWindow as (Window & {
       EduSlide?: EduSlideRuntime;
@@ -208,7 +197,7 @@ export default function PresentationPage() {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     const runtime = getSlideRuntime();
     if (runtime) {
       try {
@@ -223,11 +212,26 @@ export default function PresentationPage() {
     }
 
     setCurrentIndex((index) => Math.min(index + 1, Math.max(slides.length - 1, 0)));
-  };
+  }, [slides.length]);
 
-  const handlePrev = () => {
+  const handlePrev = useCallback(() => {
     setCurrentIndex((index) => Math.max(index - 1, 0));
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowRight" || event.key === " ") {
+        event.preventDefault();
+        handleNext();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        handlePrev();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleNext, handlePrev]);
 
   if (isLoading) {
     return (
