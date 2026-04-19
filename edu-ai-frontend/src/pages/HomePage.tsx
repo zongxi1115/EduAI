@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useLayoutEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -366,27 +366,27 @@ export default function HomePage() {
                           <motion.path 
                             d="M3 6h18" 
                             variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.3 }} 
+                            transition={{ duration: 0.16 }} 
                           />
                           <motion.path 
                             d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" 
                             variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.4, delay: 0.1 }} 
+                            transition={{ duration: 0.22, delay: 0.04 }} 
                           />
                           <motion.path 
                             d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" 
                             variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.3, delay: 0.2 }} 
+                            transition={{ duration: 0.18, delay: 0.08 }} 
                           />
                           <motion.line 
                             x1="10" y1="11" x2="10" y2="17" 
                             variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.2, delay: 0.3 }} 
+                            transition={{ duration: 0.14, delay: 0.1 }} 
                           />
                           <motion.line 
                             x1="14" y1="11" x2="14" y2="17" 
                             variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
-                            transition={{ duration: 0.2, delay: 0.3 }} 
+                            transition={{ duration: 0.14, delay: 0.1 }} 
                           />
                         </motion.svg>
                       </Button>
@@ -443,9 +443,9 @@ export default function HomePage() {
             />
             <motion.div
               key="modal"
-              initial={{ opacity: 0, scale: 0.95, y: 10, x: "-50%", y: "-50%" }}
-              animate={{ opacity: 1, scale: 1, y: "-50%", x: "-50%" }}
-              exit={{ opacity: 0, scale: 0.95, y: -40, x: "-50%" }}
+              initial={{ opacity: 0, scale: 0.95, x: "-50%", y: "-40%" }}
+              animate={{ opacity: 1, scale: 1, x: "-50%", y: "-50%" }}
+              exit={{ opacity: 0, scale: 0.95, x: "-50%", y: "-40%" }}
               whileHover="hover"
               className="fixed left-1/2 top-1/2 z-[70] w-[calc(100%-32px)] max-w-sm rounded-[24px] border border-zinc-200/50 dark:border-zinc-800/50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl p-6 shadow-2xl"
             >
@@ -643,6 +643,7 @@ export default function HomePage() {
               disabled={isSubmitting}
             >
               <PromptInputTextarea
+                id="prompt-main-textarea"
                 placeholder="在此输入你今天想学的内容..."
                 className="text-base sm:text-lg min-h-14 py-2 text-black dark:text-black placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed font-medium"
               />
@@ -818,96 +819,126 @@ export default function HomePage() {
 
 function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x: number, y: number, w: number, h: number }, onComplete: () => void }) {
   const [targetRect, setTargetRect] = useState<{ x: number, y: number } | null>(null)
-  const startX = flyingData.x + flyingData.w / 2
-  const startY = flyingData.y + flyingData.h / 2
-  const [trailPoint, setTrailPoint] = useState<{ x: number, y: number }>({ x: startX, y: startY })
+  const startCenterX = flyingData.x + flyingData.w / 2
+  const startCenterY = flyingData.y + flyingData.h / 2
+  const [trailPoint, setTrailPoint] = useState<{ x: number, y: number }>({ x: startCenterX, y: startCenterY })
+  const beamDuration = 0.68
 
-  useEffect(() => {
-    // Attempt to locate input box to fly words to
-    const inputArea = document.getElementById('main-input-box')
-    if (inputArea) {
-      const rect = inputArea.getBoundingClientRect()
-      // Aim the bubble center to a point inside the textarea to avoid visual offset.
-      const targetAnchorX = rect.left + Math.min(140, rect.width * 0.2)
-      const targetAnchorY = rect.top + Math.min(42, rect.height * 0.45)
-      setTargetRect({
-        x: targetAnchorX - flyingData.w / 2,
-        y: targetAnchorY - flyingData.h / 2,
-      })
+  useLayoutEffect(() => {
+    const inputArea = document.getElementById('prompt-main-textarea')
+    const inputBox = document.getElementById('main-input-box')
+    if (!inputArea) {
+      setTargetRect({ x: flyingData.x, y: flyingData.y })
+      return
     }
-  }, [flyingData.h, flyingData.w])
+
+    const rect = inputArea.getBoundingClientRect()
+    const boxRect = inputBox?.getBoundingClientRect() ?? rect
+    const computed = window.getComputedStyle(inputArea)
+    const paddingLeft = Number.parseFloat(computed.paddingLeft) || 0
+    const paddingTop = Number.parseFloat(computed.paddingTop) || 0
+    const fontSize = Number.parseFloat(computed.fontSize) || 16
+    const parsedLineHeight = Number.parseFloat(computed.lineHeight)
+    const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : fontSize * 1.35
+
+    // Aim at the first input line's visual center, then clamp into input box bounds.
+    const anchorX = rect.left + paddingLeft + 10
+    const anchorY = rect.top + paddingTop + lineHeight * 0.5
+    const rawX = anchorX - flyingData.w / 2
+    const rawY = anchorY - flyingData.h / 2
+    const insetX = 12
+    const insetY = 8
+    const minX = boxRect.left + insetX
+    const maxX = boxRect.right - insetX - flyingData.w
+    const minY = boxRect.top + insetY
+    const maxY = boxRect.bottom - insetY - flyingData.h
+    const clampedX = Math.min(Math.max(rawX, minX), Math.max(minX, maxX))
+    const clampedY = Math.min(Math.max(rawY, minY), Math.max(minY, maxY))
+
+    setTargetRect({
+      x: clampedX,
+      y: clampedY,
+    })
+  }, [flyingData.h, flyingData.w, flyingData.x, flyingData.y])
 
   useEffect(() => {
-    setTrailPoint({ x: startX, y: startY })
-  }, [startX, startY])
+    setTrailPoint({ x: startCenterX, y: startCenterY })
+  }, [startCenterX, startCenterY])
 
-  const beamDuration = 0.72
-  const deltaX = trailPoint.x - startX
-  const lift = Math.max(56, Math.abs(deltaX) * 0.2)
-  const controlY = Math.min(startY, trailPoint.y) - lift
-  const beamPath = `M ${startX} ${startY} Q ${startX + deltaX * 0.5} ${controlY} ${trailPoint.x} ${trailPoint.y}`
+  const deltaX = trailPoint.x - startCenterX
+  const lift = Math.max(48, Math.abs(deltaX) * 0.18)
+  const controlY = Math.min(startCenterY, trailPoint.y) - lift
+  const beamPath = `M ${startCenterX} ${startCenterY} Q ${startCenterX + deltaX * 0.5} ${controlY} ${trailPoint.x} ${trailPoint.y}`
 
   return (
     <>
       {targetRect && (
         <svg className="fixed inset-0 z-40 pointer-events-none overflow-visible" aria-hidden>
+          <defs>
+            <linearGradient id="beamGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="transparent" />
+              <stop offset="50%" stopColor="rgba(56, 189, 248, 0.4)" />
+              <stop offset="100%" stopColor="transparent" />
+            </linearGradient>
+          </defs>
           <path
             d={beamPath}
             fill="none"
-            stroke="rgba(56, 189, 248, 0.36)"
+            stroke="url(#beamGradient)"
             strokeWidth={2}
             strokeLinecap="round"
-            opacity={0.32}
+            opacity={0.95}
           />
         </svg>
       )}
 
-      <motion.div
-        initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
-        animate={targetRect ? {
-          x: targetRect.x,
-          y: targetRect.y,
-          opacity: [1, 1, 0],
-          scale: 0.82
-        } : {}}
-        transition={{ duration: beamDuration, ease: [0.16, 1, 0.3, 1] }}
-        onUpdate={(latest) => {
-          const nextXRaw = latest.x
-          const nextYRaw = latest.y
-          const nextX =
-            typeof nextXRaw === "number"
-              ? nextXRaw
-              : Number.parseFloat(nextXRaw ? String(nextXRaw) : `${flyingData.x}`)
-          const nextY =
-            typeof nextYRaw === "number"
-              ? nextYRaw
-              : Number.parseFloat(nextYRaw ? String(nextYRaw) : `${flyingData.y}`)
+      {targetRect && (
+        <motion.div
+          initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
+          animate={{
+            x: targetRect.x,
+            y: targetRect.y,
+            opacity: [1, 1, 0],
+            scale: 0.82
+          }}
+          transition={{ duration: beamDuration, ease: [0.16, 1, 0.3, 1] }}
+          onUpdate={(latest) => {
+            const nextXRaw = latest.x
+            const nextYRaw = latest.y
+            const nextX =
+              typeof nextXRaw === "number"
+                ? nextXRaw
+                : Number.parseFloat(nextXRaw ? String(nextXRaw) : `${flyingData.x}`)
+            const nextY =
+              typeof nextYRaw === "number"
+                ? nextYRaw
+                : Number.parseFloat(nextYRaw ? String(nextYRaw) : `${flyingData.y}`)
 
-          if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return
+            if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return
 
-          const centerX = nextX + flyingData.w / 2
-          const centerY = nextY + flyingData.h / 2
-          setTrailPoint((prev) => {
-            if (Math.abs(prev.x - centerX) < 0.5 && Math.abs(prev.y - centerY) < 0.5) {
-              return prev
-            }
-            return { x: centerX, y: centerY }
-          })
-        }}
-        onAnimationComplete={onComplete}
-        className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
-      >
-        <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
-          {/* Inner passing beam */}
-          <motion.div 
-            initial={{ left: "-100%" }}
-            animate={{ left: "200%" }}
-            transition={{ duration: beamDuration, ease: "linear" }}
-            className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
-          />
-          {flyingData.text}
-        </div>
-      </motion.div>
+            const centerX = nextX + flyingData.w / 2
+            const centerY = nextY + flyingData.h / 2
+            setTrailPoint((prev) => {
+              if (Math.abs(prev.x - centerX) < 0.5 && Math.abs(prev.y - centerY) < 0.5) {
+                return prev
+              }
+              return { x: centerX, y: centerY }
+            })
+          }}
+          onAnimationComplete={onComplete}
+          className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
+        >
+          <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
+            <motion.div 
+              initial={{ left: "-100%" }}
+              animate={{ left: "200%" }}
+              transition={{ duration: beamDuration, ease: "linear" }}
+              className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
+            />
+            {flyingData.text}
+          </div>
+        </motion.div>
+      )}
     </>
   )
 }
@@ -935,19 +966,19 @@ function AnimatedTrashIcon() {
             hover: { rotate: -16, y: -3, x: -2 }
           }}
           style={{ transformOrigin: "2px 6px" }}
-          transition={{ type: "spring", stiffness: 350, damping: 15 }}
+          transition={{ type: "spring", stiffness: 520, damping: 22 }}
         >
           <motion.path 
             d="M3 6h18" 
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" }}
+            transition={{ duration: 0.26, delay: 0.02, ease: "easeOut" }}
           />
           <motion.path 
             d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" 
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.2, ease: "easeOut" }}
+            transition={{ duration: 0.26, delay: 0.06, ease: "easeOut" }}
           />
         </motion.g>
 
@@ -956,19 +987,19 @@ function AnimatedTrashIcon() {
           d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" 
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
+          transition={{ duration: 0.34, ease: "easeOut" }}
         />
         <motion.line 
           x1="10" y1="11" x2="10" y2="17" 
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
-          transition={{ duration: 0.4, delay: 0.3, ease: "easeOut" }}
+          transition={{ duration: 0.18, delay: 0.08, ease: "easeOut" }}
         />
         <motion.line 
           x1="14" y1="11" x2="14" y2="17" 
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
-          transition={{ duration: 0.4, delay: 0.4, ease: "easeOut" }}
+          transition={{ duration: 0.18, delay: 0.12, ease: "easeOut" }}
         />
       </svg>
     </motion.div>
