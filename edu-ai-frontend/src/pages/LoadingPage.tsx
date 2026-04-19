@@ -308,22 +308,28 @@ export default function LoadingPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-gray-800 font-sans selection:bg-[#09f]/20 transition-colors duration-1000 relative">
       
+
       <div className="max-w-[1600px] w-full mx-auto px-6 py-10 md:py-12 flex gap-6 items-center justify-center min-h-screen">
+
         
         {/* Left Section - Loading Animation */}
         <AnimatePresence>
           {!showFocusMode && (
             <motion.div
+
               exit={{ opacity: 0, width: 0, scale: 0.95, filter: "blur(20px)", margin: 0, padding: 0 }}
               transition={{ duration: 0.6, ease: "easeInOut" }}
               className={`shrink-0 flex flex-col items-center justify-center overflow-hidden transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-[320px] lg:w-[400px]' : 'w-[440px] lg:w-[560px]'}`}
+
             >
               {/* Lottie Animation */}
               <motion.div 
                  initial={{ opacity: 0, y: 30 }}
                  animate={{ opacity: 1, y: 0 }}
                  transition={{ duration: 0.8, ease: "easeOut" }}
+
                  className={`relative pointer-events-none z-10 mb-6 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-80 h-80 md:w-96 md:h-96' : 'w-[360px] h-[360px] md:w-[480px] md:h-[480px]'}`}
+
               >
                 <div className="absolute inset-0 bg-[#09f]/5 blur-[80px] rounded-full mx-auto my-auto animate-pulse" />
                 <iframe 
@@ -377,7 +383,9 @@ export default function LoadingPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: "easeOut" }}
+
             className="w-[320px] lg:w-[400px] shrink-0 flex flex-col items-center justify-center px-4"
+
           >
             <div className="w-20 h-20 mb-6 bg-emerald-50 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/10 border border-emerald-100/50">
               <Check className="w-10 h-10 text-emerald-500" strokeWidth={2.5} />
@@ -402,13 +410,16 @@ export default function LoadingPage() {
           </motion.div>
         )}
 
+
         {/* Middle Section - SSE Event Stream */}
+
         <motion.div 
           layout
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, type: "spring", bounce: 0.2 }}
           className={`flex-1 bg-white/70 backdrop-blur-xl border border-slate-200/50 rounded-3xl overflow-hidden shadow-2xl shadow-slate-200/50 p-8 h-[calc(100vh-160px)] min-h-[500px] flex flex-col relative`}
+
         >
           <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100">
             <h3 className="text-lg font-semibold text-slate-800 tracking-tight flex items-center gap-2">
