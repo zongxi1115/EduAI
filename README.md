@@ -1,6 +1,6 @@
 # 贡献前必读
 
-请不要直接merge到main分支，先**务必且只在** 对应自己的分支开发，完成后提交**pull request**，并@相关人员进行code review后才能merge到main分支。
+请不要直接 merge 到 `main` 分支，先在自己的分支开发，完成后提交 Pull Request 并完成 code review。
 
 ## 协作与部署文档
 
@@ -10,87 +10,149 @@
 
 # Edu Multi-Agent
 
-This module builds a LangGraph-based teaching preparation workflow for the pre-class stage.
+Edu Multi-Agent 是一个面向课前备课场景的多智能体系统，核心基于 LangGraph，提供命令行与 API 两种使用方式。
 
-## What it does
+## 功能概览
 
-Input a learning goal, then let a supervisor agent:
+输入一个教学目标后，系统会由 supervisor agent 统一编排，自动生成：
 
-- decide what teaching materials should be prepared,
-- route work in parallel to specialized agents,
-- collect actual file outputs,
-- write a final Markdown report.
+- 学案与教师提示；
+- 练习题与答案；
+- Manim 动画脚本；
+- 交互式网页素材；
+- 最终汇总报告（Markdown）。
 
-The specialized agents generate:
+## 项目结构
 
-- study guide documents,
-- practice exercises with an answer key,
-- a Manim animation script,
-- an interactive web page.
+- 后端工作流：[`src/edu_multi_agent`](./src/edu_multi_agent)
+- API 网关：[`src/gateway`](./src/gateway)
+- 前端页面：[`edu-ai-frontend`](./edu-ai-frontend)
+- 测试目录：[`tests`](./tests)
 
-## Environment
+## 环境与依赖
 
-Create a `.env` file in the project root based on `.env.example`.
+### 运行环境
 
-Required keys:
+- Python `>=3.10`
+- Node.js `>=20`
+- pnpm `>=9`
 
-- `BASE_URL`
-- `API_KEY`
-- `MODEL_NAME`
+### 后端 Python 依赖（核心）
 
-Optional keys:
+项目通过 `pyproject.toml` 管理依赖，核心包括：
 
-- `OUTPUT_ROOT`
-- `TEMPERATURE`
-- `REQUEST_TIMEOUT_SECONDS`
+- `langgraph`
+- `langchain-core`
+- `langchain-openai`
+- `fastapi`
+- `uvicorn`
+- `pydantic`
+- `python-dotenv`
 
-## Install
+开发测试建议安装：
+
+```bash
+conda run -n base python -m pip install -e ".[dev]"
+```
+
+如仅运行服务，可安装基础依赖：
 
 ```bash
 conda run -n base python -m pip install -e .
 ```
 
-## Run
-
-Directly from the repo root:
+### 前端依赖安装
 
 ```bash
-conda run -n base python run_edu_multi_agent.py --goal "Understand the causes and impacts of the water cycle"
+pnpm --dir edu-ai-frontend install --frozen-lockfile
 ```
 
-You can also add optional metadata:
+## 配置
+
+在项目根目录基于 `.env.example` 创建 `.env`：
 
 ```bash
-conda run -n base python run_edu_multi_agent.py ^
-  --goal "Understand quadratic functions and their graphs" ^
-  --subject "Mathematics" ^
-  --grade-level "Grade 8" ^
-  --learner-profile "Mixed-ability class that needs visual explanation and structured practice" ^
-  --notes "Focus on pre-class preparation assets only"
+cp .env.example .env
 ```
 
-## API Gateway
+必填项：
 
-The FastAPI backend now lives in [`src/gateway`](./src/gateway) and is separated from the
-LangGraph workflow package in [`src/edu_multi_agent`](./src/edu_multi_agent).
+- `BASE_URL`
+- `API_KEY`
+- `MODEL_NAME`
 
-Run the API locally with either command:
+可选项：
+
+- `OUTPUT_ROOT`
+- `TEMPERATURE`
+- `REQUEST_TIMEOUT_SECONDS`
+- `SUPPORT_VISION`
+
+## 运行方式
+
+### 1) 命令行运行（工作流）
+
+```bash
+conda run -n base python run_edu_multi_agent.py --goal "理解水循环的成因与影响"
+```
+
+带可选元数据：
+
+```bash
+conda run -n base python run_edu_multi_agent.py \
+  --goal "理解二次函数及其图像" \
+  --subject "数学" \
+  --grade-level "八年级" \
+  --learner-profile "基础差异较大的混合班级，偏好图形化讲解" \
+  --notes "仅生成课前准备材料"
+```
+
+### 2) API 网关
 
 ```bash
 conda run -n base edu-prep-api --host 127.0.0.1 --port 8000
 ```
 
+或：
+
 ```bash
 conda run -n base uvicorn gateway.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Interactive API docs:
+接口文档：
 
 - `http://127.0.0.1:8000/api/docs`
 
-## Output
+### 3) 前端本地开发
 
-Each run creates a timestamped folder under `outputs/`, for example:
+```bash
+pnpm --dir edu-ai-frontend dev
+```
+
+## 常用校验命令
+
+后端语法检查：
+
+```bash
+conda run -n base python -m compileall src
+```
+
+后端测试：
+
+```bash
+conda run -n base pytest -q
+```
+
+前端类型检查与 Lint：
+
+```bash
+pnpm --dir edu-ai-frontend typecheck
+pnpm --dir edu-ai-frontend lint
+```
+
+## 输出目录示例
+
+每次运行会在 `outputs/` 下创建一个时间戳目录，例如：
 
 ```text
 outputs/

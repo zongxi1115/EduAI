@@ -1,0 +1,85 @@
+name: PR Title Check
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+
+jobs:
+  check-title:
+    name: Check PR Title
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Validate PR title
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            // Allow multi-type prefixes separated by "/" (e.g. "feat/fix"),
+            // optional scope in parentheses, and both ASCII ":" and Chinese "：".
+            const conventional = /^(feat|fix|docs|refactor|chore|style|test|ci|build|perf|revert)(\/[\w-]+)*(\([^)]+\))?[：:]\s*.+/;
+
+            const tooShort = title.length < 5;
+            const notConventional = !conventional.test(title);
+
+            const MARKER = '<!-- pr-title-check-bot -->';
+
+            if (tooShort || notConventional) {
+              const reasons = [];
+              if (tooShort) reasons.push(`PR 标题过短（当前 ${title.length} 个字符，至少需要 5 个字符）`);
+              if (notConventional) reasons.push('标题不符合提交规范（缺少合法类型前缀）');
+
+              const body = [
+                MARKER,
+                '⚠️ **PR 标题不规范，请修改后重新提交。**',
+                '',
+                `**问题：** ${reasons.join('；')}`,
+                '',
+                '**格式要求：**',
+                '- 标题长度不少于 5 个字符',
+                '- 须以合法的类型前缀开头，支持单个或多个类型（用 `/` 分隔），格式为 `<type>[/type][scope]: <描述>`',
+                '- 冒号支持半角 `:` 和全角 `：`',
+                '',
+                '**合法的类型前缀：**',
+                '`feat` · `fix` · `docs` · `refactor` · `chore` · `style` · `test` · `ci` · `build` · `perf` · `revert`',
+                '',
+                '**示例：**',
+                '```',
+                'feat: 添加用户登录功能',
+                'fix(auth): 修复 token 过期问题',
+                'docs/chore: 更新 README 并整理依赖',
+                'chore: 升级依赖版本',
+                '```',
+              ].join('\n');
+
+              // Find an existing bot warning comment to update instead of spamming new ones.
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+              });
+              const existing = comments.find(c => c.body && c.body.includes(MARKER));
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body,
+                });
+              }
+
+              core.setFailed(`PR 标题不规范：${reasons.join('；')}`);
+            }
