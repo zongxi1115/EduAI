@@ -171,6 +171,36 @@ def get_prep_run(
     return build_status_response(view)
 
 
+@router.delete(
+    "/{run_id}",
+    summary="删除课前准备任务",
+    description="删除指定任务的输出目录及所有关联文件。如果是正在运行的任务，会从内存注册表中移除并忽略其后续输出。",
+    response_description="成功删除后返回状态消息。",
+)
+def delete_prep_run(
+    registry: RunRegistryDep,
+    settings: SettingsDep,
+    run_id: str = ApiPath(description="课前准备任务的唯一标识符。"),
+) -> dict[str, str]:
+    """删除指定的课前准备任务及其文件。"""
+    import shutil
+    try:
+        registry.remove_run(run_id)
+    except Exception:
+        pass
+    
+    output_dir = settings.output_root / run_id
+    if output_dir.is_dir():
+        try:
+            shutil.rmtree(output_dir)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete directory: {e}")
+    else:
+        raise HTTPException(status_code=404, detail="Run not found.")
+        
+    return {"status": "success", "message": f"Run {run_id} deleted."}
+
+
 @router.get(
     "/{run_id}/artifacts",
     response_model=ArtifactListResponse,
