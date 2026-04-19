@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape as html_escape
 from pathlib import Path
 from typing import Any
