@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useLayoutEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -25,6 +25,15 @@ const PHRASES = [
 const INITIAL_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理"]
 const INITIAL_GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
 const INITIAL_TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
+
+interface PrepRun {
+  run_id: string;
+  status: string;
+  created_at: string;
+  request?: {
+    learning_goal: string;
+  };
+}
 
 interface CreatePrepRunResponse {
   run_id?: string
@@ -74,7 +83,11 @@ function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
 export default function HomePage() {
   const [query, setQuery] = useState("")
   const [isExpanded, setIsExpanded] = useState(false)
-  
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [historyRuns, setHistoryRuns] = useState<PrepRun[]>([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true)
+  const [runToDelete, setRunToDelete] = useState<string | null>(null)
+
   // Extra options
   const [subjects, setSubjects] = useState(INITIAL_SUBJECTS)
   const [grades, setGrades] = useState(INITIAL_GRADES)
@@ -97,6 +110,39 @@ export default function HomePage() {
     }, 4000)
     return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    let active = true
+
+    async function fetchHistory() {
+      try {
+        const res = await fetch("/api/v1/prep-runs")
+        if (res.ok && active) {
+          const data = await res.json()
+          setHistoryRuns(data.items || [])
+        }
+      } catch (err) {
+        console.error("Failed to fetch history:", err)
+      } finally {
+        if (active) {
+          setIsLoadingHistory(false)
+        }
+      }
+    }
+
+    void fetchHistory()
+    
+    const histInterval = setInterval(() => {
+      if (isSidebarOpen) {
+        void fetchHistory()
+      }
+    }, 5000)
+
+    return () => {
+      active = false
+      clearInterval(histInterval)
+    }
+  }, [isSidebarOpen])
 
   // Fly animation setup
   const [flyingSuggestion, setFlyingSuggestion] = useState<{ text: string, x: number, y: number, w: number, h: number } | null>(null)
@@ -197,12 +243,240 @@ export default function HomePage() {
     }
   }
 
+  const handleDeleteClick = (e: React.MouseEvent, runId: string) => {
+    e.stopPropagation()
+    setRunToDelete(runId)
+  }
+
+  const confirmDelete = async () => {
+    if (!runToDelete) return
+    const runId = runToDelete
+    setRunToDelete(null)
+    const snapshot = historyRuns
+    setHistoryRuns(prev => prev.filter(r => r.run_id !== runId))
+    try {
+      const response = await fetch(`/api/v1/prep-runs/${runId}`, { method: "DELETE" })
+      if (!response.ok) {
+        setHistoryRuns(snapshot) // rollback
+      }
+    } catch {
+      setHistoryRuns(snapshot) // rollback
+    }
+  }
+
   const handleSearchSubmit = () => {
     void handleSearch()
   }
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 bg-[#fafafa] dark:bg-zinc-950 relative overflow-hidden">
+    <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
+      {/* Sidebar Toggle Button (Always visible when closed, or inside sidebar when open) */}
+      <div className="absolute top-6 left-6 z-50 hidden md:block">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className={`text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl transition-all duration-300 shadow-sm ${
+            isSidebarOpen ? 'opacity-0 pointer-events-none translate-x-[-10px]' : 'opacity-100 translate-x-0'
+          }`}
+        >
+          <PanelLeft className="w-5 h-5" />
+        </Button>
+      </div>
+
+      {/* Sidebar panel */}
+      <AnimatePresence initial={false}>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ width: 0, opacity: 0, marginLeft: 0 }}
+            animate={{ width: 320, opacity: 1, marginLeft: 24 }}
+            exit={{ width: 0, opacity: 0, marginLeft: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="h-[calc(100vh-48px)] my-6 bg-white/60 dark:bg-zinc-950/60 backdrop-blur-2xl border border-zinc-200/40 dark:border-zinc-800/40 rounded-2xl shadow-lg dark:shadow-none z-40 flex-shrink-0 flex flex-col hidden md:flex overflow-hidden relative"
+          >
+            {/* Header */}
+            <div className="px-5 py-5 flex items-center justify-between border-b border-zinc-100/50 dark:border-zinc-800/50">
+              <h2 className="font-semibold text-zinc-800 dark:text-zinc-200 flex items-center gap-2.5">
+                <History className="w-4.5 h-4.5 text-blue-500" />
+                历史任务
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarOpen(false)}
+                className="w-8 h-8 rounded-full text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </Button>
+            </div>
+            
+            {/* Content list */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
+              {isLoadingHistory ? (
+                <div className="flex flex-col items-center justify-center p-8 text-zinc-400 gap-3">
+                  <LoaderCircle className="w-5 h-5 animate-spin" />
+                  <span className="text-xs font-medium">加载中...</span>
+                </div>
+              ) : historyRuns.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 text-zinc-400 gap-3 h-32">
+                  <History className="w-8 h-8 opacity-20" />
+                  <span className="text-sm">暂无历史任务</span>
+                </div>
+              ) : (
+                historyRuns.map((run) => (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate="rest"
+                    whileHover="hover"
+                    variants={{
+                      rest: { opacity: 1, y: 0 },
+                      hover: { opacity: 1, y: 0 }
+                    }}
+                    key={run.run_id}
+                    onClick={() => navigate(`/load/${run.run_id}`)}
+                    className="p-3.5 rounded-xl bg-white/70 dark:bg-zinc-950/50 border border-zinc-200/50 dark:border-zinc-800/60 shadow-[0_2px_10px_rgb(0,0,0,0.02)] hover:shadow-md hover:bg-white/90 dark:hover:bg-zinc-900/80 hover:border-blue-300/60 dark:hover:border-blue-900/50 cursor-pointer transition-all duration-300 flex flex-col gap-2.5 group relative overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/0 to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    
+                    {/* Delete Action Button */}
+                    <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => handleDeleteClick(e, run.run_id)}
+                        className="w-7 h-7 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                        title="删除记录"
+                      >
+                        <motion.svg 
+                          width="14" 
+                          height="14" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round" 
+                          className="overflow-visible"
+                        >
+                          <motion.path 
+                            d="M3 6h18" 
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
+                            transition={{ duration: 0.16 }} 
+                          />
+                          <motion.path 
+                            d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" 
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
+                            transition={{ duration: 0.22, delay: 0.04 }} 
+                          />
+                          <motion.path 
+                            d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" 
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
+                            transition={{ duration: 0.18, delay: 0.08 }} 
+                          />
+                          <motion.line 
+                            x1="10" y1="11" x2="10" y2="17" 
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
+                            transition={{ duration: 0.14, delay: 0.1 }} 
+                          />
+                          <motion.line 
+                            x1="14" y1="11" x2="14" y2="17" 
+                            variants={{ rest: { pathLength: 0, opacity: 0 }, hover: { pathLength: 1, opacity: 1 } }} 
+                            transition={{ duration: 0.14, delay: 0.1 }} 
+                          />
+                        </motion.svg>
+                      </Button>
+                    </div>
+
+                    <div className="flex items-start justify-between gap-3 relative z-10 pr-8">
+                      <span className="text-[13px] leading-relaxed font-medium text-zinc-700 dark:text-zinc-300 line-clamp-2 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors">
+                        {run.request?.learning_goal || run.run_id}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 relative z-10">
+                        <Clock className="w-3 h-3" />
+                        {new Date(run.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      
+                      {run.status === "running" || run.status === "queued" ? (
+                        <div className="flex items-center text-[10px] font-medium text-blue-500 bg-blue-50/80 dark:bg-blue-500/10 px-2 py-0.5 rounded-md shrink-0">
+                          <LoaderCircle className="w-3 h-3 animate-spin mr-1" />
+                          运行中
+                        </div>
+                      ) : run.status === "succeeded" ? (
+                        <div className="flex items-center text-[10px] font-medium text-emerald-500 bg-emerald-50/80 dark:bg-emerald-500/10 px-2 py-0.5 rounded-md shrink-0">
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/80 mr-1.5" />
+                          已完成
+                        </div>
+                      ) : (
+                        <div className="flex items-center text-[10px] font-medium text-red-500 bg-red-50/80 dark:bg-red-500/10 px-2 py-0.5 rounded-md shrink-0">
+                          <div className="w-1.5 h-1.5 rounded-full bg-red-500/80 mr-1.5" />
+                          出错
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {runToDelete && (
+          <>
+            <motion.div
+              key="overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setRunToDelete(null)}
+              className="fixed inset-0 z-[60] bg-black/10 dark:bg-black/40 backdrop-blur-sm transition-opacity duration-300"
+            />
+            <motion.div
+              key="modal"
+              initial={{ opacity: 0, scale: 0.95, x: "-50%", y: "-40%" }}
+              animate={{ opacity: 1, scale: 1, x: "-50%", y: "-50%" }}
+              exit={{ opacity: 0, scale: 0.95, x: "-50%", y: "-40%" }}
+              whileHover="hover"
+              className="fixed left-1/2 top-1/2 z-[70] w-[calc(100%-32px)] max-w-sm rounded-[24px] border border-zinc-200/50 dark:border-zinc-800/50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl p-6 shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center gap-3">
+                <AnimatedTrashIcon />
+                <div className="space-y-1.5">
+                  <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">删除历史任务</h3>
+                  <p className="text-[13px] text-zinc-500 font-medium leading-relaxed px-2">
+                    确定要删除这条学习记录吗？删除后所有相关材料将无法找回。
+                  </p>
+                </div>
+                <div className="flex w-full gap-3 mt-6">
+                  <Button
+                    variant="outline"
+                    className="flex-1 rounded-xl bg-white/50 border-zinc-200 hover:bg-zinc-100 dark:bg-zinc-800/50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                    onClick={() => setRunToDelete(null)}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1 rounded-xl bg-red-500 hover:bg-red-600 text-white"
+                    onClick={confirmDelete}
+                  >
+                    确认删除
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 relative overflow-hidden h-screen overflow-y-auto w-full">
+
         {/* Background blobs */}
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none w-full h-full">
           <motion.div
@@ -364,6 +638,7 @@ export default function HomePage() {
               disabled={isSubmitting}
             >
               <PromptInputTextarea
+                id="prompt-main-textarea"
                 placeholder="在此输入你今天想学的内容..."
                 className="text-base sm:text-lg min-h-14 py-2 text-black dark:text-black placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed font-medium"
               />
@@ -532,102 +807,196 @@ export default function HomePage() {
           </div>
         </motion.div>
       </motion.div>
+      </div>
     </div>
   )
 }
 
 function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x: number, y: number, w: number, h: number }, onComplete: () => void }) {
   const [targetRect, setTargetRect] = useState<{ x: number, y: number } | null>(null)
-  const startX = flyingData.x + flyingData.w / 2
-  const startY = flyingData.y + flyingData.h / 2
-  const [trailPoint, setTrailPoint] = useState<{ x: number, y: number }>({ x: startX, y: startY })
+  const startCenterX = flyingData.x + flyingData.w / 2
+  const startCenterY = flyingData.y + flyingData.h / 2
+  const [trailPoint, setTrailPoint] = useState<{ x: number, y: number }>({ x: startCenterX, y: startCenterY })
+  const beamDuration = 0.68
 
-  useEffect(() => {
-    // Attempt to locate input box to fly words to
-    const inputArea = document.getElementById('main-input-box')
-    if (inputArea) {
-      const rect = inputArea.getBoundingClientRect()
-      // Aim the bubble center to a point inside the textarea to avoid visual offset.
-      const targetAnchorX = rect.left + Math.min(140, rect.width * 0.2)
-      const targetAnchorY = rect.top + Math.min(42, rect.height * 0.45)
-      setTargetRect({
-        x: targetAnchorX - flyingData.w / 2,
-        y: targetAnchorY - flyingData.h / 2,
-      })
+  useLayoutEffect(() => {
+    const inputArea = document.getElementById('prompt-main-textarea')
+    const inputBox = document.getElementById('main-input-box')
+    if (!inputArea) {
+      setTargetRect({ x: flyingData.x, y: flyingData.y })
+      return
     }
-  }, [flyingData.h, flyingData.w])
+
+    const rect = inputArea.getBoundingClientRect()
+    const boxRect = inputBox?.getBoundingClientRect() ?? rect
+    const computed = window.getComputedStyle(inputArea)
+    const paddingLeft = Number.parseFloat(computed.paddingLeft) || 0
+    const paddingTop = Number.parseFloat(computed.paddingTop) || 0
+    const fontSize = Number.parseFloat(computed.fontSize) || 16
+    const parsedLineHeight = Number.parseFloat(computed.lineHeight)
+    const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : fontSize * 1.35
+
+    // Aim at the first input line's visual center, then clamp into input box bounds.
+    const anchorX = rect.left + paddingLeft + 10
+    const anchorY = rect.top + paddingTop + lineHeight * 0.5
+    const rawX = anchorX - flyingData.w / 2
+    const rawY = anchorY - flyingData.h / 2
+    const insetX = 12
+    const insetY = 8
+    const minX = boxRect.left + insetX
+    const maxX = boxRect.right - insetX - flyingData.w
+    const minY = boxRect.top + insetY
+    const maxY = boxRect.bottom - insetY - flyingData.h
+    const clampedX = Math.min(Math.max(rawX, minX), Math.max(minX, maxX))
+    const clampedY = Math.min(Math.max(rawY, minY), Math.max(minY, maxY))
+
+    setTargetRect({
+      x: clampedX,
+      y: clampedY,
+    })
+  }, [flyingData.h, flyingData.w, flyingData.x, flyingData.y])
 
   useEffect(() => {
-    setTrailPoint({ x: startX, y: startY })
-  }, [startX, startY])
+    setTrailPoint({ x: startCenterX, y: startCenterY })
+  }, [startCenterX, startCenterY])
 
-  const beamDuration = 0.72
-  const deltaX = trailPoint.x - startX
-  const lift = Math.max(56, Math.abs(deltaX) * 0.2)
-  const controlY = Math.min(startY, trailPoint.y) - lift
-  const beamPath = `M ${startX} ${startY} Q ${startX + deltaX * 0.5} ${controlY} ${trailPoint.x} ${trailPoint.y}`
+  const deltaX = trailPoint.x - startCenterX
+  const lift = Math.max(48, Math.abs(deltaX) * 0.18)
+  const controlY = Math.min(startCenterY, trailPoint.y) - lift
+  const beamPath = `M ${startCenterX} ${startCenterY} Q ${startCenterX + deltaX * 0.5} ${controlY} ${trailPoint.x} ${trailPoint.y}`
 
   return (
     <>
       {targetRect && (
         <svg className="fixed inset-0 z-40 pointer-events-none overflow-visible" aria-hidden>
+          <defs>
+            <linearGradient id="beamGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="transparent" />
+              <stop offset="50%" stopColor="rgba(56, 189, 248, 0.4)" />
+              <stop offset="100%" stopColor="transparent" />
+            </linearGradient>
+          </defs>
           <path
             d={beamPath}
             fill="none"
-            stroke="rgba(56, 189, 248, 0.36)"
+            stroke="url(#beamGradient)"
             strokeWidth={2}
             strokeLinecap="round"
-            opacity={0.32}
+            opacity={0.95}
           />
         </svg>
       )}
 
-      <motion.div
-        initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
-        animate={targetRect ? {
-          x: targetRect.x,
-          y: targetRect.y,
-          opacity: [1, 1, 0],
-          scale: 0.82
-        } : {}}
-        transition={{ duration: beamDuration, ease: [0.16, 1, 0.3, 1] }}
-        onUpdate={(latest) => {
-          const nextXRaw = latest.x
-          const nextYRaw = latest.y
-          const nextX =
-            typeof nextXRaw === "number"
-              ? nextXRaw
-              : Number.parseFloat(nextXRaw ? String(nextXRaw) : `${flyingData.x}`)
-          const nextY =
-            typeof nextYRaw === "number"
-              ? nextYRaw
-              : Number.parseFloat(nextYRaw ? String(nextYRaw) : `${flyingData.y}`)
+      {targetRect && (
+        <motion.div
+          initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
+          animate={{
+            x: targetRect.x,
+            y: targetRect.y,
+            opacity: [1, 1, 0],
+            scale: 0.82
+          }}
+          transition={{ duration: beamDuration, ease: [0.16, 1, 0.3, 1] }}
+          onUpdate={(latest) => {
+            const nextXRaw = latest.x
+            const nextYRaw = latest.y
+            const nextX =
+              typeof nextXRaw === "number"
+                ? nextXRaw
+                : Number.parseFloat(nextXRaw ? String(nextXRaw) : `${flyingData.x}`)
+            const nextY =
+              typeof nextYRaw === "number"
+                ? nextYRaw
+                : Number.parseFloat(nextYRaw ? String(nextYRaw) : `${flyingData.y}`)
 
-          if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return
+            if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return
 
-          const centerX = nextX + flyingData.w / 2
-          const centerY = nextY + flyingData.h / 2
-          setTrailPoint((prev) => {
-            if (Math.abs(prev.x - centerX) < 0.5 && Math.abs(prev.y - centerY) < 0.5) {
-              return prev
-            }
-            return { x: centerX, y: centerY }
-          })
-        }}
-        onAnimationComplete={onComplete}
-        className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
-      >
-        <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
-          {/* Inner passing beam */}
-          <motion.div 
-            initial={{ left: "-100%" }}
-            animate={{ left: "200%" }}
-            transition={{ duration: beamDuration, ease: "linear" }}
-            className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
-          />
-          {flyingData.text}
-        </div>
-      </motion.div>
+            const centerX = nextX + flyingData.w / 2
+            const centerY = nextY + flyingData.h / 2
+            setTrailPoint((prev) => {
+              if (Math.abs(prev.x - centerX) < 0.5 && Math.abs(prev.y - centerY) < 0.5) {
+                return prev
+              }
+              return { x: centerX, y: centerY }
+            })
+          }}
+          onAnimationComplete={onComplete}
+          className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
+        >
+          <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
+            <motion.div 
+              initial={{ left: "-100%" }}
+              animate={{ left: "200%" }}
+              transition={{ duration: beamDuration, ease: "linear" }}
+              className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
+            />
+            {flyingData.text}
+          </div>
+        </motion.div>
+      )}
     </>
+  )
+}
+
+function AnimatedTrashIcon() {
+  return (
+    <motion.div 
+      className="relative w-16 h-16 flex items-center justify-center rounded-2xl bg-red-50/50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 shadow-sm mx-auto mb-1 overflow-visible"
+    >
+      <svg 
+        width="28" 
+        height="28" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        stroke="currentColor" 
+        strokeWidth="2" 
+        strokeLinecap="round" 
+        strokeLinejoin="round" 
+        className="text-red-500/80 transition-colors overflow-visible"
+      >
+        {/* Animated Lid */}
+        <motion.g
+          variants={{
+            rest: { rotate: 0, y: 0, x: 0 },
+            hover: { rotate: -16, y: -3, x: -2 }
+          }}
+          style={{ transformOrigin: "2px 6px" }}
+          transition={{ type: "spring", stiffness: 520, damping: 22 }}
+        >
+          <motion.path 
+            d="M3 6h18" 
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={{ pathLength: 1, opacity: 1 }}
+            transition={{ duration: 0.26, delay: 0.02, ease: "easeOut" }}
+          />
+          <motion.path 
+            d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" 
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={{ pathLength: 1, opacity: 1 }}
+            transition={{ duration: 0.26, delay: 0.06, ease: "easeOut" }}
+          />
+        </motion.g>
+
+        {/* Bin Body */}
+        <motion.path 
+          d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" 
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: 0.34, ease: "easeOut" }}
+        />
+        <motion.line 
+          x1="10" y1="11" x2="10" y2="17" 
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: 0.18, delay: 0.08, ease: "easeOut" }}
+        />
+        <motion.line 
+          x1="14" y1="11" x2="14" y2="17" 
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: 0.18, delay: 0.12, ease: "easeOut" }}
+        />
+      </svg>
+    </motion.div>
   )
 }

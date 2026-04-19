@@ -107,6 +107,16 @@ class RunRegistry:
         """Return the in-memory session for a run when it is still tracked."""
         with self._lock:
             return self._sessions.get(run_id)
+    def remove_run(self, run_id: str) -> None:
+        """Remove a run from memory tracking."""
+        with self._lock:
+            if run_id in self._sessions:
+                session = self._sessions.pop(run_id)
+                with session.condition:
+                    if session.status not in {RunStatus.succeeded, RunStatus.failed}:
+                        session.status = RunStatus.failed
+                        session.error = "Run deleted by user."
+                    session.condition.notify_all()
 
     def list_session_ids(self) -> list[str]:
         """Return all run identifiers that are currently tracked in memory."""
