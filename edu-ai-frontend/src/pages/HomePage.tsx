@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -22,12 +22,53 @@ const PHRASES = [
     "随时答疑，高效提分",
     "攻克难题，轻松拿高分"
   ]
-const SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理", "其他"]
-const GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
-const TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
+const INITIAL_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理"]
+const INITIAL_GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
+const INITIAL_TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
 
 interface CreatePrepRunResponse {
   run_id?: string
+}
+
+function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [value, setValue] = useState("");
+
+  if (isEditing) {
+    return (
+      <input 
+        autoFocus
+        className="px-3 py-[2px] text-sm rounded-full border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-24 h-7 text-zinc-900 dark:text-zinc-100"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={() => {
+          if (value.trim()) onAdd(value.trim());
+          setIsEditing(false);
+          setValue("");
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            if (value.trim()) onAdd(value.trim());
+            setIsEditing(false);
+            setValue("");
+          } else if (e.key === 'Escape') {
+            setIsEditing(false);
+            setValue("");
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <Badge 
+      variant="outline"
+      className="cursor-pointer px-3 py-1 font-normal border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors bg-transparent h-7"
+      onClick={() => setIsEditing(true)}
+    >
+      <Plus className="w-3 h-3 mr-1" /> 自定义
+    </Badge>
+  );
 }
 
 export default function HomePage() {
@@ -35,6 +76,10 @@ export default function HomePage() {
   const [isExpanded, setIsExpanded] = useState(false)
   
   // Extra options
+  const [subjects, setSubjects] = useState(INITIAL_SUBJECTS)
+  const [grades, setGrades] = useState(INITIAL_GRADES)
+  const [teacherStyles, setTeacherStyles] = useState(INITIAL_TEACHER_STYLES)
+  
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([])
   const [selectedGrades, setSelectedGrades] = useState<string[]>([])
   const [selectedStyles, setSelectedStyles] = useState<string[]>([])
@@ -54,17 +99,32 @@ export default function HomePage() {
   }, [])
 
   // Fly animation setup
-  const [flyingSuggestion, setFlyingSuggestion] = useState<{ text: string, x: number, y: number, w: number } | null>(null)
+  const [flyingSuggestion, setFlyingSuggestion] = useState<{ text: string, x: number, y: number, w: number, h: number } | null>(null)
   
   const handleSuggestionClick = (e: React.MouseEvent, text: string) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setFlyingSuggestion({ text, x: rect.left, y: rect.top, w: rect.width })
+    setFlyingSuggestion({ text, x: rect.left, y: rect.top, w: rect.width, h: rect.height })
   }
 
-  const toggleArray = (arr: string[], setArr: React.Dispatch<React.SetStateAction<string[]>>, item: string) => {
-    if (arr.includes(item)) setArr(arr.filter(i => i !== item))
-    else setArr([...arr, item])
+  const toggleSingle = (
+    arr: string[],
+    setArr: React.Dispatch<React.SetStateAction<string[]>>,
+    item: string,
+  ) => {
+    if (arr[0] === item) setArr([])
+    else setArr([item])
   }
+  
+  const handleAddCustom = (
+    val: string, 
+    sourceArr: string[], 
+    setSourceArr: React.Dispatch<React.SetStateAction<string[]>>,
+    setSelectedArr: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    if (!val || sourceArr.includes(val)) return;
+    setSourceArr([...sourceArr, val]);
+    setSelectedArr([val]);
+  };
 
   const handleSearch = async () => {
     const trimmedQuery = query.trim()
@@ -142,7 +202,7 @@ export default function HomePage() {
   }
 
   return (
-          <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 bg-[#fafafa] dark:bg-zinc-950 relative overflow-hidden">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 bg-[#fafafa] dark:bg-zinc-950 relative overflow-hidden">
         {/* Background blobs */}
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none w-full h-full">
           <motion.div
@@ -305,7 +365,7 @@ export default function HomePage() {
             >
               <PromptInputTextarea
                 placeholder="在此输入你今天想学的内容..."
-                className="text-base sm:text-lg min-h-14 py-2 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 leading-relaxed font-medium"
+                className="text-base sm:text-lg min-h-14 py-2 text-black dark:text-black placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed font-medium"
               />
               
               <div className="flex justify-between items-center w-full px-1 pb-1 pt-3 mt-2">
@@ -351,61 +411,67 @@ export default function HomePage() {
                       
                       <div className="space-y-3">
                         <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" />学科领域</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {SUBJECTS.map(sub => (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {subjects.map(sub => (
                             <Badge 
                               key={sub}
                               variant={selectedSubjects.includes(sub) ? "default" : "secondary"}
-                              className={`cursor-pointer px-3 py-1 font-normal transition-all duration-200 ${
+                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
                                 selectedSubjects.includes(sub) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
-                              onClick={() => toggleArray(selectedSubjects, setSelectedSubjects, sub)}
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
+                              onClick={() => toggleSingle(selectedSubjects, setSelectedSubjects, sub)}
                             >
                               {sub}
                             </Badge>
                           ))}
+                          <CustomEditableTag 
+                            onAdd={(val) => handleAddCustom(val, subjects, setSubjects, setSelectedSubjects)}
+                          />
                         </div>
                       </div>
                       
                       <div className="space-y-3">
                         <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5" />适用年级</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {GRADES.map(grade => (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {grades.map(grade => (
                             <Badge 
                               key={grade}
                               variant={selectedGrades.includes(grade) ? "default" : "secondary"}
-                              className={`cursor-pointer px-3 py-1 font-normal transition-all duration-200 ${
+                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
                                 selectedGrades.includes(grade) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
-                              onClick={() => toggleArray(selectedGrades, setSelectedGrades, grade)}
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
+                              onClick={() => toggleSingle(selectedGrades, setSelectedGrades, grade)}
                             >
                               {grade}
                             </Badge>
                           ))}
+                          <CustomEditableTag 
+                            onAdd={(val) => handleAddCustom(val, grades, setGrades, setSelectedGrades)}
+                          />
                         </div>
                       </div>
 
                       <div className="space-y-3">
                         <h4 className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><User2 className="w-3.5 h-3.5" />教师风格</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {TEACHER_STYLES.map(style => (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {teacherStyles.map(style => (
                             <Badge 
                               key={style}
                               variant={selectedStyles.includes(style) ? "default" : "secondary"}
-                              className={`cursor-pointer px-3 py-1 font-normal transition-all duration-200 ${
+                              className={"cursor-pointer px-3 py-1 font-normal transition-all duration-200 " + (
                                 selectedStyles.includes(style) 
                                   ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" 
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
-                              onClick={() => toggleArray(selectedStyles, setSelectedStyles, style)}
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-700")}
+                              onClick={() => toggleSingle(selectedStyles, setSelectedStyles, style)}
                             >
                               {style}
                             </Badge>
                           ))}
+                          <CustomEditableTag 
+                            onAdd={(val) => handleAddCustom(val, teacherStyles, setTeacherStyles, setSelectedStyles)}
+                          />
                         </div>
                       </div>
 
@@ -454,7 +520,7 @@ export default function HomePage() {
               >
                 <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
                   <PromptSuggestion
-                    className="bg-white dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-200/80 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
+                    className="bg-white dark:bg-white backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-400 text-black dark:text-black hover:text-black dark:hover:text-black px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
                   >
                     
                     <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
@@ -470,66 +536,98 @@ export default function HomePage() {
   )
 }
 
-function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x: number, y: number, w: number }, onComplete: () => void }) {
+function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x: number, y: number, w: number, h: number }, onComplete: () => void }) {
   const [targetRect, setTargetRect] = useState<{ x: number, y: number } | null>(null)
+  const startX = flyingData.x + flyingData.w / 2
+  const startY = flyingData.y + flyingData.h / 2
+  const [trailPoint, setTrailPoint] = useState<{ x: number, y: number }>({ x: startX, y: startY })
 
   useEffect(() => {
     // Attempt to locate input box to fly words to
     const inputArea = document.getElementById('main-input-box')
     if (inputArea) {
       const rect = inputArea.getBoundingClientRect()
-      // approximate target position into the textarea
-      setTargetRect({ x: rect.left + 24, y: rect.top + 24 })
+      // Aim the bubble center to a point inside the textarea to avoid visual offset.
+      const targetAnchorX = rect.left + Math.min(140, rect.width * 0.2)
+      const targetAnchorY = rect.top + Math.min(42, rect.height * 0.45)
+      setTargetRect({
+        x: targetAnchorX - flyingData.w / 2,
+        y: targetAnchorY - flyingData.h / 2,
+      })
     }
-  }, [])
+  }, [flyingData.h, flyingData.w])
+
+  useEffect(() => {
+    setTrailPoint({ x: startX, y: startY })
+  }, [startX, startY])
+
+  const beamDuration = 0.72
+  const deltaX = trailPoint.x - startX
+  const lift = Math.max(56, Math.abs(deltaX) * 0.2)
+  const controlY = Math.min(startY, trailPoint.y) - lift
+  const beamPath = `M ${startX} ${startY} Q ${startX + deltaX * 0.5} ${controlY} ${trailPoint.x} ${trailPoint.y}`
 
   return (
-    <motion.div
-      initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
-      animate={targetRect ? { 
-        x: targetRect.x, 
-        y: targetRect.y, 
-        opacity: [1, 1, 0],
-        scale: 0.8
-      } : {}}
-      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-      onAnimationComplete={onComplete}
-      className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
-    >
-      {/* Light beam / glow trail effect behind the flying text */}
+    <>
+      {targetRect && (
+        <svg className="fixed inset-0 z-40 pointer-events-none overflow-visible" aria-hidden>
+          <path
+            d={beamPath}
+            fill="none"
+            stroke="rgba(56, 189, 248, 0.36)"
+            strokeWidth={2}
+            strokeLinecap="round"
+            opacity={0.32}
+          />
+        </svg>
+      )}
+
       <motion.div
-         initial={{ opacity: 0, scaleY: 0.5 }}
-         animate={{ opacity: [0, 0.8, 0], scaleY: [0.5, 1.5, 0.5], scaleX: [1, 2, 1] }}
-         transition={{ duration: 0.6, ease: "easeInOut" }}
-         className="absolute inset-[-20px] bg-blue-500/30 blur-2xl rounded-full z-0"
-      />
-      <div className="bg-white dark:bg-zinc-900 shadow-[0_0_30px_rgba(59,130,246,0.5)] border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate w-full h-full relative z-10 overflow-hidden">
-        {/* Inner passing beam */}
-        <motion.div 
-          initial={{ left: "-100%" }}
-          animate={{ left: "200%" }}
-          transition={{ duration: 0.6, ease: "linear" }}
-          className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
-        />
-        {flyingData.text}
-      </div>
-    </motion.div>
+        initial={{ x: flyingData.x, y: flyingData.y, width: flyingData.w, opacity: 1, scale: 1 }}
+        animate={targetRect ? {
+          x: targetRect.x,
+          y: targetRect.y,
+          opacity: [1, 1, 0],
+          scale: 0.82
+        } : {}}
+        transition={{ duration: beamDuration, ease: [0.16, 1, 0.3, 1] }}
+        onUpdate={(latest) => {
+          const nextXRaw = latest.x
+          const nextYRaw = latest.y
+          const nextX =
+            typeof nextXRaw === "number"
+              ? nextXRaw
+              : Number.parseFloat(nextXRaw ? String(nextXRaw) : `${flyingData.x}`)
+          const nextY =
+            typeof nextYRaw === "number"
+              ? nextYRaw
+              : Number.parseFloat(nextYRaw ? String(nextYRaw) : `${flyingData.y}`)
+
+          if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return
+
+          const centerX = nextX + flyingData.w / 2
+          const centerY = nextY + flyingData.h / 2
+          setTrailPoint((prev) => {
+            if (Math.abs(prev.x - centerX) < 0.5 && Math.abs(prev.y - centerY) < 0.5) {
+              return prev
+            }
+            return { x: centerX, y: centerY }
+          })
+        }}
+        onAnimationComplete={onComplete}
+        className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
+      >
+        <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
+          {/* Inner passing beam */}
+          <motion.div 
+            initial={{ left: "-100%" }}
+            animate={{ left: "200%" }}
+            transition={{ duration: beamDuration, ease: "linear" }}
+            className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
+          />
+          {flyingData.text}
+        </div>
+      </motion.div>
+    </>
   )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
