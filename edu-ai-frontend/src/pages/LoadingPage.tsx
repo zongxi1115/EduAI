@@ -396,17 +396,30 @@ export default function LoadingPage() {
             <p className="text-gray-500 mb-8 max-w-sm text-center">
               所有 AI 智能体子任务均已正确执行，讲义、题库及动画材料就绪。
             </p>
-            <button
-              onClick={() => {
-                if (id) {
-                  navigate(`/study/${id}`);
-                }
-              }}
-              className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5"
-            >
-              <CheckCircle2 className="w-5 h-5" />
-              进入课堂
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={() => {
+                  if (id) {
+                    navigate(`/study/${id}`);
+                  }
+                }}
+                className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                进入课堂
+              </button>
+              <button
+                onClick={() => {
+                  if (id) {
+                    navigate(`/present/${id}`);
+                  }
+                }}
+                className="px-8 py-3.5 rounded-full border border-[#09f]/25 bg-white text-[#09f] hover:bg-[#09f]/5 font-medium flex items-center gap-2 transition-all hover:-translate-y-0.5"
+              >
+                <FileCode2 className="w-5 h-5" />
+                开始演示
+              </button>
+            </div>
           </motion.div>
         )}
 
@@ -652,5 +665,4 @@ export default function LoadingPage() {
     </div>
   );
 }
-
 

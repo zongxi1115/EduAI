@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import StudyArea from "./pages/StudyArea";
 import LoadingPage from "./pages/LoadingPage";
+import PresentationPage from "./pages/PresentationPage";
 
 export default function App() {
   return (
@@ -10,6 +11,7 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/study" element={<StudyArea />} />
         <Route path="/study/:runId" element={<StudyArea />} />
+        <Route path="/present/:runId" element={<PresentationPage />} />
         <Route path="/load/:id" element={<LoadingPage />} />
       </Routes>
     </BrowserRouter>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from html import escape as html_escape
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -255,3 +256,361 @@ def render_fallback_report(
         lines.extend(f"- 备注: {note}" for note in artifact.notes)
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def render_lecture_script_markdown(
+    request: GenerationRequest,
+    deck_title: str,
+    slides: list[dict[str, Any]],
+) -> str:
+    """Render a teacher-facing lecture script derived from slide metadata."""
+    lines = [
+        "# 课堂讲稿",
+        "",
+        f"- 课程主题: {deck_title}",
+        f"- 学习目标: {request.learning_goal}",
+        f"- 学科: {request.subject}",
+        f"- 学段/年级: {request.grade_level}",
+        "",
+    ]
+
+    for slide in slides:
+        lines.extend(
+            [
+                f"## 第{slide.get('sequence', 0)}页：{slide.get('title', '未命名页面')}",
+                "",
+                f"- 教学目标: {slide.get('teaching_goal', '围绕当前课程目标展开讲解。')}",
+                f"- 页面类型: {slide.get('visual_type', 'concept')}",
+                "",
+                "### 讲解主线",
+                slide.get("script_context_current", ""),
+                "",
+                "### 页内动画步骤",
+                *[
+                    f"{index}. {item}"
+                    for index, item in enumerate(slide.get("animation_steps", []), start=1)
+                ],
+                "",
+                "### 教师备注",
+                slide.get("speaker_notes", ""),
+                "",
+            ]
+        )
+        interrupts = slide.get("interrupts", [])
+        if interrupts:
+            lines.append("### 课堂中断点")
+            lines.extend(
+                f"- {item.get('type', 'pause')}: {item.get('prompt', '')}" for item in interrupts
+            )
+            lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def render_presenter_notes_markdown(
+    deck_title: str,
+    slides: list[dict[str, Any]],
+) -> str:
+    """Render concise presenter notes for the presentation shell."""
+    lines = [
+        "# Presenter Notes",
+        "",
+        f"- Deck: {deck_title}",
+        f"- Slide count: {len(slides)}",
+        "",
+    ]
+
+    for slide in slides:
+        lines.extend(
+            [
+                f"## Slide {slide.get('sequence', 0)} · {slide.get('title', 'Untitled')}",
+                "",
+                f"- Teaching goal: {slide.get('teaching_goal', '')}",
+                f"- Notes: {slide.get('speaker_notes', '')}",
+                "",
+            ]
+        )
+        interrupts = slide.get("interrupts", [])
+        if interrupts:
+            lines.append("- Interrupts:")
+            lines.extend(
+                f"  - {item.get('type', 'pause')}: {item.get('prompt', '')}" for item in interrupts
+            )
+            lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def render_slide_html(deck_title: str, slide: dict[str, Any]) -> str:
+    """Render one standalone HTML slide with a common EduSlide runtime contract."""
+    title = html_escape(str(slide.get("title", "Untitled Slide")))
+    deck = html_escape(deck_title)
+    teaching_goal = html_escape(str(slide.get("teaching_goal", "")))
+    context = html_escape(str(slide.get("script_context_current", "")))
+    visual_type = html_escape(str(slide.get("visual_type", "concept")))
+    before_context = html_escape(str(slide.get("script_context_before", "")))
+    after_context = html_escape(str(slide.get("script_context_after", "")))
+
+    animation_steps = [
+        str(item).strip()
+        for item in slide.get("animation_steps", [])
+        if str(item).strip()
+    ]
+    if not animation_steps:
+        animation_steps = [str(slide.get("script_context_current", "讲解当前核心内容。")).strip()]
+
+    interrupts = [
+        item
+        for item in slide.get("interrupts", [])
+        if isinstance(item, dict) and str(item.get("prompt", "")).strip()
+    ]
+
+    reveal_items_html = "\n".join(
+        f'<li class="reveal-item" data-step="{index}">{html_escape(step)}</li>'
+        for index, step in enumerate(animation_steps, start=1)
+    )
+    interrupt_cards_html = "\n".join(
+        (
+            '<div class="interrupt-card">'
+            f'<span class="interrupt-type">{html_escape(str(item.get("type", "pause")))}</span>'
+            f'<p>{html_escape(str(item.get("prompt", "")))}</p>'
+            "</div>"
+        )
+        for item in interrupts
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --bg: linear-gradient(135deg, #eff6ff 0%, #ffffff 35%, #f8fafc 100%);
+        --panel: rgba(255, 255, 255, 0.82);
+        --border: rgba(148, 163, 184, 0.22);
+        --primary: #2563eb;
+        --text: #0f172a;
+        --muted: #475569;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }}
+      .stage {{
+        min-height: 100vh;
+        padding: 48px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 28px;
+      }}
+      .meta {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        color: var(--muted);
+        font-size: 14px;
+      }}
+      .badge {{
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.12);
+        color: var(--primary);
+        font-weight: 600;
+      }}
+      .hero {{
+        display: grid;
+        gap: 24px;
+        align-content: start;
+      }}
+      .headline {{
+        display: grid;
+        gap: 12px;
+      }}
+      h1 {{
+        margin: 0;
+        font-size: clamp(38px, 5vw, 64px);
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+      }}
+      .goal {{
+        font-size: 20px;
+        color: var(--primary);
+        font-weight: 600;
+      }}
+      .context {{
+        max-width: 980px;
+        padding: 22px 24px;
+        border-radius: 28px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        font-size: 20px;
+        line-height: 1.7;
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.07);
+        white-space: pre-wrap;
+      }}
+      .grid {{
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+        gap: 24px;
+      }}
+      .card {{
+        padding: 24px;
+        border-radius: 28px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.07);
+      }}
+      .card h2 {{
+        margin: 0 0 16px;
+        font-size: 18px;
+        color: var(--muted);
+      }}
+      .reveal-list {{
+        margin: 0;
+        padding-left: 24px;
+        display: grid;
+        gap: 14px;
+        font-size: 24px;
+        line-height: 1.55;
+      }}
+      .reveal-item {{
+        opacity: 0;
+        transform: translateY(14px);
+        transition: opacity 220ms ease, transform 220ms ease;
+      }}
+      .reveal-item.visible {{
+        opacity: 1;
+        transform: translateY(0);
+      }}
+      .interrupt-stack {{
+        display: grid;
+        gap: 12px;
+      }}
+      .interrupt-card {{
+        padding: 14px 16px;
+        border-radius: 20px;
+        background: rgba(37, 99, 235, 0.08);
+        border: 1px solid rgba(37, 99, 235, 0.12);
+      }}
+      .interrupt-type {{
+        display: inline-flex;
+        margin-bottom: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--primary);
+      }}
+      .interrupt-card p {{
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }}
+      .footer {{
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        color: var(--muted);
+        font-size: 14px;
+      }}
+      .footer strong {{
+        color: var(--text);
+      }}
+      @media (max-width: 960px) {{
+        .stage {{ padding: 24px; }}
+        .grid {{ grid-template-columns: 1fr; }}
+        .context, .reveal-list {{ font-size: 18px; }}
+      }}
+    </style>
+  </head>
+  <body>
+    <main class="stage">
+      <header class="meta">
+        <span>{deck}</span>
+        <span class="badge">{visual_type}</span>
+      </header>
+
+      <section class="hero">
+        <div class="headline">
+          <div class="goal">{teaching_goal}</div>
+          <h1>{title}</h1>
+        </div>
+        <div class="context">{context}</div>
+        <div class="grid">
+          <section class="card">
+            <h2>页内动画步骤</h2>
+            <ol class="reveal-list">{reveal_items_html}</ol>
+          </section>
+          <aside class="card">
+            <h2>课堂互动提示</h2>
+            <div class="interrupt-stack">
+              {interrupt_cards_html or '<p style="margin:0;color:var(--muted);line-height:1.55;">当前页没有额外 interrupt，可直接继续讲解。</p>'}
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div><strong>前文：</strong>{before_context or '本页承接上一页导入。'}</div>
+        <div><strong>后文：</strong>{after_context or '本页之后进入课堂收束或下一知识点。'}</div>
+      </footer>
+    </main>
+
+    <script>
+      (() => {{
+        const items = Array.from(document.querySelectorAll(".reveal-item"));
+        let step = 0;
+
+        const sync = () => {{
+          items.forEach((item, index) => {{
+            if (index < step) {{
+              item.classList.add("visible");
+            }} else {{
+              item.classList.remove("visible");
+            }}
+          }});
+        }};
+
+        const buildState = (advanced) => ({{
+          step,
+          totalSteps: items.length,
+          hasMore: step < items.length,
+          completed: step >= items.length,
+          advanced,
+        }});
+
+        window.EduSlide = {{
+          to_next() {{
+            if (step < items.length) {{
+              step += 1;
+              sync();
+              return buildState(true);
+            }}
+            return buildState(false);
+          }},
+          reset() {{
+            step = 0;
+            sync();
+            return buildState(true);
+          }},
+          get_state() {{
+            return buildState(false);
+          }},
+        }};
+
+        sync();
+      }})();
+    </script>
+  </body>
+</html>
+""".strip()

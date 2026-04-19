@@ -20,8 +20,12 @@ from .file_io import (
     append_jsonl_file,
     now_iso,
     render_fallback_report,
+    render_lecture_script_markdown,
     render_plan_markdown,
+    render_presenter_notes_markdown,
     render_practice_blueprint_markdown,
+    render_slide_html,
+    slugify_fragment,
     write_json_file,
     write_text_file,
 )
@@ -1243,6 +1247,265 @@ def _emit_event(
     event_callback(payload)
 
 
+def _build_slide_interrupts(slide_kind: str, request: GenerationRequest) -> list[dict[str, str]]:
+    if slide_kind == "objectives":
+        return [
+            {
+                "type": "quick_poll",
+                "prompt": f"请学生快速判断：在学习“{request.learning_goal}”前，自己最有把握的基础点是什么？",
+            }
+        ]
+    if slide_kind == "practice":
+        return [
+            {
+                "type": "quiz_pause",
+                "prompt": "暂停 30 秒，让学生先独立思考这页对应练习，再进入讲解。",
+            }
+        ]
+    if slide_kind == "manim":
+        return [
+            {
+                "type": "manim_replay",
+                "prompt": "如果学生对动态过程仍有疑问，可重放当前动画并只强调关键转折。",
+            }
+        ]
+    if slide_kind == "interactive_web":
+        return [
+            {
+                "type": "think_pair_share",
+                "prompt": "请学生两两讨论 1 分钟，再回到大屏共同操作当前交互页面。",
+            }
+        ]
+    if slide_kind == "summary":
+        return [
+            {
+                "type": "reflection_prompt",
+                "prompt": "让学生用一句话说出本节课最重要的结论，并补充一个仍然困惑的问题。",
+            }
+        ]
+    return []
+
+
+def _clean_bullet_lines(raw_text: str, *, limit: int = 4) -> list[str]:
+    lines: list[str] = []
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip().lstrip("-").lstrip("*").strip()
+        if not line or line.startswith("#") or line in lines:
+            continue
+        lines.append(line)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _read_first_available_text(artifact: ArtifactResult, candidate_names: tuple[str, ...]) -> str:
+    for file_path in artifact.files:
+        path = Path(file_path)
+        if path.name not in candidate_names or not path.is_file():
+            continue
+        if path.suffix.lower() not in {".md", ".txt", ".json"}:
+            continue
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return ""
+
+
+def _artifact_slide_payload(
+    artifact: ArtifactResult,
+    request: GenerationRequest,
+) -> dict[str, Any]:
+    kind_map = {
+        "study_guide": "concept",
+        "practice": "practice",
+        "manim": "manim",
+        "interactive_web": "interactive_web",
+    }
+    prompt_map = {
+        "study_guide": ("study_guide.md", "teacher_notes.md"),
+        "practice": ("practice_blueprint.md", "answer_key.md"),
+        "manim": ("render_guide.md",),
+        "interactive_web": ("usage_notes.md",),
+    }
+    title_map = {
+        "study_guide": "课前导学重点",
+        "practice": "练习设计与课堂检测",
+        "manim": "动画演示与视觉解释",
+        "interactive_web": "交互网页与课堂操作",
+    }
+    goal_map = {
+        "study_guide": "让学生进入课程前先建立知识框架和阅读路径。",
+        "practice": "让课堂练习从热身到迁移形成清晰梯度。",
+        "manim": "把抽象过程变成可视化、可暂停、可复述的讲解片段。",
+        "interactive_web": "把重点概念变成可操作、可讨论、可即时反馈的课堂互动。",
+    }
+
+    reference_text = _read_first_available_text(
+        artifact,
+        prompt_map.get(artifact.agent_name, tuple()),
+    )
+    reference_points = _clean_bullet_lines(reference_text, limit=4)
+    animation_steps = reference_points or _clean_bullet_lines(artifact.summary, limit=3)
+    if not animation_steps:
+        animation_steps = ["先交代当前部分的作用，再逐步展开关键内容。"]
+
+    current_context_parts = [artifact.summary.strip()]
+    if reference_points:
+        current_context_parts.append("；".join(reference_points))
+
+    notes = _compact_lines([*reference_points, *artifact.notes])[:3]
+    speaker_notes = "；".join(notes) or f"围绕“{request.learning_goal}”讲清这一类资源在课堂中的使用方式。"
+
+    return {
+        "title": title_map.get(artifact.agent_name, artifact.title),
+        "teaching_goal": goal_map.get(artifact.agent_name, "围绕当前资源完成课堂讲解。"),
+        "visual_type": kind_map.get(artifact.agent_name, "concept"),
+        "script_context_current": "\n".join(part for part in current_context_parts if part).strip(),
+        "animation_steps": animation_steps,
+        "speaker_notes": speaker_notes,
+        "interrupts": _build_slide_interrupts(kind_map.get(artifact.agent_name, "concept"), request),
+    }
+
+
+def _build_slideshow_payload(
+    request: GenerationRequest,
+    plan: PreparationPlan,
+    artifacts: list[ArtifactResult],
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    deck_title = f"{request.learning_goal} · 课堂演示稿"
+    completed_artifacts = [artifact for artifact in artifacts if artifact.status != "failed"]
+
+    slide_blueprints: list[dict[str, Any]] = [
+        {
+            "title": request.learning_goal,
+            "teaching_goal": "用一句话说清本节课要解决的问题，并把学生注意力聚焦到课程主线上。",
+            "visual_type": "cover",
+            "script_context_current": (
+                plan.plan_summary.strip()
+                or f"本节课围绕“{request.learning_goal}”展开，目标是把抽象知识转化为可讲、可练、可互动的课堂流程。"
+            ),
+            "animation_steps": _compact_lines(
+                [
+                    f"先点出本节课的核心目标：{request.learning_goal}",
+                    *plan.teaching_focus[:2],
+                    *(plan.required_materials[:1] or ["说明本节课会结合讲义、练习与互动资源同步推进。"]),
+                ]
+            )[:4],
+            "speaker_notes": "开场先把课堂目标和本节课的推进顺序说清楚，再提醒学生本节会有哪些互动环节。",
+            "interrupts": [],
+        },
+        {
+            "title": "本课目标与推进顺序",
+            "teaching_goal": "让学生知道先学什么、再练什么、最后怎么总结。",
+            "visual_type": "objectives",
+            "script_context_current": "\n".join(
+                [
+                    "课堂推进建议：",
+                    *[
+                        f"{index}. {item}"
+                        for index, item in enumerate(
+                            _compact_lines(
+                                [
+                                    *plan.teaching_focus,
+                                    *plan.teacher_checklist,
+                                    *plan.quality_bar,
+                                ]
+                            )[:4],
+                            start=1,
+                        )
+                    ],
+                ]
+            ).strip(),
+            "animation_steps": _compact_lines(
+                [
+                    *plan.teaching_focus,
+                    *plan.teacher_checklist,
+                    *plan.quality_bar,
+                ]
+            )[:4]
+            or ["先建立目标，再进行讲解与练习，最后完成课堂收束。"],
+            "speaker_notes": "第二页要把课堂节奏说清楚，让学生知道哪些地方需要主动参与，哪些地方是教师示范。",
+            "interrupts": _build_slide_interrupts("objectives", request),
+        },
+    ]
+
+    slide_blueprints.extend(
+        _artifact_slide_payload(artifact, request) for artifact in completed_artifacts
+    )
+    slide_blueprints.append(
+        {
+            "title": "收束与课后延伸",
+            "teaching_goal": "帮助学生复盘本节收获，并为下一步练习或反思留出口。",
+            "visual_type": "summary",
+            "script_context_current": "\n".join(
+                [
+                    "请在结尾明确三件事：",
+                    *[
+                        f"- {item}"
+                        for item in _compact_lines(
+                            [
+                                *plan.quality_bar,
+                                *plan.teacher_checklist,
+                                f"回到学习目标：{request.learning_goal}",
+                            ]
+                        )[:4]
+                    ],
+                ]
+            ),
+            "animation_steps": _compact_lines(
+                [
+                    f"回到学习目标：{request.learning_goal}",
+                    *plan.quality_bar,
+                    *plan.teacher_checklist,
+                ]
+            )[:4]
+            or ["回顾本节课最重要的一个结论。"],
+            "speaker_notes": "最后一页不要再扩展新知识，而是回到学习目标，让学生说出关键结论和仍然困惑的地方。",
+            "interrupts": _build_slide_interrupts("summary", request),
+        }
+    )
+
+    slides: list[dict[str, Any]] = []
+    for index, slide in enumerate(slide_blueprints, start=1):
+        html_file = f"slides/{index:02d}-{slugify_fragment(str(slide['title']), max_length=24)}.html"
+        slides.append(
+            {
+                "slide_id": f"slide_{index:02d}",
+                "sequence": index,
+                "title": slide["title"],
+                "teaching_goal": slide["teaching_goal"],
+                "visual_type": slide["visual_type"],
+                "script_context_before": "",
+                "script_context_current": slide["script_context_current"],
+                "script_context_after": "",
+                "animation_steps": list(slide["animation_steps"]),
+                "speaker_notes": slide["speaker_notes"],
+                "interrupts": list(slide.get("interrupts", [])),
+                "html_file": html_file,
+            }
+        )
+
+    for index, slide in enumerate(slides):
+        before_slide = slides[index - 1] if index > 0 else None
+        after_slide = slides[index + 1] if index + 1 < len(slides) else None
+        slide["script_context_before"] = (
+            before_slide["script_context_current"] if before_slide else "从课程开场进入本页。"
+        )
+        slide["script_context_after"] = (
+            after_slide["script_context_current"] if after_slide else "本页之后进入课程总结。"
+        )
+
+    return {
+        "deck_title": deck_title,
+        "run_id": run_id,
+        "generated_at": now_iso(),
+        "slides": slides,
+    }
+
+
 def build_workflow(
     settings: Settings,
     event_callback: GraphEventCallback | None = None,
@@ -1835,6 +2098,155 @@ def build_workflow(
             "manifest_path": str(manifest_path),
         }
 
+    def slideshow_node(state: WorkflowState) -> dict[str, Any]:
+        request = GenerationRequest.model_validate(state["request"])
+        plan = PreparationPlan.model_validate(state["plan"])
+        output_dir = Path(state["output_dir"])
+        node_name = "slideshow_agent"
+        existing_artifacts = [
+            ArtifactResult.model_validate(item)
+            for item in state.get("artifact_results", [])
+        ]
+
+        _emit_event(
+            event_callback,
+            event="node_started",
+            node=node_name,
+            phase="slideshow_generation",
+            agent_name="slideshow",
+            summary="HTML slide runtime generation started.",
+            data={"artifact_count": len(existing_artifacts)},
+        )
+
+        try:
+            slide_payload = _build_slideshow_payload(
+                request,
+                plan,
+                existing_artifacts,
+                run_id=output_dir.name,
+            )
+            slides = slide_payload["slides"]
+
+            lecture_script_md_path = write_text_file(
+                output_dir,
+                "05_slides/lecture_script.md",
+                render_lecture_script_markdown(request, slide_payload["deck_title"], slides),
+            )
+            lecture_script_json_path = write_json_file(
+                output_dir,
+                "05_slides/lecture_script.json",
+                {
+                    "deck_title": slide_payload["deck_title"],
+                    "run_id": slide_payload["run_id"],
+                    "generated_at": slide_payload["generated_at"],
+                    "slides": [
+                        {
+                            "slide_id": slide["slide_id"],
+                            "sequence": slide["sequence"],
+                            "title": slide["title"],
+                            "teaching_goal": slide["teaching_goal"],
+                            "script_context_current": slide["script_context_current"],
+                            "speaker_notes": slide["speaker_notes"],
+                        }
+                        for slide in slides
+                    ],
+                },
+            )
+            slide_manifest_path = write_json_file(
+                output_dir,
+                "05_slides/slide_manifest.json",
+                slide_payload,
+            )
+            presenter_notes_path = write_text_file(
+                output_dir,
+                "05_slides/presenter_notes.md",
+                render_presenter_notes_markdown(slide_payload["deck_title"], slides),
+            )
+
+            written_files = [
+                str(lecture_script_md_path),
+                str(lecture_script_json_path),
+                str(slide_manifest_path),
+                str(presenter_notes_path),
+            ]
+            for slide in slides:
+                html_path = write_text_file(
+                    output_dir,
+                    f"05_slides/{slide['html_file']}",
+                    render_slide_html(slide_payload["deck_title"], slide),
+                )
+                written_files.append(str(html_path))
+
+            updated_manifest_path = write_json_file(
+                output_dir,
+                "00_supervisor/artifact_manifest.json",
+                {
+                    "artifacts": [
+                        *[artifact.model_dump() for artifact in existing_artifacts],
+                        {
+                            "agent_name": "slideshow",
+                            "title": "HTML Slides Agent",
+                            "summary": "已生成讲稿、slide manifest、presenter notes 与逐页 HTML 幻灯片。",
+                            "output_dir": str(output_dir / "05_slides"),
+                            "files": written_files,
+                            "notes": [f"共生成 {len(slides)} 页 HTML slide。"],
+                            "status": "completed",
+                        },
+                    ]
+                },
+            )
+
+            artifact = ArtifactResult(
+                agent_name="slideshow",
+                title="HTML Slides Agent",
+                summary="已生成讲稿、slide manifest、presenter notes 与逐页 HTML 幻灯片。",
+                output_dir=str(output_dir / "05_slides"),
+                files=written_files,
+                notes=[f"共生成 {len(slides)} 页 HTML slide。"],
+            )
+            _emit_event(
+                event_callback,
+                event="artifact_ready",
+                node=node_name,
+                phase="slideshow_generation",
+                agent_name="slideshow",
+                summary="HTML slide runtime generated successfully.",
+                data={
+                    "artifact": artifact.model_dump(),
+                    "slide_count": len(slides),
+                    "manifest_path": str(slide_manifest_path),
+                },
+            )
+            return {
+                "artifact_results": [artifact.model_dump()],
+                "manifest_path": str(updated_manifest_path),
+            }
+        except Exception as exc:
+            failed_path = write_text_file(
+                output_dir,
+                "05_slides/FAILED.md",
+                f"# HTML Slides Agent\n\n生成失败。\n\n```\n{exc}\n```\n",
+            )
+            artifact = ArtifactResult(
+                agent_name="slideshow",
+                title="HTML Slides Agent",
+                summary="HTML slide runtime 生成失败。",
+                output_dir=str(output_dir / "05_slides"),
+                files=[str(failed_path)],
+                notes=[str(exc)],
+                status="failed",
+            )
+            _emit_event(
+                event_callback,
+                event="artifact_failed",
+                node=node_name,
+                phase="slideshow_generation",
+                agent_name="slideshow",
+                summary="HTML slide runtime generation failed.",
+                data={"artifact": artifact.model_dump(), "error": str(exc)},
+            )
+            return {"artifact_results": [artifact.model_dump()]}
+
     graph = StateGraph(WorkflowState)
     graph.add_node("planner", planner_node)
     graph.add_node("practice_planner_agent", practice_planner_node)
@@ -1846,6 +2258,7 @@ def build_workflow(
         graph.add_node(node_name, make_agent_node(spec))
 
     graph.add_node("supervisor_report", report_node)
+    graph.add_node("slideshow_agent", slideshow_node)
 
     graph.add_edge(START, "planner")
     for spec in AGENT_SPECS:
@@ -1856,6 +2269,7 @@ def build_workflow(
     graph.add_edge("planner", "practice_planner_agent")
     graph.add_edge("practice_planner_agent", "practice_agent")
     graph.add_edge(artifact_node_names, "supervisor_report")
-    graph.add_edge("supervisor_report", END)
+    graph.add_edge("supervisor_report", "slideshow_agent")
+    graph.add_edge("slideshow_agent", END)
 
     return graph.compile()

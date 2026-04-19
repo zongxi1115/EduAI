@@ -160,6 +160,7 @@ class TestAgentName:
         assert "practice" in [name for name in AgentName.__args__]
         assert "manim" in [name for name in AgentName.__args__]
         assert "interactive_web" in [name for name in AgentName.__args__]
+        assert "slideshow" in [name for name in AgentName.__args__]
 
 
 class TestQuestionTypeName:

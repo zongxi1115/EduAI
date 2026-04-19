@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-AgentName = Literal["study_guide", "practice", "manim", "interactive_web"]
+AgentName = Literal["study_guide", "practice", "manim", "interactive_web", "slideshow"]
 QuestionTypeName = Literal[
     "FillInTheBlank",
     "MultipleChoice",

@@ -6,12 +6,15 @@ from edu_multi_agent.graph import (
     _compact_lines,
     _count_question_types,
     _build_global_question_id,
+    _build_slideshow_payload,
     _validate_generated_files,
 )
 from edu_multi_agent.graph import (
     _normalize_practice_blueprint,
     _build_fallback_practice_blueprint,
 )
+from edu_multi_agent.file_io import render_slide_html
+from edu_multi_agent.models import ArtifactResult, GenerationRequest, PreparationPlan
 
 
 class TestCompactLines:
@@ -358,3 +361,60 @@ class TestValidateGeneratedFiles:
         }
         with pytest.raises(SyntaxError):
             _validate_generated_files(files)
+
+
+class TestBuildSlideshowPayload:
+    def test_generates_slide_manifest_with_context(self):
+        request = GenerationRequest(learning_goal="理解一次函数", subject="数学", grade_level="初中")
+        plan = PreparationPlan(
+            plan_summary="围绕一次函数图像、斜率和实际情境组织课堂。",
+            teaching_focus=["理解斜率含义", "能读图判断变化趋势"],
+            teacher_checklist=["先用情境导入", "再过渡到图像表示"],
+            quality_bar=["内容连贯", "讲练结合"],
+        )
+        artifacts = [
+            ArtifactResult(
+                agent_name="study_guide",
+                title="学案 Agent",
+                summary="学案整理了预习重点和阅读顺序。",
+                output_dir="/tmp/01_study_guide",
+                files=[],
+            ),
+            ArtifactResult(
+                agent_name="practice",
+                title="练习 Agent",
+                summary="题库按热身、巩固和迁移三个层次组织。",
+                output_dir="/tmp/02_practice",
+                files=[],
+            ),
+        ]
+
+        payload = _build_slideshow_payload(request, plan, artifacts, run_id="run_123")
+
+        assert payload["deck_title"].startswith("理解一次函数")
+        assert payload["run_id"] == "run_123"
+        assert len(payload["slides"]) >= 4
+        assert payload["slides"][0]["script_context_before"] == "从课程开场进入本页。"
+        assert payload["slides"][0]["html_file"].startswith("slides/")
+        assert payload["slides"][-1]["interrupts"][0]["type"] == "reflection_prompt"
+
+    def test_slide_html_runtime_contract_present(self):
+        html = render_slide_html(
+            "测试课堂演示稿",
+            {
+                "title": "核心概念",
+                "teaching_goal": "讲清概念",
+                "visual_type": "concept",
+                "script_context_before": "上一页导入",
+                "script_context_current": "本页解释概念与例子。",
+                "script_context_after": "下一页进入练习。",
+                "animation_steps": ["先讲定义", "再讲例子"],
+                "speaker_notes": "强调易错点。",
+                "interrupts": [{"type": "quiz_pause", "prompt": "让学生先判断一个例子。"}],
+            },
+        )
+
+        assert "window.EduSlide" in html
+        assert "to_next()" in html
+        assert "先讲定义" in html
+        assert "quiz_pause" in html

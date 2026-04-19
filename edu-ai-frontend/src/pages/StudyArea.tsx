@@ -319,11 +319,20 @@ function classifyMaterial(fileName: string) {
   if (lowerName === "answer_key.md") {
     return { label: "答案解析", colorClass: "text-amber-600", openMode: "markdown" as const, priority: 90 };
   }
+  if (lowerName === "lecture_script.md") {
+    return { label: "讲稿", colorClass: "text-indigo-600", openMode: "markdown" as const, priority: 94 };
+  }
+  if (lowerName === "presenter_notes.md") {
+    return { label: "演讲备注", colorClass: "text-violet-600", openMode: "markdown" as const, priority: 89 };
+  }
   if (lowerName === "practice_blueprint.md") {
     return { label: "题型蓝图", colorClass: "text-cyan-600", openMode: "markdown" as const, priority: 91 };
   }
   if (lowerName === "practice_blueprint.json") {
     return { label: "题型蓝图", colorClass: "text-cyan-600", openMode: "download" as const, priority: 83 };
+  }
+  if (lowerName === "slide_manifest.json") {
+    return { label: "演示清单", colorClass: "text-sky-600", openMode: "download" as const, priority: 93 };
   }
   if (lowerName === "usage_notes.md") {
     return { label: "使用说明", colorClass: "text-rose-600", openMode: "markdown" as const, priority: 88 };
@@ -333,6 +342,9 @@ function classifyMaterial(fileName: string) {
   }
   if (lowerName === "practice_questions.json") {
     return { label: "题库数据", colorClass: "text-amber-600", openMode: "download" as const, priority: 82 };
+  }
+  if (lowerName.startsWith("0") && lowerName.endsWith(".html")) {
+    return { label: "幻灯片", colorClass: "text-sky-600", openMode: "link" as const, priority: 87 };
   }
   if (lowerName.endsWith(".html")) {
     return { label: "交互网页", colorClass: "text-rose-600", openMode: "link" as const, priority: 86 };
@@ -580,6 +592,8 @@ export default function StudyArea() {
   const [activeTabId, setActiveTabId] = useState(WORKSPACE_TAB_ID);
 
   const activeTab = openTabs.find((tab) => tab.id === activeTabId) ?? DEFAULT_WORKSPACE_TAB;
+  const hasPresentationDeck = workspaceData.materials.some((material) => material.name === "slide_manifest.json");
+  const presentationHref = runId && hasPresentationDeck ? `/present/${runId}` : null;
 
   const togglePanel = (panel: string) => {
     setActivePanel((current) => (current === panel ? null : panel));
@@ -917,7 +931,8 @@ export default function StudyArea() {
       <div className="flex flex-col h-screen bg-background">
         <FloatingAIInput />
         <header className="h-14 border-b bg-card flex items-center px-6 shrink-0 shadow-sm">
-          <div className="flex items-center gap-2 font-semibold text-lg min-w-0">
+          <div className="flex items-center justify-between gap-4 w-full">
+            <div className="flex items-center gap-2 font-semibold text-lg min-w-0">
             <BookOpen className="w-5 h-5 text-primary shrink-0" />
             <div className="min-w-0">
               <div className="truncate">{workspaceData.workspaceTitle}</div>
@@ -925,6 +940,15 @@ export default function StudyArea() {
                 {isLoadingWorkspace ? "正在加载任务数据..." : workspaceData.workspaceSubtitle}
               </div>
             </div>
+            </div>
+            {presentationHref && (
+              <Button variant="outline" size="sm" asChild className="shrink-0">
+                <a href={presentationHref}>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  开始演示
+                </a>
+              </Button>
+            )}
           </div>
         </header>
 
