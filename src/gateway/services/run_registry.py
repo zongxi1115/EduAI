@@ -117,6 +117,7 @@ class RunRegistry:
                         session.status = RunStatus.failed
                         session.error = "Run deleted by user."
                     session.condition.notify_all()
+
     def list_session_ids(self) -> list[str]:
         """Return all run identifiers that are currently tracked in memory."""
         with self._lock:

@@ -252,20 +252,15 @@ export default function HomePage() {
     if (!runToDelete) return
     const runId = runToDelete
     setRunToDelete(null)
-
-    // Optimistic UI update or full refetch
+    const snapshot = historyRuns
     setHistoryRuns(prev => prev.filter(r => r.run_id !== runId))
-    
     try {
-      const response = await fetch(`/api/v1/prep-runs/${runId}`, {
-        method: "DELETE"
-      })
+      const response = await fetch(`/api/v1/prep-runs/${runId}`, { method: "DELETE" })
       if (!response.ok) {
-        // Should handle failure (e.g. reload if optimistic delete fails)
-        console.error("Failed to delete the run")
+        setHistoryRuns(snapshot) // rollback
       }
-    } catch (err) {
-      console.error(err)
+    } catch {
+      setHistoryRuns(snapshot) // rollback
     }
   }
 

@@ -183,21 +183,23 @@ def delete_prep_run(
     run_id: str = ApiPath(description="课前准备任务的唯一标识符。"),
 ) -> dict[str, str]:
     """删除指定的课前准备任务及其文件。"""
-    import shutil
+    output_dir = settings.output_root / run_id
+    session = registry.get_session(run_id)
+    if not session and not output_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Run not found.")
+
     try:
         registry.remove_run(run_id)
-    except Exception:
-        pass
-    
-    output_dir = settings.output_root / run_id
+    except KeyError:
+        pass  # not in registry, OK
+
     if output_dir.is_dir():
+        import shutil
         try:
             shutil.rmtree(output_dir)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to delete directory: {e}")
-    else:
-        raise HTTPException(status_code=404, detail="Run not found.")
-        
+
     return {"status": "success", "message": f"Run {run_id} deleted."}
 
 
