@@ -62,7 +62,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   h1: ({ className, ...props }) => (
     <h1
       className={cn(
-        "mt-8 mb-4 scroll-m-20 text-3xl font-extrabold tracking-tight lg:text-4xl border-b pb-2 text-slate-900 dark:text-slate-100",
+        "mt-8 mb-4 scroll-m-20 text-3xl font-extrabold tracking-tight lg:text-4xl border-b pb-2 text-foreground dark:text-slate-100",
         className
       )}
       {...props}
@@ -71,7 +71,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   h2: ({ className, ...props }) => (
     <h2
       className={cn(
-        "mt-10 mb-4 scroll-m-20 border-l-4 border-primary pl-3 text-2xl font-semibold tracking-tight transition-colors first:mt-0 text-slate-800 dark:text-slate-200",
+        "mt-10 mb-4 scroll-m-20 border-l-4 border-primary pl-3 text-2xl font-semibold tracking-tight transition-colors first:mt-0 text-foreground dark:text-slate-200",
         className
       )}
       {...props}
@@ -80,7 +80,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   h3: ({ className, ...props }) => (
     <h3
       className={cn(
-        "mt-8 mb-3 scroll-m-20 text-xl font-semibold tracking-tight text-slate-800 dark:text-slate-200",
+        "mt-8 mb-3 scroll-m-20 text-xl font-semibold tracking-tight text-foreground dark:text-slate-200",
         className
       )}
       {...props}
@@ -89,7 +89,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   h4: ({ className, ...props }) => (
     <h4
       className={cn(
-        "mt-6 mb-2 scroll-m-20 text-lg font-semibold tracking-tight text-slate-800 dark:text-slate-200",
+        "mt-6 mb-2 scroll-m-20 text-lg font-semibold tracking-tight text-foreground dark:text-slate-200",
         className
       )}
       {...props}
@@ -97,15 +97,15 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   ),
   p: ({ className, ...props }) => (
     <p
-      className={cn("leading-7 [&:not(:first-child)]:mt-4 text-slate-700 dark:text-slate-300", className)}
+      className={cn("leading-7 [&:not(:first-child)]:mt-4 text-foreground dark:text-slate-300", className)}
       {...props}
     />
   ),
   ul: ({ className, ...props }) => (
-    <ul className={cn("my-5 ml-6 list-disc [&>li]:mt-2 text-slate-700 dark:text-slate-300", className)} {...props} />
+    <ul className={cn("my-5 ml-6 list-disc [&>li]:mt-2 text-foreground dark:text-slate-300", className)} {...props} />
   ),
   ol: ({ className, ...props }) => (
-    <ol className={cn("my-5 ml-6 list-decimal [&>li]:mt-2 text-slate-700 dark:text-slate-300", className)} {...props} />
+    <ol className={cn("my-5 ml-6 list-decimal [&>li]:mt-2 text-foreground dark:text-slate-300", className)} {...props} />
   ),
   li: ({ className, ...props }) => (
     <li className={cn("mt-1", className)} {...props} />
@@ -113,24 +113,24 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(
-        "mt-6 border-l-4 border-slate-300 pl-6 italic text-slate-600 dark:border-slate-700 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 py-2 pr-4 rounded-r-md",
+        "mt-6 border-l-4 border-border pl-6 italic text-muted-foreground dark:border-slate-700 dark:text-muted-foreground bg-muted dark:bg-slate-900/50 py-2 pr-4 rounded-r-md",
         className
       )}
       {...props}
     />
   ),
   table: ({ className, ...props }) => (
-    <div className="my-6 w-full overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800">
+    <div className="my-6 w-full overflow-y-auto rounded-lg border border-border dark:border-zinc-800 dark:border-zinc-700">
       <table className={cn("w-full border-collapse text-sm", className)} {...props} />
     </div>
   ),
   thead: ({ className, ...props }) => (
-    <thead className={cn("bg-slate-100 dark:bg-slate-800 font-bold text-slate-900 dark:text-slate-100", className)} {...props} />
+    <thead className={cn("bg-accent dark:bg-slate-800 font-bold text-foreground dark:text-slate-100", className)} {...props} />
   ),
   th: ({ className, ...props }) => (
     <th
       className={cn(
-        "border px-4 py-3 text-left font-bold [&[align=center]]:text-center [&[align=right]]:text-right border-slate-200 dark:border-slate-700",
+        "border px-4 py-3 text-left font-bold [&[align=center]]:text-center [&[align=right]]:text-right border-border dark:border-slate-700",
         className
       )}
       {...props}
@@ -139,14 +139,14 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   td: ({ className, ...props }) => (
     <td
       className={cn(
-        "border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300",
+        "border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right border-border dark:border-slate-700 text-foreground dark:text-slate-300",
         className
       )}
       {...props}
     />
   ),
   hr: ({ className, ...props }) => (
-    <hr className={cn("my-8 border-slate-200 dark:border-slate-800", className)} {...props} />
+    <hr className={cn("my-8 border-border dark:border-zinc-800 dark:border-zinc-700", className)} {...props} />
   ),
 }
 

@@ -28,15 +28,15 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
   };
 
   return (
-    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-white border rounded-xl shadow-sm overflow-y-auto">
+    <div className="custom-scrollbar w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto">
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="prose prose-slate max-w-none flex-1">
           <ReactMarkdown
-             remarkPlugins={[remarkMath]}
-             rehypePlugins={[rehypeKatex]}
-             components={{
-               p: ({node, ...props}) => <p className="text-base text-slate-800 m-0 mb-4" {...props} />,
-             }}
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={{
+              p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
+            }}
           >
             {questionContent}
           </ReactMarkdown>
@@ -51,24 +51,24 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
           </DialogTrigger>
           {/* @ts-ignore */}
           <DialogContent className="fixed inset-0 m-0 max-w-none max-h-none h-[100dvh] w-[100dvw] p-0 flex flex-col rounded-none overflow-hidden border-none top-0 left-0 translate-x-0 translate-y-0 sm:max-w-none" showCloseButton={false}>
-             <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
-             
-             {/* DraftBoard fills entire modal */}
-             <div className="flex-1 w-full h-full relative">
-               <DraftBoard questionContent={questionContent} />
+            <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
 
-               {/* Custom Close Button to ensure it renders above the absolutely positioned DraftBoard elements */}
-               <DialogClose asChild>
-                 <Button 
-                   variant="secondary" 
-                   size="icon" 
-                   className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-white/80 backdrop-blur-sm"
-                 >
-                   <X className="w-5 h-5" />
-                   <span className="sr-only">关闭全屏草稿纸</span>
-                 </Button>
-               </DialogClose>
-             </div>
+            {/* DraftBoard fills entire modal */}
+            <div className="flex-1 w-full h-full relative">
+              <DraftBoard questionContent={questionContent} />
+
+              {/* Custom Close Button to ensure it renders above the absolutely positioned DraftBoard elements */}
+              <DialogClose asChild>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-background/80 backdrop-blur-sm"
+                >
+                  <X className="w-5 h-5" />
+                  <span className="sr-only">关闭全屏草稿纸</span>
+                </Button>
+              </DialogClose>
+            </div>
           </DialogContent>
         </Dialog>
       </div>
@@ -77,28 +77,26 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
         {options.map((option) => {
           const isSelected = selectedId === option.id;
           return (
-            <div 
+            <div
               key={option.id}
               onClick={() => handleSelect(option.id)}
-              className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                isSelected 
-                  ? "border-primary bg-primary/5 shadow-sm" 
-                  : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
-              }`}
+              className={`p-4 border rounded-lg cursor-pointer transition-colors ${isSelected
+                  ? "border-primary bg-primary/5 shadow-sm"
+                  : "border-border hover:border-border hover:bg-muted/50"
+                }`}
             >
               <div className="flex items-start gap-4">
-                <div className={`mt-0.5 shrink-0 flex items-center justify-center w-6 h-6 rounded-full border text-sm font-medium transition-colors ${
-                  isSelected ? "bg-primary border-primary text-primary-foreground" : "border-slate-300 text-slate-500 bg-white"
-                }`}>
+                <div className={`mt-0.5 shrink-0 flex items-center justify-center w-6 h-6 rounded-full border text-sm font-medium transition-colors ${isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border text-muted-foreground bg-card text-card-foreground"
+                  }`}>
                   {option.id}
                 </div>
-                <div className={`prose prose-slate max-w-none flex-1 overflow-hidden ${isSelected ? "text-primary" : "text-slate-700"}`}>
+                <div className={`prose prose-slate max-w-none flex-1 overflow-hidden ${isSelected ? "text-primary" : "text-foreground"}`}>
                   <ReactMarkdown
-                     remarkPlugins={[remarkMath]}
-                     rehypePlugins={[rehypeKatex]}
-                     components={{
-                       p: ({node, ...props}) => <p className="m-0" {...props} />,
-                     }}
+                    remarkPlugins={[remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={{
+                      p: ({ node, ...props }) => <p className="m-0" {...props} />,
+                    }}
                   >
                     {option.content}
                   </ReactMarkdown>
@@ -110,8 +108,8 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
       </div>
 
       <div className="mt-8 flex justify-end">
-        <Button 
-          disabled={!selectedId} 
+        <Button
+          disabled={!selectedId}
           onClick={() => onSelect && onSelect(selectedId!)}
           className="gap-2 px-8"
         >
