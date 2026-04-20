@@ -1,0 +1,56 @@
+name: 功能建议
+description: 提交新功能、体验优化或流程改进建议
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提出功能建议。请尽量说明使用场景、业务价值和预期方案，帮助我们评估优先级。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景与问题
+      description: 当前场景下有什么痛点，为什么需要这个能力？
+      placeholder: 例如：当前只能通过命令行触发备课流程，老师在浏览器里无法直接查看历史输出。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述你希望增加或调整的能力。
+      placeholder: 例如：在前端增加任务历史页，可查看过去生成的教案、练习题和动画脚本。
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: 预期收益
+      description: 这个能力能解决什么问题，提升哪些体验或效率？
+      placeholder: 例如：减少重复生成，便于老师回顾和二次编辑已有内容。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案或补充说明
+      description: 如果你考虑过其他做法，也请一并说明。
+      placeholder: 例如：也可以先只在后端输出目录中生成索引文件，再由前端读取展示。
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 如果这个需求被实现，怎样算完成？
+      placeholder: |
+        1. 用户可以看到最近生成记录
+        2. 可以点开查看主要产物
+        3. 支持失败任务状态展示
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 issue，确认这不是重复建议
+          required: true
+        - label: 我已尽量说明业务背景和预期收益
+          required: true
