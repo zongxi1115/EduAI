@@ -427,8 +427,8 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
       >
         <FlowerMenu
           menuItems={menuItems}
-          iconColor="#0f172a"
-          backgroundColor="#e2e8f0"
+          iconColor={isDarkMode ? "#e2e8f0" : "#0f172a"}
+          backgroundColor={isDarkMode ? "#334155" : "#e2e8f0"}
           togglerSize={40}
         />
       </div>

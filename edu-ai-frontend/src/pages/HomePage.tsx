@@ -271,6 +271,12 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
+      <div className="absolute top-6 right-6 z-50">
+        <div className="rounded-xl border border-zinc-200/50 bg-white/80 shadow-sm backdrop-blur-md dark:border-zinc-800/50 dark:bg-zinc-950/80">
+          <ThemeToggle />
+        </div>
+      </div>
+
       {/* Sidebar Toggle Button (Always visible when closed, or inside sidebar when open) */}
       <div className="absolute top-6 left-6 z-50 hidden md:block">
         <Button
