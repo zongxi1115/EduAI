@@ -1070,7 +1070,7 @@ export function PracticeQuestionWorkspace({
   };
 
   return (
-    <div className="w-full h-full flex flex-col gap-8 overflow-y-auto pr-4">
+    <div className="custom-scrollbar w-full h-full flex flex-col gap-8 overflow-y-auto pr-4">
       <div className="rounded-3xl border bg-card text-card-foreground px-5 py-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">

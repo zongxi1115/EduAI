@@ -929,12 +929,12 @@ function FlyingText({ flyingData, onComplete }: { flyingData: { text: string, x:
           onAnimationComplete={onComplete}
           className="fixed top-0 left-0 z-50 pointer-events-none flex items-center justify-center"
         >
-          <div className="bg-white dark:bg-white border border-zinc-300 text-black dark:text-black px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm">
+          <div className="bg-card/95 border border-border text-card-foreground px-5 py-2.5 text-sm rounded-full font-medium whitespace-nowrap truncate relative z-10 overflow-hidden shadow-sm backdrop-blur-sm">
             <motion.div
               initial={{ left: "-100%" }}
               animate={{ left: "200%" }}
               transition={{ duration: beamDuration, ease: "linear" }}
-              className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-white/80 dark:via-white/40 to-transparent skew-x-[-30deg]"
+              className="absolute top-0 bottom-0 w-[200px] bg-gradient-to-r from-transparent via-background/80 to-transparent skew-x-[-30deg]"
             />
             {flyingData.text}
           </div>

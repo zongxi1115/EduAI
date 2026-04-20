@@ -306,7 +306,7 @@ export default function LoadingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-gray-800 font-sans selection:bg-[#09f]/20 transition-colors duration-1000 relative">
+    <div className="min-h-screen bg-background text-foreground font-sans selection:bg-[#09f]/20 transition-colors duration-1000 relative">
 
 
       <div className="max-w-[1600px] w-full mx-auto px-6 py-10 md:py-12 flex gap-6 items-center justify-center min-h-screen">
@@ -649,5 +649,4 @@ export default function LoadingPage() {
     </div>
   );
 }
-
 

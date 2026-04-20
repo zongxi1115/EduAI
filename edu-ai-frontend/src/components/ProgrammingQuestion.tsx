@@ -460,7 +460,7 @@ export function ProgrammingQuestion({
             </DialogContent>
           </Dialog>
         </div>
-        <div className="p-6 overflow-y-auto flex-1 prose prose-slate max-w-none">
+        <div className="custom-scrollbar p-6 overflow-y-auto flex-1 prose prose-slate max-w-none">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
             rehypePlugins={[rehypeKatex]}
@@ -575,7 +575,7 @@ export function ProgrammingQuestion({
                       <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-muted-foreground">{runDurationMs} ms</span>
                     ) : null}
                   </div>
-                  <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-sm">
+                  <div className="custom-scrollbar flex-1 min-h-0 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-sm">
                     {outputLines.length > 0 ? (
                       <div className="space-y-2 whitespace-pre-wrap break-words">
                         {outputLines.map((line, index) => (

@@ -36,7 +36,7 @@ export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionPr
   };
 
   return (
-    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto mt-6">
+    <div className="custom-scrollbar w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto mt-6">
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <ReactMarkdown
