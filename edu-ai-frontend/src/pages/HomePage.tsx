@@ -7,6 +7,7 @@ import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import homepageBackground from "@/assets/homepage.png"
 
 const SUGGESTIONS = [
   { text: "帮我总结一下昨天刚学的牛顿三大定律", icon: Lightbulb },
@@ -269,7 +270,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
+    <div className="relative isolate min-h-screen w-full flex overflow-hidden bg-[#fafafa] dark:bg-zinc-950">
       {/* Sidebar Toggle Button (Always visible when closed, or inside sidebar when open) */}
       <div className="absolute top-6 left-6 z-50 hidden md:block">
         <Button
@@ -476,6 +477,13 @@ export default function HomePage() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 relative overflow-hidden h-screen overflow-y-auto w-full">
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          <div
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-[0.5] dark:opacity-[0.24]"
+            style={{ backgroundImage: `url(${homepageBackground})` }}
+          />
+          <div className="absolute inset-0 bg-[#fafafa]/48 dark:bg-zinc-950/56" />
+        </div>
 
         {/* Background blobs */}
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none w-full h-full">
