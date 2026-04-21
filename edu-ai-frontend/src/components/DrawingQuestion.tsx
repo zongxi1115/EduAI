@@ -36,14 +36,14 @@ export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionPr
   };
 
   return (
-    <div className="w-full flex-1 max-w-4xl mx-auto p-6 bg-white border rounded-xl shadow-sm overflow-y-auto mt-6">
+    <div className="custom-scrollbar w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto mt-6">
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
             rehypePlugins={[rehypeKatex]}
             components={{
-              p: ({ node, ...props }) => <p className="text-base text-slate-800 m-0 mb-4" {...props} />,
+              p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
             }}
           >
             {questionContent}
@@ -58,10 +58,10 @@ export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionPr
 
       <div className={
         isFullscreen
-          ? "fixed inset-0 z-[9999] bg-white flex flex-col m-0 p-0 overflow-hidden"
-          : "w-full h-[600px] border-2 border-slate-200 rounded-xl overflow-hidden relative shadow-sm mb-6 bg-slate-50"
+          ? "fixed inset-0 z-[9999] bg-card text-card-foreground flex flex-col m-0 p-0 overflow-hidden"
+          : "w-full h-[600px] border-2 border-border rounded-xl overflow-hidden relative shadow-sm mb-6 bg-muted/50"
       }>
-        <div className="absolute top-4 left-4 z-[50] text-sm text-slate-500 bg-white/80 px-3 py-1 rounded-full shadow-sm select-none pointer-events-none hidden sm:block">
+        <div className="absolute top-4 left-4 z-[50] text-sm text-muted-foreground bg-background/80 px-3 py-1 rounded-full shadow-sm select-none pointer-events-none hidden sm:block">
           {isFullscreen ? "全屏作图区" : "绘图区"}
         </div>
 
@@ -70,7 +70,7 @@ export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionPr
             variant="secondary"
             size="icon"
             onClick={() => setIsFullscreen(false)}
-            className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-white/80 backdrop-blur-sm"
+            className="absolute top-4 right-4 z-[9999] rounded-full shadow-lg border hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors bg-background/80 backdrop-blur-sm"
           >
             <Shrink className="w-5 h-5" />
             <span className="sr-only">退出全屏</span>

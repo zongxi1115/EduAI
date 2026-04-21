@@ -1,0 +1,83 @@
+name: Bug 报告
+description: 提交一个可复现的问题，帮助我们快速定位和修复
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题。请尽量提供完整上下文，便于我们快速复现与定位。
+
+        提交前请先确认：
+        - 已阅读仓库内的 `README.md` 和 `CONTRIBUTING.md`
+        - 已搜索现有 issue，避免重复提交
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题概述
+      description: 用 1-3 句话说明遇到了什么问题，以及它影响了什么。
+      placeholder: 例如：前端提交教学目标后请求返回 500，无法生成备课结果。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 按顺序列出可复现问题的步骤。
+      placeholder: |
+        1. 启动后端服务
+        2. 打开前端页面
+        3. 输入教学目标并提交
+        4. 观察到报错
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+      description: 描述你原本预期应该发生什么。
+      placeholder: 应正常返回生成结果，并在页面展示输出内容。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 描述实际发生了什么，可包含报错信息。
+      placeholder: 接口返回 500，页面提示生成失败。
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 影响范围
+      description: 问题对使用的影响程度。
+      options:
+        - 阻塞使用
+        - 影响主要流程
+        - 影响次要流程
+        - 轻微问题
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 请填写尽量完整的环境信息。
+      placeholder: Windows 11 / Python 3.11 / Node 20 / pnpm 9 / Chrome 135
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志、截图或补充信息
+      description: 可粘贴错误堆栈、接口响应、截图或录屏说明。
+      render: shell
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 issue，确认这不是重复问题
+          required: true
+        - label: 我已尽量提供可复现步骤和必要上下文
+          required: true
