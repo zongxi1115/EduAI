@@ -8,10 +8,12 @@ from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
 
 from .routers.assistant import router as assistant_router
+from .routers.classroom import router as classroom_router
 from .routers.code_execution import router as code_execution_router
 from .routers.health import router as health_router
 from .routers.prep_runs import router as prep_runs_router
 from .routers.practice_review import router as practice_review_router
+from .services.classroom_tasks import ClassroomTaskRegistry
 from .services.run_registry import RunRegistry
 
 
@@ -33,6 +35,12 @@ OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "AI 课堂",
+        "description": (
+            "用于把主题/素材/大纲生成成可播放的 AI 课堂数据包，或对课堂讲稿脚本进行解析校验。"
+        ),
+    },
+    {
         "name": "代码运行",
         "description": "用于前端编程题在线运行，例如后端执行 Python 代码。",
     },
@@ -51,11 +59,21 @@ SWAGGER_UI_PARAMETERS = {
 }
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    llm_client: LLMClient | None = None,
+    classroom_outline_agent: object | None = None,
+) -> FastAPI:
     """Create and configure the FastAPI gateway application."""
     resolved_settings = settings or Settings.from_env()
     registry = RunRegistry(resolved_settings)
-    llm_client = LLMClient(resolved_settings)
+    resolved_llm_client = llm_client or LLMClient(resolved_settings)
+    classroom_task_registry = ClassroomTaskRegistry(
+        resolved_settings,
+        resolved_llm_client,
+        classroom_outline_agent,
+    )
 
     app = FastAPI(
         title="Edu 多智能体网关 API",
@@ -80,9 +98,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.run_registry = registry
     app.state.settings = resolved_settings
-    app.state.llm_client = llm_client
+    app.state.llm_client = resolved_llm_client
+    app.state.classroom_outline_agent = classroom_outline_agent
+    app.state.classroom_task_registry = classroom_task_registry
 
     app.include_router(assistant_router)
+    app.include_router(classroom_router)
     app.include_router(code_execution_router)
     app.include_router(health_router)
     app.include_router(prep_runs_router)
