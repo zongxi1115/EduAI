@@ -69,6 +69,8 @@ def test_write_classroom_preview_files_outputs_html_pages(tmp_path) -> None:
 
     assert "概念引入" in index_content
     assert 'event.key !== "ArrowRight"' in page_content
+    assert "window.MathJax" in page_content
+    assert "mathjax@4/tex-chtml.js" in page_content
     assert '<section class="card" data-idx="0">' in page_content
     assert "第一页讲稿<to_next_page/>第二页讲稿" in script_content
 

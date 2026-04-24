@@ -20,6 +20,7 @@ CONTROL_TAG_PATTERN = re.compile(
     r"</?(?:on_slide|question|false_intro)>|<to_next\s*/>|<to_next_page\s*/>"
 )
 QUESTION_BLOCK_PATTERN = re.compile(r"<question>(.*?)</question>", re.DOTALL)
+QUESTION_XML_TAG_PATTERN = re.compile(r"(</?(?:choice|fill|prompt|option|answer)\s*>)")
 JSON_SYNTAX_TRANSLATION = str.maketrans(
     {
         "｛": "{",
@@ -281,8 +282,9 @@ def _parse_question_payload(raw_payload: str) -> dict[str, Any]:
 
 
 def _parse_question_xml_payload(raw_payload: str) -> dict[str, Any]:
+    repaired_payload = _repair_question_xml_text(raw_payload)
     try:
-        root = ET.fromstring(raw_payload)
+        root = ET.fromstring(repaired_payload)
     except ET.ParseError as exc:
         raise ScriptParseError(f"Invalid <question> XML: {exc}.") from exc
 
@@ -355,6 +357,26 @@ def _strip_xml_namespace(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[-1]
     return tag
+
+
+def _repair_question_xml_text(raw_payload: str) -> str:
+    parts = QUESTION_XML_TAG_PATTERN.split(raw_payload)
+    repaired: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if QUESTION_XML_TAG_PATTERN.fullmatch(part):
+            repaired.append(part)
+            continue
+        repaired.append(_escape_xml_text(part))
+    return "".join(repaired)
+
+
+def _escape_xml_text(text: str) -> str:
+    text = re.sub(r"&(?!(?:amp|lt|gt|quot|apos);)", "&amp;", text)
+    text = text.replace("<", "&lt;")
+    text = text.replace(">", "&gt;")
+    return text
 
 
 def normalize_question_json_syntax(raw_payload: str) -> str:

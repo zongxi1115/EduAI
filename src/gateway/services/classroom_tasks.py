@@ -445,6 +445,18 @@ def _render_preview_html(*, idx: int, page_title: str, section_html: str) -> str
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>课堂预览 - 第 {idx + 1} 页 - {safe_title}</title>
+    <script>
+      window.MathJax = {{
+        tex: {{
+          inlineMath: {{ '[+]': [['$', '$']] }},
+          displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
+        }},
+        options: {{
+          skipHtmlTags: {{ '[-]': ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }}
+        }}
+      }};
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-chtml.js"></script>
     <style>
       :root {{
         color-scheme: light;
@@ -535,7 +547,10 @@ def _render_preview_html(*, idx: int, page_title: str, section_html: str) -> str
         if (event.key !== "ArrowRight") return;
         if (typeof window.to_next !== "function") return;
         event.preventDefault();
-        window.to_next();
+        const advanced = window.to_next();
+        if (advanced && window.MathJax && typeof window.MathJax.typesetPromise === "function") {{
+          window.MathJax.typesetPromise().catch(function () {{}});
+        }}
       }});
     </script>
   </body>

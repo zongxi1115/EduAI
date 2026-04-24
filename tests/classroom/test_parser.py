@@ -135,3 +135,26 @@ def test_parse_script_allows_literal_less_than_in_narration() -> None:
     assert pages[0]["reveals"][0]["narration"].startswith(r"考虑分段函数：f(x)=\begin{cases}")
     assert "< 1" in pages[0]["reveals"][0]["narration"]
     assert pages[0]["reveals"][1]["narration"] == "继续分析它在 x=1 处的左右极限。"
+
+
+def test_parse_script_repairs_math_symbols_inside_question_xml_text() -> None:
+    script = (
+        "先做一道题。"
+        "<question><choice><prompt>考虑分段函数：$$"
+        "f(x)=\\begin{cases} x^2, & x < 2 \\\\ 4, & x = 2 \\\\ 2x, & x > 2 \\end{cases}"
+        "$$ 则极限是否存在？</prompt>"
+        "<option>A. 存在，且等于4</option>"
+        "<option>B. 存在，且等于2</option>"
+        "<option>C. 不存在，因为左极限不等于右极限</option>"
+        "<option>D. 不存在，因为函数在x=2处无定义</option>"
+        "<answer>A. 存在，且等于4</answer>"
+        "</choice></question>"
+    )
+
+    pages = parse_script(script)
+
+    payload = pages[0]["quizzes"][0]["payload"]
+    assert payload["type"] == "choice"
+    assert "x < 2" in payload["question"]
+    assert "x > 2" in payload["question"]
+    assert payload["ans"] == "A. 存在，且等于4"

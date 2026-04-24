@@ -139,7 +139,9 @@ function LessonQuizPanel({
         ) : (
           <>
             <div className="rounded-2xl border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm leading-6 text-sky-50">
-              {quiz.false_intro?.trim() || "我们补充一下这一题的思路，再继续。"}
+              <Markdown className="prose prose-invert max-w-none [&_p]:m-0 [&_p]:text-sm [&_p]:leading-7">
+                {quiz.false_intro?.trim() || "我们补充一下这一题的思路，再继续。"}
+              </Markdown>
             </div>
             <div className="flex items-center justify-end gap-3">
               <Button variant="outline" onClick={onSkip} className="border-white/15 bg-white/5 text-white hover:bg-white/10">
@@ -294,7 +296,7 @@ function LessonPlayerShell() {
               key={currentPage.idx}
               ref={bindStageFrame}
               title={`lesson-page-${currentPage.idx}`}
-              srcDoc={currentPage.html}
+              srcDoc={currentPage.srcDoc}
               onLoad={handleStageReady}
               className="h-full min-h-[680px] w-full rounded-[26px] border-0 bg-white"
               sandbox="allow-scripts allow-same-origin"

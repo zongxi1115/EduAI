@@ -8,6 +8,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import katex from "katex";
+import katexCssUrl from "katex/dist/katex.min.css?url";
 
 export interface LessonReveal {
   narration: string;
@@ -71,6 +73,7 @@ export interface ResolvedLessonPage {
   theme: string;
   objective: string;
   html: string;
+  srcDoc: string;
   reveals: LessonReveal[];
   quizzes: LessonQuiz[];
   onSlideSummary: string;
@@ -129,9 +132,25 @@ function normalizeAnswer(text: string) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function normalizeLessonText(text: string | null | undefined) {
+  if (!text) {
+    return "";
+  }
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
 function estimateFallbackDuration(text: string) {
   return Math.min(12000, Math.max(1800, text.replace(/\s+/g, "").length * 240));
 }
+
+type MathSegment =
+  | { kind: "text"; content: string }
+  | { kind: "math"; content: string; displayMode: boolean };
+
+const INLINE_MATH_PATTERN =
+  /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$([^$\n]+?)\$/g;
+
+const SKIP_MATH_TAGS = new Set(["SCRIPT", "STYLE", "TEXTAREA", "PRE", "CODE", "NOSCRIPT"]);
 
 function buildClassroomFileUrl(runId: string, relativePath: string | null | undefined) {
   if (!relativePath) {
@@ -141,6 +160,128 @@ function buildClassroomFileUrl(runId: string, relativePath: string | null | unde
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/")}`;
+}
+
+function hasMathSyntax(text: string) {
+  return /(?:\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+?\$)/.test(text);
+}
+
+function splitMathSegments(text: string): MathSegment[] {
+  const segments: MathSegment[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(INLINE_MATH_PATTERN)) {
+    const matchIndex = match.index ?? 0;
+    if (matchIndex > lastIndex) {
+      segments.push({ kind: "text", content: text.slice(lastIndex, matchIndex) });
+    }
+
+    const displayBlock = match[1];
+    const bracketBlock = match[2];
+    const parenInline = match[3];
+    const dollarInline = match[4];
+    const mathContent = displayBlock ?? bracketBlock ?? parenInline ?? dollarInline ?? "";
+    const displayMode = displayBlock !== undefined || bracketBlock !== undefined;
+    segments.push({ kind: "math", content: mathContent, displayMode });
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ kind: "text", content: text.slice(lastIndex) });
+  }
+
+  return segments.length ? segments : [{ kind: "text", content: text }];
+}
+
+function renderMathInHtml(html: string) {
+  if (typeof window === "undefined" || typeof DOMParser === "undefined" || !hasMathSyntax(html)) {
+    return html;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    const textNode = currentNode as Text;
+    const parentElement = textNode.parentElement;
+    if (
+      parentElement &&
+      !SKIP_MATH_TAGS.has(parentElement.tagName) &&
+      hasMathSyntax(textNode.textContent ?? "")
+    ) {
+      textNodes.push(textNode);
+    }
+    currentNode = walker.nextNode();
+  }
+
+  for (const textNode of textNodes) {
+    const rawText = textNode.textContent ?? "";
+    const segments = splitMathSegments(rawText);
+    if (segments.length === 1 && segments[0]?.kind === "text") {
+      continue;
+    }
+
+    const fragment = doc.createDocumentFragment();
+    for (const segment of segments) {
+      if (segment.kind === "text") {
+        if (segment.content) {
+          fragment.appendChild(doc.createTextNode(segment.content));
+        }
+        continue;
+      }
+
+      const wrapper = doc.createElement("span");
+      try {
+        wrapper.innerHTML = katex.renderToString(segment.content, {
+          displayMode: segment.displayMode,
+          throwOnError: false,
+          strict: "ignore",
+        });
+      } catch {
+        wrapper.textContent = segment.displayMode
+          ? `$$${segment.content}$$`
+          : `$${segment.content}$`;
+      }
+      while (wrapper.firstChild) {
+        fragment.appendChild(wrapper.firstChild);
+      }
+    }
+
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+
+  return doc.body.innerHTML;
+}
+
+function buildLessonStageDocument(sectionHtml: string) {
+  const renderedSection = renderMathInHtml(sectionHtml);
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="${katexCssUrl}" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      body > section.card {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    ${renderedSection}
+  </body>
+</html>`;
 }
 
 function mergeLessonPages(lesson: LessonResult): ResolvedLessonPage[] {
@@ -162,18 +303,31 @@ function mergeLessonPages(lesson: LessonResult): ResolvedLessonPage[] {
 
       const reveals = page.reveals.map((reveal, revealIdx) => ({
         ...reveal,
+        narration: normalizeLessonText(reveal.narration),
+        on_slide: normalizeLessonText(reveal.on_slide),
         audio_src: reveal.audio_src ?? bundlePage.reveals[revealIdx]?.audio_src ?? null,
+      }));
+      const quizzes = page.quizzes.map((quiz) => ({
+        ...quiz,
+        payload: {
+          ...quiz.payload,
+          question: normalizeLessonText(quiz.payload.question),
+          ans: normalizeLessonText(quiz.payload.ans),
+          options: quiz.payload.options?.map((option) => normalizeLessonText(option)),
+        },
+        false_intro: normalizeLessonText(quiz.false_intro),
       }));
       const blueprint = blueprintByIdx.get(page.idx);
 
       return {
         idx: page.idx,
-        theme: blueprint?.theme?.trim() || `第 ${page.idx + 1} 页`,
-        objective: blueprint?.objective?.trim() || "",
+        theme: normalizeLessonText(blueprint?.theme) || `第 ${page.idx + 1} 页`,
+        objective: normalizeLessonText(blueprint?.objective),
         html: bundlePage.html,
+        srcDoc: buildLessonStageDocument(bundlePage.html),
         reveals,
-        quizzes: page.quizzes,
-        onSlideSummary: page.on_slide_summary,
+        quizzes,
+        onSlideSummary: normalizeLessonText(page.on_slide_summary),
       };
     });
 
@@ -275,13 +429,13 @@ export function LessonPlayerProvider({
       setActiveMedia(null);
       setPhase("narrating");
       window.setTimeout(() => {
-        const nextReveal = pages[currentPageIndex]?.reveals[nextRevealIndex];
+      const nextReveal = pages[currentPageIndex]?.reveals[nextRevealIndex];
         if (!nextReveal) {
           return;
         }
         setActiveMedia({
           kind: "reveal",
-          text: nextReveal.narration,
+          text: normalizeLessonText(nextReveal.narration),
           audioUrl: buildClassroomFileUrl(runId, nextReveal.audio_src),
           autoAdvance: true,
         });
@@ -323,7 +477,7 @@ export function LessonPlayerProvider({
       setPhase("narrating");
       setActiveMedia({
         kind: "reveal",
-        text: reveal.narration,
+        text: normalizeLessonText(reveal.narration),
         audioUrl: buildClassroomFileUrl(runId, reveal.audio_src),
         autoAdvance: true,
       });
@@ -361,7 +515,7 @@ export function LessonPlayerProvider({
     if (phase === "feedback" && activeQuiz?.false_intro) {
       setActiveMedia({
         kind: "feedback",
-        text: activeQuiz.false_intro,
+        text: normalizeLessonText(activeQuiz.false_intro),
         audioUrl: buildClassroomFileUrl(runId, activeQuiz.false_intro_audio_src),
         autoAdvance: false,
       });
@@ -437,7 +591,7 @@ export function LessonPlayerProvider({
         setPhase("feedback");
         setActiveMedia({
           kind: "feedback",
-          text: activeQuiz.false_intro,
+          text: normalizeLessonText(activeQuiz.false_intro),
           audioUrl: buildClassroomFileUrl(runId, activeQuiz.false_intro_audio_src),
           autoAdvance: false,
         });

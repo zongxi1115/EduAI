@@ -16,31 +16,25 @@ def test_page_script_prompt_contains_tag_contract() -> None:
 
     for token in (
         "<to_next/>",
-        "<question>…</question>",
-        "<false_intro>…</false_intro>",
+        "<question>",
+        "<false_intro>",
     ):
         assert token in prompt
     assert "<to_next_page/>" in prompt
-    assert "直接写好旁白即可" in prompt
+    assert "讲解内容请尽可能的多且充分" in prompt
     assert "同一节课" in prompt
     assert "<fill>" in prompt
     assert "<choice>" in prompt
     assert "合法 XML" in prompt
 
 
-def test_card_prompt_avoids_forbidden_words() -> None:
+def test_card_prompt_contains_required_contract() -> None:
     prompt = (PROMPT_ROOT / "slide.md").read_text(encoding="utf-8")
-    lowered = prompt.lower()
-
-    assert "ppt" not in lowered
-    assert "幻灯片" not in prompt
-    assert "slide" not in lowered
-    assert "deck" not in lowered
     assert 'window.to_next = function ()' in prompt
     assert '<section class="card" data-idx="{idx}">' in prompt
-    assert "prefers-reduced-motion" in prompt
-    assert "微交互" in prompt
-    assert "顺滑" in prompt
+    assert "MathJax" in prompt
+    assert "display_hint" in prompt
+    assert "高密度视觉化展现" in prompt
 
 
 def test_slide_html_validation_rejects_leaked_summary() -> None:
