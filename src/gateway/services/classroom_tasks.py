@@ -23,6 +23,7 @@ from edu_multi_agent.llm import LLMClient
 from ..schemas.classroom import ClassroomGenerateRequest
 from ..schemas.prep_runs import RunStatus
 from .classroom import run_classroom_workflow
+from .classroom_voice import ClassroomVoiceService
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class ClassroomTaskRegistry:
         self.llm_client = llm_client
         self.outline_agent = outline_agent
         self.output_root = (settings.output_root / CLASSROOM_RUNS_DIRNAME).resolve()
+        self.voice_service = ClassroomVoiceService(settings)
         self._sessions: dict[str, ClassroomTaskSession] = {}
         self._lock = threading.Lock()
 
@@ -149,6 +151,54 @@ class ClassroomTaskRegistry:
                 event_callback=lambda event: self._append_event(session, event),
             )
             payload = result.model_dump(mode="json")
+            if self.voice_service.enabled:
+                self._append_event(
+                    session,
+                    {
+                        "event": "voice_started",
+                        "node": "voice",
+                        "phase": "voice_generation",
+                        "summary": "开始生成课堂语音。",
+                    },
+                )
+                try:
+                    voice_summary = self.voice_service.synthesize_classroom_audio(
+                        payload,
+                        session.output_dir,
+                    )
+                except Exception as exc:
+                    self._append_event(
+                        session,
+                        {
+                            "event": "voice_failed",
+                            "node": "voice",
+                            "phase": "voice_generation",
+                            "summary": "课堂语音生成失败。",
+                            "data": {"error": str(exc)},
+                        },
+                    )
+                    raise
+                self._append_event(
+                    session,
+                    {
+                        "event": "voice_completed",
+                        "node": "voice",
+                        "phase": "voice_generation",
+                        "summary": f"课堂语音已生成，共 {voice_summary['generated']} 段。",
+                        "data": voice_summary,
+                    },
+                )
+            else:
+                self._append_event(
+                    session,
+                    {
+                        "event": "voice_skipped",
+                        "node": "voice",
+                        "phase": "voice_generation",
+                        "summary": "已跳过课堂语音生成（DEBUG_DISABLE_VOICE=true）。",
+                        "data": {"debug_disable_voice": True},
+                    },
+                )
             write_json_file(session.output_dir, RESULT_FILENAME, payload)
             write_classroom_preview_files(session.output_dir, payload)
             with session.condition:

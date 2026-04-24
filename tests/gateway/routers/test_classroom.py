@@ -244,3 +244,18 @@ def test_parse_script_endpoint_returns_422_for_invalid_script(tmp_path: Path) ->
 
     assert response.status_code == 422
     assert "Page 1 is empty" in response.json()["detail"]
+
+
+def test_get_classroom_generated_file_returns_audio_asset(tmp_path: Path) -> None:
+    app = create_app(settings=_make_settings(tmp_path), llm_client=DummyLLMClient())
+    registry = FakeRegistry(tmp_path)
+    app.state.classroom_task_registry = registry
+    audio_path = registry.session.output_dir / "voice" / "page_01" / "reveal_01.wav"
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    audio_path.write_bytes(b"audio-bytes")
+
+    client = TestClient(app)
+    response = client.get("/api/v1/classroom/run_123/files/voice/page_01/reveal_01.wav")
+
+    assert response.status_code == 200
+    assert response.content == b"audio-bytes"

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path as ApiPath, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from edu_multi_agent.file_io import now_iso
 
@@ -22,6 +23,7 @@ from ..schemas.prep_runs import RunStatus
 from ..services.classroom import parse_classroom_script
 from ..services.classroom_tasks import ClassroomTaskRegistry, load_run_view, load_stored_events
 from ..services.prep_runs import encode_sse
+from ..services.prep_runs import safe_path_within
 
 
 router = APIRouter(prefix="/api/v1/classroom", tags=["AI 课堂"])
@@ -143,6 +145,23 @@ def get_classroom_task_result(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=404, detail="Task result not found.")
     return ClassroomGenerateResponse.model_validate(payload)
+
+
+@router.get(
+    "/{run_id}/files/{file_path:path}",
+    summary="获取课堂生成文件",
+    description="从课堂任务输出目录中获取单个生成文件，例如语音文件。",
+    response_description="返回课堂任务目录中的目标文件。",
+)
+def download_classroom_file(
+    registry: ClassroomTaskRegistryDep,
+    run_id: str = ApiPath(description="AI 课堂任务唯一标识。"),
+    file_path: str = ApiPath(description="课堂任务输出目录中的相对文件路径。"),
+) -> FileResponse:
+    output_dir = registry.resolve_run_dir(run_id)
+    target = safe_path_within(output_dir, file_path)
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(target, media_type=media_type)
 
 
 @router.get(

@@ -26,6 +26,16 @@ class Settings:
     temperature: float = 0.2
     request_timeout_seconds: int = 180
     support_vision: bool = False
+    tts_base_url: str = ""
+    tts_api_key: str = ""
+    tts_model_name: str = ""
+    tts_voice: str = "mimo_default"
+    tts_audio_format: str = "wav"
+    tts_style_prompt: str = (
+        "请用自然、亲切、清晰的中文课堂讲解语气朗读，节奏平稳，重点适度强调。"
+    )
+    tts_max_workers: int = 4
+    debug_disable_voice: bool = True
 
     @classmethod
     def from_env(cls, env_path: str | None = None) -> "Settings":
@@ -43,6 +53,20 @@ class Settings:
         temperature = float(os.getenv("TEMPERATURE", "0.2"))
         request_timeout_seconds = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "180"))
         support_vision = _env_flag("SUPPORT_VISION", False)
+        tts_base_url = os.getenv("TTS_BASE_URL", "").strip()
+        tts_api_key = os.getenv("TTS_API_KEY", "").strip()
+        tts_model_name = os.getenv("TTS_MODEL_NAME", "").strip()
+        tts_voice = os.getenv("TTS_VOICE", "mimo_default").strip() or "mimo_default"
+        tts_audio_format = os.getenv("TTS_AUDIO_FORMAT", "wav").strip() or "wav"
+        tts_style_prompt = (
+            os.getenv(
+                "TTS_STYLE_PROMPT",
+                "请用自然、亲切、清晰的中文课堂讲解语气朗读，节奏平稳，重点适度强调。",
+            ).strip()
+            or "请用自然、亲切、清晰的中文课堂讲解语气朗读，节奏平稳，重点适度强调。"
+        )
+        tts_max_workers = max(1, int(os.getenv("TTS_MAX_WORKERS", "4")))
+        debug_disable_voice = _env_flag("DEBUG_DISABLE_VOICE", True)
 
         missing = [
             name
@@ -66,4 +90,12 @@ class Settings:
             temperature=temperature,
             request_timeout_seconds=request_timeout_seconds,
             support_vision=support_vision,
+            tts_base_url=tts_base_url,
+            tts_api_key=tts_api_key,
+            tts_model_name=tts_model_name,
+            tts_voice=tts_voice,
+            tts_audio_format=tts_audio_format,
+            tts_style_prompt=tts_style_prompt,
+            tts_max_workers=tts_max_workers,
+            debug_disable_voice=debug_disable_voice,
         )

@@ -27,12 +27,17 @@ class ClassroomGenerateRequest(BaseModel):
 class ClassroomRevealResponse(BaseModel):
     narration: str = Field(description="口播旁白。")
     on_slide: str | None = Field(default=None, description="页面显示文字。")
+    audio_src: str | None = Field(default=None, description="该段旁白对应的语音文件路径。")
 
 
 class ClassroomQuizResponse(BaseModel):
     after_reveal_idx: int = Field(ge=0, description="在第几个 reveal 播放后触发。")
     payload: dict[str, Any] = Field(description="题目 JSON 负载。")
     false_intro: str | None = Field(default=None, description="答错补讲旁白。")
+    false_intro_audio_src: str | None = Field(
+        default=None,
+        description="答错补讲旁白对应的语音文件路径。",
+    )
 
 
 class ClassroomPageSpecResponse(BaseModel):
@@ -53,6 +58,7 @@ class ClassroomPageBlueprintResponse(BaseModel):
 
 class ClassroomBundleRevealResponse(BaseModel):
     narration: str = Field(description="交付给播放器的旁白文本。")
+    audio_src: str | None = Field(default=None, description="交付给播放器的旁白语音文件路径。")
 
 
 class ClassroomBundlePageResponse(BaseModel):
