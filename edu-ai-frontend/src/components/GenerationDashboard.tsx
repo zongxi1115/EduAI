@@ -197,6 +197,56 @@ function getTypingChunk(text: string, targetMs: number, intervalMs: number, mini
   return Math.max(minimum, Math.ceil(text.length / ticks));
 }
 
+function buildPreviewDocument(htmlCode: string) {
+  if (!htmlCode.trim()) {
+    return htmlCode;
+  }
+
+  const hiddenProgressStyle = `
+<style id="edu-preview-hide-progress">
+  html,
+  body {
+    margin: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    scrollbar-width: none !important;
+  }
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  section.card {
+    overflow: hidden !important;
+  }
+  progress,
+  .progress,
+  .progress-bar,
+  #progressBar,
+  #progress-bar,
+  [role="progressbar"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+</style>`;
+
+  if (htmlCode.includes('edu-preview-hide-progress')) {
+    return htmlCode;
+  }
+
+  if (htmlCode.includes('</head>')) {
+    return htmlCode.replace('</head>', `${hiddenProgressStyle}</head>`);
+  }
+
+  if (htmlCode.includes('<body')) {
+    return htmlCode.replace(/<body([^>]*)>/i, `<body$1>${hiddenProgressStyle}`);
+  }
+
+  return `${hiddenProgressStyle}${htmlCode}`;
+}
+
 export function GenerationDashboard({
   topic,
   status,
@@ -210,6 +260,7 @@ export function GenerationDashboard({
 }) {
   const timersRef = useRef<number[]>([]);
   const processedEventIdsRef = useRef<Set<number>>(new Set());
+  const streamTailRef = useRef<HTMLDivElement | null>(null);
 
   const [hasBlueprints, setHasBlueprints] = useState(false);
   const [slides, setSlides] = useState<SlideState[]>(() => buildPlaceholderSlides(topic, summary, status));
@@ -313,21 +364,28 @@ export function GenerationDashboard({
       }
 
       if (event.event === 'node_started' && event.node === 'page_script' && pageIdx !== null) {
-        updateSlide(pageIdx, pageTitle ? { title: pageTitle } : {}, 'script_deleting');
+        updateSlide(pageIdx, pageTitle ? { title: pageTitle } : {});
         return;
       }
 
       if (event.event === 'node_completed' && event.node === 'page_script' && pageIdx !== null) {
         const scriptText = getString(data?.page_script) ?? getString(event.summary) ?? '';
+        const previousOutlineText = slides.find((slide) => slide.idx === pageIdx)?.outlineText ?? '';
         updateSlide(
           pageIdx,
           {
             scriptText,
             ...(pageTitle ? { title: pageTitle } : {}),
           },
-          'script_typing',
+          'script_deleting',
         );
 
+        const deletingDuration = estimateDuration(previousOutlineText, {
+          intervalMs: 18,
+          charactersPerTick: getTypingChunk(previousOutlineText, 500, 18, 4),
+          minMs: 180,
+          maxMs: 700,
+        });
         const typingDuration = estimateDuration(scriptText, {
           intervalMs: 25,
           charactersPerTick: getTypingChunk(scriptText, 2000, 25, 3),
@@ -335,7 +393,8 @@ export function GenerationDashboard({
           maxMs: 2400,
         });
 
-        queueTask(() => updateSlide(pageIdx, {}, 'script_done'), typingDuration);
+        queueTask(() => updateSlide(pageIdx, {}, 'script_typing'), deletingDuration);
+        queueTask(() => updateSlide(pageIdx, {}, 'script_done'), deletingDuration + typingDuration);
         return;
       }
 
@@ -389,16 +448,7 @@ export function GenerationDashboard({
         advanceGlobalPhase('done');
       }
     });
-  }, [events]);
-
-  useEffect(() => {
-    if (globalPhase === 'outline_seq') {
-      window.scrollTo({
-        top: document.documentElement.scrollHeight,
-        behavior: 'smooth',
-      });
-    }
-  }, [globalPhase, slides]);
+  }, [events, slides]);
 
   const effectiveGlobalPhase = status === 'succeeded' ? 'done' : globalPhase;
   const isGrid =
@@ -413,6 +463,21 @@ export function GenerationDashboard({
       : topic
       ? `${topic} 正在生成课堂`
       : 'AI 课堂正在生成');
+
+  useEffect(() => {
+    if (effectiveGlobalPhase !== 'outline_seq') {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      streamTailRef.current?.scrollIntoView({
+        block: 'end',
+        behavior: 'smooth',
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [effectiveGlobalPhase, slides]);
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] font-sans text-zinc-900 pb-32 relative overflow-hidden">
@@ -469,6 +534,7 @@ export function GenerationDashboard({
                     </motion.div>
                   );
                 })}
+                <div ref={streamTailRef} className="h-px w-full" />
               </motion.div>
             ) : (
               <motion.div
@@ -584,7 +650,12 @@ function SlideBlock({ slide, title }: { slide: SlideState; title: string }) {
               transition={{ duration: 0.8 }}
               className="absolute inset-0 z-20 bg-white"
             >
-              <iframe srcDoc={slide.htmlCode} className="w-full h-full border-none pointer-events-none" title="preview" />
+              <iframe
+                srcDoc={buildPreviewDocument(slide.htmlCode)}
+                className="w-full h-full border-none pointer-events-none"
+                scrolling="no"
+                title="preview"
+              />
 
               <AnimatePresence>
                 {(slide.phase === 'audio_gen' || slide.phase === 'audio_done') && (
@@ -708,10 +779,11 @@ function TypewriterEffect({ text, phase }: { text: string; phase: 'idle' | 'typi
 
 function TypewriterTransition({ oldText, newText, phase }: { oldText: string; newText: string; phase: SlidePhase }) {
   const [display, setDisplay] = useState(oldText);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   const maskStyle = {
-    maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
-    WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
+    maskImage: 'linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%)',
+    WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%)',
   };
 
   useEffect(() => {
@@ -752,31 +824,42 @@ function TypewriterTransition({ oldText, newText, phase }: { oldText: string; ne
     }
   }, [newText, oldText, phase]);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [display]);
+
   const isOutline = phase === 'outline_done' || phase === 'script_deleting';
 
   return (
-    <div
-      className={`whitespace-pre-wrap ${
-        isOutline
-          ? 'text-zinc-500 font-medium leading-[1.6]'
-          : 'text-zinc-700 font-serif text-[15px] leading-[1.8] tracking-[0.01em]'
-      } h-full transition-colors duration-500`}
-      style={maskStyle}
-    >
-      {display}
-      {(phase === 'script_deleting' || phase === 'script_typing') && (
-        <motion.span
-          animate={{ opacity: [1, 0] }}
-          transition={{ repeat: Infinity, duration: 0.7 }}
-          className="inline-block w-1.5 h-[1.1em] bg-purple-500 ml-1 translate-y-1 rounded-sm"
-        />
-      )}
+    <div ref={viewportRef} className="h-full overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={maskStyle}>
+      <div
+        className={`whitespace-pre-wrap ${
+          isOutline
+            ? 'text-zinc-500 font-medium leading-[1.6]'
+            : 'text-zinc-700 font-serif text-[15px] leading-[1.8] tracking-[0.01em]'
+        } min-h-full transition-colors duration-500`}
+      >
+        {display}
+        {(phase === 'script_deleting' || phase === 'script_typing') && (
+          <motion.span
+            animate={{ opacity: [1, 0] }}
+            transition={{ repeat: Infinity, duration: 0.7 }}
+            className="ml-1 inline-block h-[1.1em] w-1.5 translate-y-1 rounded-sm bg-purple-500"
+          />
+        )}
+      </div>
     </div>
   );
 }
 
 function CodeStreamer({ code, isGenerating }: { code: string; isGenerating: boolean }) {
   const [display, setDisplay] = useState('');
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!isGenerating) {
@@ -797,6 +880,15 @@ function CodeStreamer({ code, isGenerating }: { code: string; isGenerating: bool
     return () => window.clearInterval(timer);
   }, [code, isGenerating]);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [display]);
+
   return (
     <div className="h-full overflow-hidden relative flex flex-col">
       <div className="flex items-center gap-1.5 mb-4 opacity-40 shrink-0">
@@ -805,10 +897,11 @@ function CodeStreamer({ code, isGenerating }: { code: string; isGenerating: bool
         <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
       </div>
       <div
-        className="flex-1 overflow-hidden relative"
+        ref={viewportRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden relative [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{
-          maskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)',
+          maskImage: 'linear-gradient(to bottom, transparent 0%, black 8%, black 90%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 8%, black 90%, transparent 100%)',
         }}
       >
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:100%_4px] pointer-events-none z-10" />

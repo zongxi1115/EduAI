@@ -87,13 +87,27 @@ type ActiveMedia =
       text: string;
       audioUrl: string | null;
       autoAdvance: true;
+      startAtMs: number;
     }
   | {
       kind: "feedback";
       text: string;
       audioUrl: string | null;
       autoAdvance: false;
+      startAtMs: number;
     };
+
+export interface LessonTimelineSegment {
+  id: string;
+  pageIndex: number;
+  revealIndex: number;
+  text: string;
+  audioUrl: string | null;
+  fallbackDurationMs: number;
+  durationMs: number;
+  startMs: number;
+  endMs: number;
+}
 
 interface LessonPlayerContextValue {
   lesson: LessonResult;
@@ -121,12 +135,27 @@ interface LessonPlayerContextValue {
   skipQuiz: () => void;
   totalReveals: number;
   completedReveals: number;
+  timelineSegments: LessonTimelineSegment[];
+  timelineDurationMs: number;
+  timelineElapsedMs: number;
+  currentSegmentDurationMs: number;
+  currentSegmentElapsedMs: number;
+  playbackRate: number;
+  setPlaybackRate: (rate: number) => void;
+  stageRenderNonce: number;
+  seekToTime: (timeMs: number) => void;
+  seekBy: (offsetMs: number) => void;
+  pausePlayback: () => void;
+  resumePlayback: () => void;
+  togglePlayback: () => void;
 }
 
 const LessonPlayerContext = createContext<LessonPlayerContextValue | null>(null);
 
 const PAGE_SWITCH_DELAY_MS = 220;
 const REVEAL_SWITCH_DELAY_MS = 320;
+const MIN_SEEK_SAFETY_MS = 48;
+const INLINE_QUIZZES_ENABLED = true;
 
 function normalizeAnswer(text: string) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
@@ -141,6 +170,14 @@ function normalizeLessonText(text: string | null | undefined) {
 
 function estimateFallbackDuration(text: string) {
   return Math.min(12000, Math.max(1800, text.replace(/\s+/g, "").length * 240));
+}
+
+function clampPlaybackRate(rate: number) {
+  if (!Number.isFinite(rate)) {
+    return 1;
+  }
+
+  return Math.min(2, Math.max(0.5, Number(rate.toFixed(2))));
 }
 
 type MathSegment =
@@ -268,15 +305,31 @@ function buildLessonStageDocument(sectionHtml: string) {
       html, body {
         margin: 0;
         width: 100%;
-        height: 100%;
-        overflow: hidden;
+        min-height: 100%;
         background: transparent;
+      }
+      html {
+        height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+      body {
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
       body > section.card {
         width: 100%;
-        height: 100%;
+        min-height: 100%;
       }
     </style>
+    <script>
+      window.addEventListener("dblclick", () => {
+        try {
+          window.parent.postMessage({ source: "edu-lesson-stage", type: "lesson-stage-dblclick" }, "*");
+        } catch {}
+      });
+    </script>
   </head>
   <body>
     ${renderedSection}
@@ -355,9 +408,22 @@ export function LessonPlayerProvider({
   const [activeQuizQueue, setActiveQuizQueue] = useState<LessonQuiz[]>([]);
   const [activeQuizIndex, setActiveQuizIndex] = useState(0);
   const [quizError, setQuizError] = useState<string | null>(null);
+  const [stageRenderNonce, setStageRenderNonce] = useState(0);
+  const [durationBySegmentId, setDurationBySegmentId] = useState<Record<string, number>>({});
+  const [currentSegmentElapsedMs, setCurrentSegmentElapsedMs] = useState(0);
+  const [activePlaybackDurationMs, setActivePlaybackDurationMs] = useState(0);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const fallbackTimerRef = useRef<number | null>(null);
+  const playbackFrameRef = useRef<number | null>(null);
+  const playbackStartedAtRef = useRef<number | null>(null);
+  const playbackRateRef = useRef(1);
+  const pendingSeekRef = useRef<{
+    pageIndex: number;
+    revealIndex: number;
+    offsetMs: number;
+  } | null>(null);
   const awaitingStageLoadRef = useRef(false);
 
   const currentPage = pages[currentPageIndex] ?? pages[0];
@@ -375,6 +441,149 @@ export function LessonPlayerProvider({
         .reduce((sum, page) => sum + page.reveals.length, 0) + currentRevealIndex,
     [currentPageIndex, currentRevealIndex, pages]
   );
+  const timelineSegments = useMemo(() => {
+    const baseSegments = pages.flatMap<LessonTimelineSegment>((page, pageIndex) =>
+      page.reveals.map((reveal, revealIndex) => {
+        const text = normalizeLessonText(reveal.narration);
+        const audioUrl = buildClassroomFileUrl(runId, reveal.audio_src);
+        const fallbackDurationMs = estimateFallbackDuration(text);
+
+        return {
+          id: `${page.idx}:${revealIndex}`,
+          pageIndex,
+          revealIndex,
+          text,
+          audioUrl,
+          fallbackDurationMs,
+          durationMs: fallbackDurationMs,
+          startMs: 0,
+          endMs: 0,
+        };
+      })
+    );
+
+    let elapsedMs = 0;
+    return baseSegments.map((segment) => {
+      const durationMs = durationBySegmentId[segment.id] ?? segment.fallbackDurationMs;
+      const nextSegment = {
+        ...segment,
+        durationMs,
+        startMs: elapsedMs,
+        endMs: elapsedMs + durationMs,
+      };
+      elapsedMs += durationMs;
+      return nextSegment;
+    });
+  }, [durationBySegmentId, pages, runId]);
+  const timelineDurationMs = timelineSegments.at(-1)?.endMs ?? 0;
+  const currentTimelineSegment = useMemo(
+    () =>
+      timelineSegments.find(
+        (segment) =>
+          segment.pageIndex === currentPageIndex && segment.revealIndex === currentRevealIndex
+      ) ?? null,
+    [currentPageIndex, currentRevealIndex, timelineSegments]
+  );
+  const currentSegmentDurationMs = currentTimelineSegment?.durationMs ?? activePlaybackDurationMs;
+  const timelineElapsedMs = useMemo(() => {
+    if (isEnded) {
+      return timelineDurationMs;
+    }
+
+    if (!currentTimelineSegment) {
+      return 0;
+    }
+
+    if (phase === "question" || phase === "feedback") {
+      return currentTimelineSegment.endMs;
+    }
+
+    if (phase === "narrating" && activeMedia?.kind === "reveal") {
+      return Math.min(
+        currentTimelineSegment.endMs,
+        currentTimelineSegment.startMs + currentSegmentElapsedMs
+      );
+    }
+
+    return currentTimelineSegment.startMs;
+  }, [activeMedia, currentSegmentElapsedMs, currentTimelineSegment, isEnded, phase, timelineDurationMs]);
+
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.defaultPlaybackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  useEffect(() => {
+    let disposed = false;
+    const cleanups: Array<() => void> = [];
+
+    timelineSegments.forEach((segment) => {
+      if (durationBySegmentId[segment.id]) {
+        return;
+      }
+
+      if (!segment.audioUrl) {
+        setDurationBySegmentId((current) => {
+          if (current[segment.id]) {
+            return current;
+          }
+          return {
+            ...current,
+            [segment.id]: segment.fallbackDurationMs,
+          };
+        });
+        return;
+      }
+
+      const metadataAudio = new Audio();
+      metadataAudio.preload = "metadata";
+
+      const finalize = (nextDurationMs: number) => {
+        if (disposed) {
+          return;
+        }
+
+        setDurationBySegmentId((current) => {
+          if (current[segment.id] === nextDurationMs) {
+            return current;
+          }
+          return {
+            ...current,
+            [segment.id]: nextDurationMs,
+          };
+        });
+      };
+
+      const handleLoadedMetadata = () => {
+        const durationMs = Number.isFinite(metadataAudio.duration) && metadataAudio.duration > 0
+          ? Math.round(metadataAudio.duration * 1000)
+          : segment.fallbackDurationMs;
+        finalize(durationMs);
+      };
+
+      const handleError = () => {
+        finalize(segment.fallbackDurationMs);
+      };
+
+      metadataAudio.addEventListener("loadedmetadata", handleLoadedMetadata);
+      metadataAudio.addEventListener("error", handleError);
+      metadataAudio.src = segment.audioUrl;
+
+      cleanups.push(() => {
+        metadataAudio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        metadataAudio.removeEventListener("error", handleError);
+        metadataAudio.src = "";
+      });
+    });
+
+    return () => {
+      disposed = true;
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [durationBySegmentId, timelineSegments]);
 
   const clearPlayback = useCallback(() => {
     if (fallbackTimerRef.current !== null) {
@@ -382,13 +591,72 @@ export function LessonPlayerProvider({
       fallbackTimerRef.current = null;
     }
 
+    if (playbackFrameRef.current !== null) {
+      window.cancelAnimationFrame(playbackFrameRef.current);
+      playbackFrameRef.current = null;
+    }
+
+    playbackStartedAtRef.current = null;
+
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
       audio.removeAttribute("src");
       audio.load();
     }
+
+    setCurrentSegmentElapsedMs(0);
+    setActivePlaybackDurationMs(0);
     setIsPlaying(false);
+  }, []);
+
+  const syncStageToReveal = useCallback((revealIndex: number) => {
+    if (revealIndex <= 0) {
+      return;
+    }
+
+    try {
+      const stageWindow = frameRef.current?.contentWindow as (Window & {
+        to_next?: () => boolean;
+      }) | null;
+
+      for (let step = 0; step < revealIndex; step += 1) {
+        const advanced = stageWindow?.to_next?.();
+        if (advanced === false) {
+          break;
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to sync embedded lesson card.", error);
+    }
+  }, []);
+
+  const isStageReady = useCallback(() => {
+    try {
+      return (
+        frameRef.current?.contentDocument?.readyState === "complete" ||
+        frameRef.current?.contentWindow?.document?.readyState === "complete"
+      );
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const queueSeek = useCallback((targetSegment: LessonTimelineSegment, offsetMs: number) => {
+    pendingSeekRef.current = {
+      pageIndex: targetSegment.pageIndex,
+      revealIndex: targetSegment.revealIndex,
+      offsetMs,
+    };
+    awaitingStageLoadRef.current = true;
+    setHasStarted(true);
+    setCurrentPageIndex(targetSegment.pageIndex);
+    setCurrentRevealIndex(targetSegment.revealIndex);
+    setActiveMedia(null);
+    setActiveQuizQueue([]);
+    setActiveQuizIndex(0);
+    setQuizError(null);
+    setPhase("narrating");
   }, []);
 
   const advanceAfterReveal = useCallback((options?: { skipQuizCheck?: boolean }) => {
@@ -399,7 +667,7 @@ export function LessonPlayerProvider({
       return;
     }
 
-    if (!skipQuizCheck) {
+    if (INLINE_QUIZZES_ENABLED && !skipQuizCheck) {
       const queuedQuizzes = page.quizzes.filter(
         (quiz) => quiz.after_reveal_idx === currentRevealIndex
       );
@@ -414,30 +682,34 @@ export function LessonPlayerProvider({
     }
 
     if (currentRevealIndex < page.reveals.length - 1) {
-      try {
-        (
-          frameRef.current?.contentWindow as (Window & {
-            to_next?: () => boolean;
-          }) | null
-        )?.to_next?.();
-      } catch (error) {
-        console.warn("Failed to advance embedded lesson card.", error);
-      }
+      syncStageToReveal(1);
 
       const nextRevealIndex = currentRevealIndex + 1;
       setCurrentRevealIndex(nextRevealIndex);
       setActiveMedia(null);
       setPhase("narrating");
       window.setTimeout(() => {
-      const nextReveal = pages[currentPageIndex]?.reveals[nextRevealIndex];
+        const nextReveal = pages[currentPageIndex]?.reveals[nextRevealIndex];
         if (!nextReveal) {
           return;
         }
+
+        const nextSegment = timelineSegments.find(
+          (segment) =>
+            segment.pageIndex === currentPageIndex && segment.revealIndex === nextRevealIndex
+        );
+        const startAtMs = 0;
+
+        setCurrentSegmentElapsedMs(startAtMs);
+        setActivePlaybackDurationMs(
+          nextSegment?.durationMs ?? estimateFallbackDuration(nextReveal.narration)
+        );
         setActiveMedia({
           kind: "reveal",
           text: normalizeLessonText(nextReveal.narration),
           audioUrl: buildClassroomFileUrl(runId, nextReveal.audio_src),
           autoAdvance: true,
+          startAtMs,
         });
       }, REVEAL_SWITCH_DELAY_MS);
       return;
@@ -462,27 +734,38 @@ export function LessonPlayerProvider({
     setQuizError(null);
     setIsPlaying(false);
     setPhase("ended");
-  }, [currentPageIndex, currentRevealIndex, pages, runId]);
+  }, [currentPageIndex, currentRevealIndex, pages, syncStageToReveal, timelineSegments, runId]);
 
   const playReveal = useCallback(
-    (pageIndex: number, revealIndex: number) => {
+    (pageIndex: number, revealIndex: number, options?: { startAtMs?: number }) => {
       const reveal = pages[pageIndex]?.reveals[revealIndex];
       if (!reveal) {
         return;
       }
 
+      const startAtMs = Math.max(0, options?.startAtMs ?? 0);
+      const revealTimelineSegment =
+        timelineSegments.find(
+          (segment) => segment.pageIndex === pageIndex && segment.revealIndex === revealIndex
+        ) ?? null;
+
       setActiveQuizQueue([]);
       setActiveQuizIndex(0);
       setQuizError(null);
       setPhase("narrating");
+      setCurrentSegmentElapsedMs(startAtMs);
+      setActivePlaybackDurationMs(
+        revealTimelineSegment?.durationMs ?? estimateFallbackDuration(reveal.narration)
+      );
       setActiveMedia({
         kind: "reveal",
         text: normalizeLessonText(reveal.narration),
         audioUrl: buildClassroomFileUrl(runId, reveal.audio_src),
         autoAdvance: true,
+        startAtMs,
       });
     },
-    [pages, runId]
+    [pages, runId, timelineSegments]
   );
 
   const startLesson = useCallback(() => {
@@ -513,11 +796,15 @@ export function LessonPlayerProvider({
     }
 
     if (phase === "feedback" && activeQuiz?.false_intro) {
+      const feedbackText = normalizeLessonText(activeQuiz.false_intro);
+      setCurrentSegmentElapsedMs(0);
+      setActivePlaybackDurationMs(estimateFallbackDuration(feedbackText));
       setActiveMedia({
         kind: "feedback",
-        text: normalizeLessonText(activeQuiz.false_intro),
+        text: feedbackText,
         audioUrl: buildClassroomFileUrl(runId, activeQuiz.false_intro_audio_src),
         autoAdvance: false,
+        startAtMs: 0,
       });
       return;
     }
@@ -541,13 +828,24 @@ export function LessonPlayerProvider({
 
     awaitingStageLoadRef.current = false;
     window.setTimeout(() => {
+      const pendingSeek = pendingSeekRef.current;
+      if (pendingSeek && pendingSeek.pageIndex === currentPageIndex) {
+        syncStageToReveal(pendingSeek.revealIndex);
+        playReveal(currentPageIndex, pendingSeek.revealIndex, {
+          startAtMs: pendingSeek.offsetMs,
+        });
+        pendingSeekRef.current = null;
+        return;
+      }
+
       playReveal(currentPageIndex, currentRevealIndex);
     }, PAGE_SWITCH_DELAY_MS);
-  }, [currentPageIndex, currentRevealIndex, hasStarted, playReveal]);
+  }, [currentPageIndex, currentRevealIndex, hasStarted, playReveal, syncStageToReveal]);
 
   const restartLesson = useCallback(() => {
     clearPlayback();
     awaitingStageLoadRef.current = true;
+    pendingSeekRef.current = null;
     setHasStarted(false);
     setCurrentPageIndex(0);
     setCurrentRevealIndex(0);
@@ -556,6 +854,7 @@ export function LessonPlayerProvider({
     setActiveQuizIndex(0);
     setQuizError(null);
     setPhase("idle");
+    setStageRenderNonce((value) => value + 1);
   }, [clearPlayback]);
 
   const moveToNextQuizOrContinue = useCallback(() => {
@@ -587,13 +886,17 @@ export function LessonPlayerProvider({
       }
 
       if (activeQuiz.false_intro?.trim()) {
+        const feedbackText = normalizeLessonText(activeQuiz.false_intro);
         setQuizError("这次还不对，我们先补充一下思路。");
         setPhase("feedback");
+        setCurrentSegmentElapsedMs(0);
+        setActivePlaybackDurationMs(estimateFallbackDuration(feedbackText));
         setActiveMedia({
           kind: "feedback",
-          text: normalizeLessonText(activeQuiz.false_intro),
+          text: feedbackText,
           audioUrl: buildClassroomFileUrl(runId, activeQuiz.false_intro_audio_src),
           autoAdvance: false,
+          startAtMs: 0,
         });
         return;
       }
@@ -630,6 +933,200 @@ export function LessonPlayerProvider({
     advanceAfterReveal();
   }, [advanceAfterReveal, clearPlayback, hasStarted, phase, skipQuiz, startLesson]);
 
+  const setPlaybackRate = useCallback(
+    (rate: number) => {
+      const clampedRate = clampPlaybackRate(rate);
+      setPlaybackRateState((currentRate) => (currentRate === clampedRate ? currentRate : clampedRate));
+
+      const audio = audioRef.current;
+      if (audio) {
+        audio.playbackRate = clampedRate;
+        audio.defaultPlaybackRate = clampedRate;
+      }
+
+      if (!activeMedia || !isPlaying) {
+        return;
+      }
+
+      const nextElapsedMs =
+        activeMedia.audioUrl && audio && audio.readyState > 0
+          ? Math.round(audio.currentTime * 1000)
+          : playbackStartedAtRef.current !== null
+          ? Math.round((performance.now() - playbackStartedAtRef.current) * playbackRateRef.current)
+          : currentSegmentElapsedMs;
+
+      setActiveMedia({
+        ...activeMedia,
+        startAtMs: Math.max(0, nextElapsedMs),
+      });
+    },
+    [activeMedia, currentSegmentElapsedMs, isPlaying]
+  );
+
+  const pausePlayback = useCallback(() => {
+    if (!hasStarted || !activeMedia || !isPlaying) {
+      return;
+    }
+
+    if (fallbackTimerRef.current !== null) {
+      window.clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+
+    if (playbackFrameRef.current !== null) {
+      window.cancelAnimationFrame(playbackFrameRef.current);
+      playbackFrameRef.current = null;
+    }
+
+    const audio = audioRef.current;
+    let nextElapsedMs = currentSegmentElapsedMs;
+
+    if (activeMedia.audioUrl && audio && audio.readyState > 0) {
+      audio.pause();
+      nextElapsedMs = Math.round(audio.currentTime * 1000);
+    } else if (playbackStartedAtRef.current !== null) {
+      nextElapsedMs = Math.round(
+        (performance.now() - playbackStartedAtRef.current) * playbackRateRef.current
+      );
+    }
+
+    playbackStartedAtRef.current = null;
+
+    const durationMs = Math.max(
+      currentSegmentDurationMs,
+      activePlaybackDurationMs,
+      estimateFallbackDuration(activeMedia.text)
+    );
+    setCurrentSegmentElapsedMs(Math.min(durationMs, Math.max(0, nextElapsedMs)));
+    setIsPlaying(false);
+  }, [
+    activeMedia,
+    activePlaybackDurationMs,
+    currentSegmentDurationMs,
+    currentSegmentElapsedMs,
+    hasStarted,
+    isPlaying,
+  ]);
+
+  const seekToTime = useCallback(
+    (timeMs: number) => {
+      if (!timelineSegments.length) {
+        return;
+      }
+
+      const safeMaxTimeMs = Math.max(0, timelineDurationMs - MIN_SEEK_SAFETY_MS);
+      const clampedTimeMs = Math.max(0, Math.min(timeMs, safeMaxTimeMs));
+      const targetSegment =
+        timelineSegments.find((segment) => clampedTimeMs < segment.endMs) ??
+        timelineSegments.at(-1);
+
+      if (!targetSegment) {
+        return;
+      }
+
+      const targetOffsetMs = Math.max(0, clampedTimeMs - targetSegment.startMs);
+      const isSamePage = targetSegment.pageIndex === currentPageIndex;
+      const stageReady = isStageReady();
+
+      clearPlayback();
+      if (isSamePage && stageReady) {
+        pendingSeekRef.current = null;
+        awaitingStageLoadRef.current = false;
+        setHasStarted(true);
+        setCurrentPageIndex(targetSegment.pageIndex);
+
+        if (targetSegment.revealIndex < currentRevealIndex) {
+          // The embedded card only exposes `to_next`, so rewinding within a page
+          // still needs a single reload back to the base slide state.
+          queueSeek(targetSegment, targetOffsetMs);
+          setStageRenderNonce((value) => value + 1);
+          return;
+        }
+
+        setCurrentRevealIndex(targetSegment.revealIndex);
+        if (targetSegment.revealIndex > currentRevealIndex) {
+          syncStageToReveal(targetSegment.revealIndex - currentRevealIndex);
+        }
+
+        playReveal(targetSegment.pageIndex, targetSegment.revealIndex, {
+          startAtMs: targetOffsetMs,
+        });
+        return;
+      }
+
+      queueSeek(targetSegment, targetOffsetMs);
+    },
+    [
+      clearPlayback,
+      currentPageIndex,
+      currentRevealIndex,
+      isStageReady,
+      playReveal,
+      queueSeek,
+      syncStageToReveal,
+      timelineDurationMs,
+      timelineSegments,
+    ]
+  );
+
+  const resumePlayback = useCallback(() => {
+    if (isEnded) {
+      seekToTime(0);
+      return;
+    }
+
+    if (!hasStarted) {
+      startLesson();
+      return;
+    }
+
+    if (phase === "question" || phase === "feedback") {
+      skipQuiz();
+      return;
+    }
+
+    if (activeMedia) {
+      setActiveMedia({
+        ...activeMedia,
+        startAtMs: currentSegmentElapsedMs,
+      });
+      return;
+    }
+
+    playReveal(currentPageIndex, currentRevealIndex, {
+      startAtMs: currentSegmentElapsedMs,
+    });
+  }, [
+    activeMedia,
+    currentPageIndex,
+    currentRevealIndex,
+    currentSegmentElapsedMs,
+    hasStarted,
+    isEnded,
+    phase,
+    playReveal,
+    seekToTime,
+    skipQuiz,
+    startLesson,
+  ]);
+
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) {
+      pausePlayback();
+      return;
+    }
+
+    resumePlayback();
+  }, [isPlaying, pausePlayback, resumePlayback]);
+
+  const seekBy = useCallback(
+    (offsetMs: number) => {
+      const baseTimeMs = isEnded ? timelineDurationMs : timelineElapsedMs;
+      seekToTime(baseTimeMs + offsetMs);
+    },
+    [isEnded, seekToTime, timelineDurationMs, timelineElapsedMs]
+  );
+
   const bindStageFrame = useCallback((node: HTMLIFrameElement | null) => {
     frameRef.current = node;
   }, []);
@@ -652,36 +1149,115 @@ export function LessonPlayerProvider({
       return;
     }
 
+    let playbackDurationMs =
+      activeMedia.kind === "reveal"
+        ? currentTimelineSegment?.durationMs ?? estimateFallbackDuration(activeMedia.text)
+        : estimateFallbackDuration(activeMedia.text);
+    const startAtMs = Math.max(0, activeMedia.startAtMs);
+    const rate = playbackRateRef.current;
+
+    const updatePlaybackDuration = (nextDurationMs: number) => {
+      playbackDurationMs = nextDurationMs;
+      setActivePlaybackDurationMs(nextDurationMs);
+    };
+
     const finishPlayback = () => {
+      if (fallbackTimerRef.current !== null) {
+        window.clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+
+      if (playbackFrameRef.current !== null) {
+        window.cancelAnimationFrame(playbackFrameRef.current);
+        playbackFrameRef.current = null;
+      }
+
+      playbackStartedAtRef.current = null;
+      setCurrentSegmentElapsedMs(playbackDurationMs);
       setIsPlaying(false);
       if (activeMedia.autoAdvance) {
         advanceAfterReveal();
       }
     };
 
-    const scheduleFallback = () => {
+    const startProgressLoop = () => {
+      if (playbackFrameRef.current !== null) {
+        window.cancelAnimationFrame(playbackFrameRef.current);
+      }
+
+      const updateProgress = () => {
+        if (playbackStartedAtRef.current === null) {
+          return;
+        }
+
+        const nextElapsedMs =
+          activeMedia.audioUrl && !audio.paused && !audio.ended && audio.readyState > 0
+            ? Math.round(audio.currentTime * 1000)
+            : Math.round((performance.now() - playbackStartedAtRef.current) * rate);
+
+        setCurrentSegmentElapsedMs(Math.min(playbackDurationMs, Math.max(0, nextElapsedMs)));
+        playbackFrameRef.current = window.requestAnimationFrame(updateProgress);
+      };
+
+      playbackFrameRef.current = window.requestAnimationFrame(updateProgress);
+    };
+
+    const scheduleFallback = (resumeAtMs: number) => {
+      playbackStartedAtRef.current = performance.now() - resumeAtMs / rate;
+      setCurrentSegmentElapsedMs(resumeAtMs);
+      updatePlaybackDuration(Math.max(playbackDurationMs, resumeAtMs));
+
       fallbackTimerRef.current = window.setTimeout(
         finishPlayback,
-        estimateFallbackDuration(activeMedia.text)
+        Math.max(0, (playbackDurationMs - resumeAtMs) / rate)
       );
       setIsPlaying(true);
+      startProgressLoop();
     };
 
     const handleEnded = () => {
       finishPlayback();
     };
 
+    const handleLoadedMetadata = () => {
+      const durationMs =
+        Number.isFinite(audio.duration) && audio.duration > 0
+          ? Math.round(audio.duration * 1000)
+          : playbackDurationMs;
+
+      updatePlaybackDuration(durationMs);
+
+      if (startAtMs <= 0) {
+        return;
+      }
+
+      try {
+        audio.currentTime = Math.min(startAtMs, durationMs) / 1000;
+      } catch {
+        return;
+      }
+    };
+
     const handleError = () => {
       audio.pause();
-      scheduleFallback();
+      scheduleFallback(Math.max(startAtMs, Math.round(audio.currentTime * 1000)));
     };
 
     audio.onended = handleEnded;
+    audio.onloadedmetadata = handleLoadedMetadata;
     audio.onerror = handleError;
+    audio.playbackRate = rate;
+    audio.defaultPlaybackRate = rate;
+    updatePlaybackDuration(playbackDurationMs);
+    setCurrentSegmentElapsedMs(startAtMs);
 
     if (!activeMedia.audioUrl) {
-      scheduleFallback();
-      return;
+      scheduleFallback(startAtMs);
+      return () => {
+        audio.onended = null;
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+      };
     }
 
     audio.src = activeMedia.audioUrl;
@@ -689,17 +1265,28 @@ export function LessonPlayerProvider({
     audio
       .play()
       .then(() => {
+        playbackStartedAtRef.current = performance.now() - startAtMs / rate;
+        if (startAtMs > 0) {
+          try {
+            audio.currentTime = startAtMs / 1000;
+          } catch {
+            scheduleFallback(startAtMs);
+            return;
+          }
+        }
         setIsPlaying(true);
+        startProgressLoop();
       })
       .catch(() => {
-        scheduleFallback();
+        scheduleFallback(startAtMs);
       });
 
     return () => {
       audio.onended = null;
+      audio.onloadedmetadata = null;
       audio.onerror = null;
     };
-  }, [activeMedia, advanceAfterReveal, clearPlayback]);
+  }, [activeMedia, advanceAfterReveal, clearPlayback, currentTimelineSegment]);
 
   const contextValue = useMemo<LessonPlayerContextValue>(() => {
     return {
@@ -728,11 +1315,29 @@ export function LessonPlayerProvider({
       skipQuiz,
       totalReveals,
       completedReveals,
+      timelineSegments,
+      timelineDurationMs,
+      timelineElapsedMs,
+      currentSegmentDurationMs,
+      currentSegmentElapsedMs,
+      playbackRate,
+      setPlaybackRate,
+      stageRenderNonce,
+      seekToTime,
+      seekBy,
+      pausePlayback,
+      resumePlayback,
+      togglePlayback,
     };
   }, [
     activeMedia,
     activeQuiz,
     bindStageFrame,
+    completedReveals,
+    currentSegmentDurationMs,
+    currentSegmentElapsedMs,
+    playbackRate,
+    setPlaybackRate,
     currentPage,
     currentPageIndex,
     currentReveal,
@@ -747,13 +1352,21 @@ export function LessonPlayerProvider({
     quizError,
     replayCurrentStep,
     restartLesson,
+    seekToTime,
+    seekBy,
+    pausePlayback,
+    resumePlayback,
     startLesson,
+    stageRenderNonce,
     submitQuizAnswer,
     retryQuiz,
     skipQuiz,
+    togglePlayback,
     advanceManually,
     totalReveals,
-    completedReveals,
+    timelineSegments,
+    timelineDurationMs,
+    timelineElapsedMs,
   ]);
 
   return (

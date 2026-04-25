@@ -199,7 +199,7 @@ def test_build_graph_emits_node_events() -> None:
                     "objective": "建立问题",
                     "key_points": ["现象"],
                     "target_reveal_count": 3,
-                    "quiz_goal": None,
+                    "quiz_goal": "检查理解",
                 },
                 {
                     "idx": 1,
@@ -230,6 +230,16 @@ def test_build_graph_emits_node_events() -> None:
 
     def page_script_agent(state: dict) -> dict:
         idx = state["page_blueprint"]["idx"]
+        if idx == 0:
+            return {
+                "page_scripts": {
+                    idx: (
+                        f"第{idx+1}页讲稿第一步。<to_next/>第{idx+1}页讲稿第二步。"
+                        '<question>{"type":"fill","question":"核心公式是什么？","ans":"F=ma"}</question>'
+                        "<false_intro>回忆一下力和加速度的关系。</false_intro>"
+                    )
+                }
+            }
         return {"page_scripts": {idx: f"第{idx+1}页讲稿第一步。<to_next/>第{idx+1}页讲稿第二步。"}}
 
     def slide_html_agent(state: dict) -> dict:
@@ -253,6 +263,13 @@ def test_build_graph_emits_node_events() -> None:
         and event["node"] == "page_script"
         and event["data"].get("page_idx") == 0
         and "page_script" in event["data"]
+        for event in events
+    )
+    assert any(
+        event["event"] == "question_generated"
+        and event["node"] == "page_script"
+        and event["data"].get("page_idx") == 0
+        and event["data"].get("payload", {}).get("question") == "核心公式是什么？"
         for event in events
     )
     assert any(event["event"] == "node_completed" and event["node"] == "slide" and event["data"].get("page_idx") == 0 for event in events)

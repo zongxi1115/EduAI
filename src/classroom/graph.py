@@ -11,6 +11,7 @@ from .agents import PagePlanAgent, PageScriptAgent, SlideHtmlAgent
 from .nodes.assemble import assemble_node
 from .nodes.script import assemble_script_node
 from .nodes.split import split_node
+from .parser import parse_page
 from .state import ClassState, PageScriptTaskState, SlideTaskState
 
 StateNode = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -162,9 +163,57 @@ def _instrument_node(
                 "data": completion_data,
             }
         )
+        _emit_question_events(node_name, completion_data, event_callback)
         return result
 
     return wrapped
+
+
+def _emit_question_events(
+    node_name: str,
+    completion_data: Mapping[str, Any],
+    event_callback: GraphEventCallback,
+) -> None:
+    if node_name != "page_script":
+        return
+
+    page_idx = completion_data.get("page_idx")
+    page_script = completion_data.get("page_script")
+    if not isinstance(page_idx, int) or not isinstance(page_script, str) or not page_script.strip():
+        return
+
+    try:
+        page = parse_page(page_script, page_idx)
+    except Exception:
+        return
+
+    for question_idx, quiz in enumerate(page.get("quizzes") or [], start=1):
+        payload = quiz.get("payload") if isinstance(quiz, dict) else None
+        prompt = payload.get("question") if isinstance(payload, dict) else None
+        question_text = str(prompt).strip() if isinstance(prompt, str) else ""
+        page_theme = completion_data.get("page_theme")
+        summary = (
+            f"第 {page_idx + 1} 页教师提问已生成：{question_text}"
+            if question_text
+            else f"第 {page_idx + 1} 页教师提问已生成。"
+        )
+
+        event_callback(
+            {
+                "event": "question_generated",
+                "node": node_name,
+                "phase": _node_phase(node_name),
+                "summary": summary,
+                "data": {
+                    "page_idx": page_idx,
+                    "page_theme": page_theme,
+                    "question_idx": question_idx - 1,
+                    "after_reveal_idx": quiz.get("after_reveal_idx"),
+                    "payload": payload,
+                    "false_intro": quiz.get("false_intro"),
+                },
+            }
+        )
 
 
 def _extract_node_context(state: Mapping[str, Any]) -> dict[str, Any]:

@@ -118,18 +118,18 @@ conda run -n base python run_edu_multi_agent.py \
 ### 2) API 网关
 
 ```bash
-conda run -n base edu-prep-api --host 127.0.0.1 --port 8000
+conda run -n base edu-prep-api --host 127.0.0.1 --port 1234
 ```
 
 或：
 
 ```bash
-conda run -n base uvicorn gateway.main:app --host 127.0.0.1 --port 8000 --reload
+conda run -n base uvicorn gateway.main:app --host 127.0.0.1 --port 1234 --reload
 ```
 
 接口文档：
 
-- `http://127.0.0.1:8000/api/docs`
+- `http://127.0.0.1:1234/api/docs`
 
 ### 3) 前端本地开发
 
