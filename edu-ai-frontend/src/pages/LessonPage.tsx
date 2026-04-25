@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -6,7 +6,6 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
-  LoaderCircle,
   Mic2,
   PauseCircle,
   PlayCircle,
@@ -15,6 +14,11 @@ import {
   Volume2,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import {
+  GenerationDashboard,
+  type ClassroomGenerationEvent,
+  type ClassroomRunStatus,
+} from "@/components/GenerationDashboard";
 import { Markdown } from "@/components/ui/markdown";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,19 +29,115 @@ import {
   type LessonResult,
 } from "@/components/classroom/LessonPlayerProvider";
 
-type ClassroomRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
-
 interface ClassroomRunSnapshot {
   status: ClassroomRunStatus;
   latest_summary?: string | null;
   error?: string | null;
+  request?: {
+    topic?: string | null;
+  } | null;
+}
+
+interface ClassroomRunProgress {
+  topic: string | null;
+  status: ClassroomRunStatus;
+  summary: string | null;
+  error: string | null;
+  events: ClassroomGenerationEvent[];
 }
 
 type PageState =
-  | { status: "loading"; message: string }
-  | { status: "pending"; message: string }
+  | { status: "loading" }
+  | { status: "pending" }
   | { status: "error"; message: string }
   | { status: "ready"; lesson: LessonResult };
+
+const CLASSROOM_STREAM_EVENTS = [
+  "run_created",
+  "workflow_started",
+  "node_started",
+  "node_completed",
+  "node_failed",
+  "voice_started",
+  "voice_completed",
+  "voice_failed",
+  "voice_skipped",
+  "workflow_completed",
+  "workflow_failed",
+  "heartbeat",
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function buildInitialProgress(): ClassroomRunProgress {
+  return {
+    topic: null,
+    status: "unknown",
+    summary: "正在连接课堂生成任务…",
+    error: null,
+    events: [],
+  };
+}
+
+async function readErrorMessage(response: Response, fallback: string) {
+  const rawText = await response.text();
+  if (!rawText.trim()) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(rawText) as { detail?: unknown };
+    return getString(parsed.detail) ?? rawText;
+  } catch {
+    return rawText;
+  }
+}
+
+function parseClassroomEvent(rawData: string): ClassroomGenerationEvent | null {
+  try {
+    const parsed = JSON.parse(rawData) as unknown;
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    const index = parsed.index;
+    const timestamp = getString(parsed.timestamp);
+    const event = getString(parsed.event);
+    const runId = getString(parsed.run_id);
+    const runStatus = getString(parsed.run_status) as ClassroomRunStatus | null;
+
+    if (
+      typeof index !== "number" ||
+      timestamp === null ||
+      event === null ||
+      runId === null ||
+      runStatus === null
+    ) {
+      return null;
+    }
+
+    return {
+      index,
+      timestamp,
+      event,
+      node: getString(parsed.node),
+      phase: getString(parsed.phase),
+      summary: getString(parsed.summary),
+      run_id: runId,
+      run_status: runStatus,
+      current_node: getString(parsed.current_node),
+      data: isRecord(parsed.data) ? parsed.data : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function LessonQuizPanel({
   quiz,
@@ -394,60 +494,208 @@ function LessonPlayerShell() {
 
 export default function LessonPage() {
   const { id } = useParams<{ id: string }>();
-  const [state, setState] = useState<PageState>({
-    status: "loading",
-    message: "正在加载课堂播放数据…",
-  });
+  const [state, setState] = useState<PageState>({ status: "loading" });
+  const [progress, setProgress] = useState<ClassroomRunProgress>(() => buildInitialProgress());
+  const loadedResultRef = useRef(false);
+  const progressRef = useRef(progress);
+
+  useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
 
   useEffect(() => {
     if (!id) {
       setState({ status: "error", message: "缺少课堂任务 ID，无法打开播放器。" });
+      setProgress(buildInitialProgress());
       return;
     }
 
     let disposed = false;
-    let retryTimer: number | null = null;
+    let eventSource: EventSource | null = null;
+    const seenEventIndexes = new Set<number>();
 
-    const loadLesson = async () => {
+    loadedResultRef.current = false;
+    setState({ status: "loading" });
+    setProgress(buildInitialProgress());
+
+    const updateProgress = (patch: Partial<ClassroomRunProgress>) => {
+      if (disposed) {
+        return;
+      }
+
+      setProgress((current) => ({
+        ...current,
+        ...patch,
+        events: patch.events ?? current.events,
+      }));
+    };
+
+    const failLesson = (message: string, errorText?: string | null) => {
+      if (eventSource) {
+        eventSource.close();
+      }
+      updateProgress({
+        status: "failed",
+        summary: errorText?.trim() || message,
+        error: errorText?.trim() || message,
+      });
+      if (!disposed) {
+        setState({ status: "error", message });
+      }
+    };
+
+    const loadResult = async () => {
+      if (loadedResultRef.current) {
+        return;
+      }
+      loadedResultRef.current = true;
+
       try {
         const resultResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}/result`);
-        if (resultResponse.ok) {
-          const lesson = (await resultResponse.json()) as LessonResult;
-          if (!disposed) {
-            setState({ status: "ready", lesson });
-          }
-          return;
-        }
+        if (!resultResponse.ok) {
+          loadedResultRef.current = false;
 
-        if (resultResponse.status === 409) {
-          const statusResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}`);
-          if (!statusResponse.ok) {
-            throw new Error("课堂任务状态查询失败。");
-          }
-
-          const snapshot = (await statusResponse.json()) as ClassroomRunSnapshot;
-          if (snapshot.status === "failed") {
+          if (resultResponse.status === 409) {
+            updateProgress({
+              status: "running",
+              summary: progressRef.current.summary || "课堂内容仍在生成中…",
+            });
             if (!disposed) {
-              setState({
-                status: "error",
-                message: snapshot.error?.trim() || "课堂任务生成失败，请查看后端日志。",
-              });
+              setState({ status: "pending" });
             }
             return;
           }
 
-          if (!disposed) {
-            setState({
-              status: "pending",
-              message: snapshot.latest_summary?.trim() || "课堂内容仍在生成中，稍后会自动重试。",
-            });
-          }
-          retryTimer = window.setTimeout(loadLesson, 3000);
+          throw new Error(await readErrorMessage(resultResponse, "课堂任务结果获取失败。"));
+        }
+
+        const lesson = (await resultResponse.json()) as LessonResult;
+        if (eventSource) {
+          eventSource.close();
+        }
+        if (!disposed) {
+          setState({ status: "ready", lesson });
+        }
+      } catch (error) {
+        loadedResultRef.current = false;
+        if (!disposed) {
+          setState({
+            status: "error",
+            message: error instanceof Error ? error.message : "课堂播放页加载失败。",
+          });
+        }
+      }
+    };
+
+    const handleProgressEvent = (event: ClassroomGenerationEvent) => {
+      if (seenEventIndexes.has(event.index)) {
+        return;
+      }
+      seenEventIndexes.add(event.index);
+
+      const nextSummary = event.summary?.trim() || null;
+      const topicFromEvent = getString(event.data?.topic);
+      const errorFromEvent = getString(event.data?.error);
+
+      setProgress((current) => ({
+        ...current,
+        topic: topicFromEvent ?? current.topic,
+        status: event.run_status,
+        summary: nextSummary ?? current.summary,
+        error: errorFromEvent ?? current.error,
+        events: [...current.events, event],
+      }));
+
+      setState((current) => (current.status === "ready" || current.status === "error" ? current : { status: "pending" }));
+
+      if (
+        event.event === "workflow_failed" ||
+        event.event === "voice_failed" ||
+        event.event === "node_failed" ||
+        event.run_status === "failed"
+      ) {
+        failLesson(errorFromEvent || nextSummary || "课堂任务生成失败。", errorFromEvent || nextSummary);
+        return;
+      }
+
+      if (event.event === "workflow_completed" || event.run_status === "succeeded") {
+        void loadResult();
+      }
+    };
+
+    const connectEvents = () => {
+      eventSource = new EventSource(
+        `/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=-1&heartbeat_seconds=5`,
+      );
+
+      const handleStreamMessage = (messageEvent: MessageEvent<string>) => {
+        const parsedEvent = parseClassroomEvent(messageEvent.data);
+        if (parsedEvent) {
+          handleProgressEvent(parsedEvent);
           return;
         }
 
-        const errorText = await resultResponse.text();
-        throw new Error(errorText || "课堂任务结果获取失败。");
+        try {
+          const payload = JSON.parse(messageEvent.data) as unknown;
+          if (!isRecord(payload)) {
+            return;
+          }
+
+          updateProgress({
+            status: (getString(payload.run_status) as ClassroomRunStatus | null) ?? progressRef.current.status,
+            summary: progressRef.current.summary,
+          });
+        } catch {
+          return;
+        }
+      };
+
+      CLASSROOM_STREAM_EVENTS.forEach((eventType) => {
+        eventSource?.addEventListener(eventType, handleStreamMessage as EventListener);
+      });
+
+      eventSource.onerror = () => {
+        if (disposed) {
+          return;
+        }
+
+        setState((current) => (current.status === "ready" || current.status === "error" ? current : { status: "pending" }));
+        setProgress((current) => ({
+          ...current,
+          summary: current.summary || "连接课堂进度流时发生波动，正在自动重连…",
+        }));
+      };
+    };
+
+    const loadSnapshot = async () => {
+      try {
+        const statusResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}`);
+        if (!statusResponse.ok) {
+          throw new Error(await readErrorMessage(statusResponse, "课堂任务状态查询失败。"));
+        }
+
+        const snapshot = (await statusResponse.json()) as ClassroomRunSnapshot;
+        updateProgress({
+          topic: snapshot.request?.topic?.trim() || null,
+          status: snapshot.status,
+          summary: snapshot.latest_summary?.trim() || "课堂内容仍在生成中…",
+          error: snapshot.error?.trim() || null,
+        });
+
+        if (snapshot.status === "failed") {
+          failLesson(snapshot.error?.trim() || "课堂任务生成失败，请查看后端日志。", snapshot.error);
+          return;
+        }
+
+        if (snapshot.status === "succeeded") {
+          await loadResult();
+          return;
+        }
+
+        if (!disposed) {
+          setState({ status: "pending" });
+        }
+        connectEvents();
       } catch (error) {
         if (!disposed) {
           setState({
@@ -458,17 +706,28 @@ export default function LessonPage() {
       }
     };
 
-    void loadLesson();
+    void loadSnapshot();
 
     return () => {
       disposed = true;
-      if (retryTimer !== null) {
-        window.clearTimeout(retryTimer);
+      if (eventSource) {
+        eventSource.close();
       }
     };
   }, [id]);
 
   if (state.status !== "ready") {
+    if (state.status !== "error") {
+      return (
+        <GenerationDashboard
+          topic={progress.topic}
+          status={progress.status}
+          summary={progress.summary}
+          events={progress.events}
+        />
+      );
+    }
+
     return (
       <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.12),transparent_34%),linear-gradient(180deg,#0f172a_0%,#020617_100%)] px-6 text-white">
         <Card className="w-full max-w-2xl border-white/10 bg-white/5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.36)] backdrop-blur-xl">
@@ -477,22 +736,14 @@ export default function LessonPage() {
               {state.status === "error" ? "课堂播放器暂时打不开" : "课堂播放器准备中"}
             </CardTitle>
             <CardDescription className="text-slate-300">
-              {state.status === "pending"
-                ? "后端还在生成课堂内容，我会继续自动刷新。"
-                : "这里会直接打开生成好的课堂演示与语音播放。"}
+              这里会直接打开生成好的课堂演示与语音播放。
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-5 py-4 text-sm leading-7 text-slate-200">
-              {state.message}
+              {state.message || progress.error || progress.summary || "课堂播放页加载失败。"}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {state.status !== "error" ? (
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200">
-                  <LoaderCircle className="h-4 w-4 animate-spin text-sky-300" />
-                  自动重试中
-                </div>
-              ) : null}
               <Button asChild variant="outline" className="border-white/15 bg-white/5 text-white hover:bg-white/10">
                 <Link to={`/study/${encodeURIComponent(id ?? "")}`}>回到学习区</Link>
               </Button>
