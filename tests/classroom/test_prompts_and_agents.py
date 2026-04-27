@@ -31,7 +31,7 @@ def test_page_script_prompt_contains_tag_contract() -> None:
 
 def test_card_prompt_contains_required_contract() -> None:
     prompt = (PROMPT_ROOT / "slide.md").read_text(encoding="utf-8")
-    assert "window.to_next = function" in prompt
+    assert "window.to_next = function () {" in prompt
     assert '<section class="card" data-idx="{idx}">' in prompt
     assert "MathJax" in prompt
     assert "display_hint" in prompt
