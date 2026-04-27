@@ -32,7 +32,7 @@ def test_page_script_prompt_contains_tag_contract() -> None:
 
 def test_card_prompt_contains_required_contract() -> None:
     prompt = (PROMPT_ROOT / "slide.md").read_text(encoding="utf-8")
-    assert re.search(r"window\.to_next\s*=\s*function\s*\(\)\s*\{", prompt)
+    assert re.search(r"window\.to_next\s*=\s*function\s*\(\)\s*\{", prompt) is not None
     assert '<section class="card" data-idx="{idx}">' in prompt
     assert "MathJax" in prompt
     assert "display_hint" in prompt
