@@ -129,6 +129,8 @@ class ClassroomTaskRegistry:
             return session.output_dir
 
         candidate = (self.output_root / run_id).resolve()
+        if not candidate.is_relative_to(self.output_root.resolve()):
+            raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
         if candidate.is_dir():
             return candidate
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
@@ -177,17 +179,18 @@ class ClassroomTaskRegistry:
                             "data": {"error": str(exc)},
                         },
                     )
-                    raise
-                self._append_event(
-                    session,
-                    {
-                        "event": "voice_completed",
-                        "node": "voice",
-                        "phase": "voice_generation",
-                        "summary": f"课堂语音已生成，共 {voice_summary['generated']} 段。",
-                        "data": voice_summary,
-                    },
-                )
+                    logger.warning("Voice synthesis failed for run %s: %s; continuing to save slides.", session.run_id, exc)
+                else:
+                    self._append_event(
+                        session,
+                        {
+                            "event": "voice_completed",
+                            "node": "voice",
+                            "phase": "voice_generation",
+                            "summary": f"课堂语音已生成，共 {voice_summary['generated']} 段。",
+                            "data": voice_summary,
+                        },
+                    )
             else:
                 self._append_event(
                     session,
@@ -283,19 +286,20 @@ def load_jsonl_file(path: Path) -> list[dict[str, Any]]:
 
 
 def build_run_view_from_session(session: ClassroomTaskSession) -> dict[str, Any]:
-    return {
-        "run_id": session.run_id,
-        "status": session.status,
-        "created_at": session.created_at,
-        "started_at": session.started_at,
-        "finished_at": session.finished_at,
-        "output_dir": str(session.output_dir),
-        "request": session.request.model_dump(mode="json"),
-        "current_node": session.current_node,
-        "latest_summary": session.latest_summary,
-        "error": session.error,
-        "result": session.final_result,
-    }
+    with session.condition:
+        return {
+            "run_id": session.run_id,
+            "status": session.status,
+            "created_at": session.created_at,
+            "started_at": session.started_at,
+            "finished_at": session.finished_at,
+            "output_dir": str(session.output_dir),
+            "request": session.request.model_dump(mode="json"),
+            "current_node": session.current_node,
+            "latest_summary": session.latest_summary,
+            "error": session.error,
+            "result": session.final_result,
+        }
 
 
 def build_run_view_from_disk(registry: ClassroomTaskRegistry, run_id: str) -> dict[str, Any]:

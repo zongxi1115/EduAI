@@ -850,7 +850,7 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                     srcDoc={currentPage.srcDoc}
                     onLoad={handleStageReady}
                     className="absolute inset-0 h-full w-full border-0 bg-transparent"
-                    sandbox="allow-scripts allow-same-origin"
+                    sandbox="allow-scripts"
                   />
                 </motion.div>
               </AnimatePresence>
