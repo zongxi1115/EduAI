@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowLeft,
   BookOpen,
@@ -36,6 +37,7 @@ interface ClassroomRunSnapshot {
   error?: string | null;
   request?: {
     topic?: string | null;
+    source_prep_run_id?: string | null;
   } | null;
 }
 
@@ -168,6 +170,51 @@ const LESSON_PREVIEW_SCALE = 0.34;
 const LESSON_PREVIEW_COMPACT_SCALE = 0.28;
 const LESSON_PREVIEW_WIDTH = 208;
 const LESSON_PREVIEW_HORIZONTAL_PADDING = 10;
+const PAGE_SWITCH_DISTANCE_PX = 96;
+
+function getPageTransitionVariants(shouldReduceMotion: boolean) {
+  return {
+    enter: (direction: number) => ({
+      x: shouldReduceMotion
+        ? 0
+        : direction > 0
+          ? PAGE_SWITCH_DISTANCE_PX
+          : direction < 0
+            ? -PAGE_SWITCH_DISTANCE_PX
+            : 0,
+      opacity: shouldReduceMotion ? 1 : direction === 0 ? 1 : 0.92,
+      scale: shouldReduceMotion ? 1 : direction === 0 ? 1 : 0.985,
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      scale: 1,
+      transition: shouldReduceMotion
+        ? { duration: 0.01 }
+        : {
+            duration: 0.42,
+            ease: [0.22, 1, 0.36, 1] as const,
+          },
+    },
+    exit: (direction: number) => ({
+      x: shouldReduceMotion
+        ? 0
+        : direction > 0
+          ? -PAGE_SWITCH_DISTANCE_PX
+          : direction < 0
+            ? PAGE_SWITCH_DISTANCE_PX
+            : 0,
+      opacity: shouldReduceMotion ? 1 : direction === 0 ? 1 : 0.88,
+      scale: shouldReduceMotion ? 1 : direction === 0 ? 1 : 0.992,
+      transition: shouldReduceMotion
+        ? { duration: 0.01 }
+        : {
+            duration: 0.3,
+            ease: [0.25, 1, 0.5, 1] as const,
+          },
+    }),
+  };
+}
 
 function LessonPagePreview({
   srcDoc,
@@ -299,8 +346,7 @@ function LessonCatalogList({
   );
 }
 
-function LessonPlayerShell() {
-  const { id } = useParams<{ id: string }>();
+function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null }) {
   const {
     lesson,
     currentPage,
@@ -330,6 +376,7 @@ function LessonPlayerShell() {
     seekBy,
     togglePlayback,
   } = useLessonPlayer();
+  const shouldReduceMotion = useReducedMotion();
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -578,6 +625,25 @@ function LessonPlayerShell() {
   const hoverPreviewTitle =
     hoveredChapter?.title ||
     (hoverPreview ? pages[hoverPreview.pageIndex]?.theme || `第 ${hoverPreview.pageIndex + 1} 模块` : "");
+  const currentStageSceneKey = `${currentPage.idx}-${stageRenderNonce}`;
+  const previousPageIndexRef = useRef(currentPageIndex);
+  const previousStageSceneKeyRef = useRef(currentStageSceneKey);
+  const pageTransitionDirectionRef = useRef(0);
+
+  if (previousPageIndexRef.current !== currentPageIndex) {
+    pageTransitionDirectionRef.current =
+      currentPageIndex > previousPageIndexRef.current ? 1 : -1;
+  } else if (previousStageSceneKeyRef.current !== currentStageSceneKey) {
+    pageTransitionDirectionRef.current = 0;
+  }
+  previousPageIndexRef.current = currentPageIndex;
+  previousStageSceneKeyRef.current = currentStageSceneKey;
+
+  const pageTransitionDirection = pageTransitionDirectionRef.current;
+  const pageTransitionVariants = useMemo(
+    () => getPageTransitionVariants(Boolean(shouldReduceMotion)),
+    [shouldReduceMotion]
+  );
 
   return (
     <div className="min-h-screen bg-[#f9fafb] text-slate-900 pb-16 font-sans">
@@ -586,7 +652,11 @@ function LessonPlayerShell() {
         <div className="mx-auto flex h-[4.25rem] max-w-[1600px] items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4">
             <Link
-              to={`/study/${encodeURIComponent(id ?? "")}`}
+              to={
+                sourcePrepRunId
+                  ? `/study/${encodeURIComponent(sourcePrepRunId)}?tab=prep-classroom`
+                  : "/"
+              }
               className="inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
             >
               <ArrowLeft className="h-5 w-5" />
@@ -601,6 +671,17 @@ function LessonPlayerShell() {
               {playbackStatus}
             </div>
           </div>
+
+          {sourcePrepRunId ? (
+            <Button
+              asChild
+              className="rounded-full bg-slate-900 px-4 text-white shadow-[0_12px_24px_rgba(15,23,42,0.14)] hover:bg-slate-800"
+            >
+              <Link to={`/study/${encodeURIComponent(sourcePrepRunId)}`}>
+                前去练习
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -753,15 +834,26 @@ function LessonPlayerShell() {
                 );
               }}
             >
-              <iframe
-                key={`${currentPage.idx}-${stageRenderNonce}`}
-                ref={bindStageFrame}
-                title={`lesson-page-${currentPage.idx}`}
-                srcDoc={currentPage.srcDoc}
-                onLoad={handleStageReady}
-                className="absolute inset-0 h-full w-full border-0 bg-transparent transition-opacity duration-300"
-                sandbox="allow-scripts allow-same-origin"
-              />
+              <AnimatePresence initial={false} custom={pageTransitionDirection} mode="sync">
+                <motion.div
+                  key={currentStageSceneKey}
+                  custom={pageTransitionDirection}
+                  variants={pageTransitionVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  className="absolute inset-0 will-change-transform"
+                >
+                  <iframe
+                    ref={bindStageFrame}
+                    title={`lesson-page-${currentPage.idx}`}
+                    srcDoc={currentPage.srcDoc}
+                    onLoad={handleStageReady}
+                    className="absolute inset-0 h-full w-full border-0 bg-transparent"
+                    sandbox="allow-scripts allow-same-origin"
+                  />
+                </motion.div>
+              </AnimatePresence>
 
               {isFullscreen && (
                 <>
@@ -1134,6 +1226,7 @@ export default function LessonPage() {
   const { id } = useParams<{ id: string }>();
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [progress, setProgress] = useState<ClassroomRunProgress>(() => buildInitialProgress());
+  const [sourcePrepRunId, setSourcePrepRunId] = useState<string | null>(null);
   const loadedResultRef = useRef(false);
   const progressRef = useRef(progress);
 
@@ -1145,6 +1238,7 @@ export default function LessonPage() {
     if (!id) {
       setState({ status: "error", message: "缺少课堂任务 ID，无法打开播放器。" });
       setProgress(buildInitialProgress());
+      setSourcePrepRunId(null);
       return;
     }
 
@@ -1155,6 +1249,7 @@ export default function LessonPage() {
     loadedResultRef.current = false;
     setState({ status: "loading" });
     setProgress(buildInitialProgress());
+    setSourcePrepRunId(null);
 
     const updateProgress = (patch: Partial<ClassroomRunProgress>) => {
       if (disposed) {
@@ -1313,6 +1408,7 @@ export default function LessonPage() {
         }
 
         const snapshot = (await statusResponse.json()) as ClassroomRunSnapshot;
+        setSourcePrepRunId(snapshot.request?.source_prep_run_id?.trim() || null);
         updateProgress({
           topic: snapshot.request?.topic?.trim() || null,
           status: snapshot.status,
@@ -1383,7 +1479,15 @@ export default function LessonPage() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <Button asChild variant="outline" className="border-slate-200 text-slate-700 hover:bg-slate-50">
-                <Link to={`/study/${encodeURIComponent(id ?? "")}`}>回到学习区</Link>
+                <Link
+                  to={
+                    sourcePrepRunId
+                      ? `/study/${encodeURIComponent(sourcePrepRunId)}?tab=prep-classroom`
+                      : "/"
+                  }
+                >
+                  回到课前准备
+                </Link>
               </Button>
             </div>
           </CardContent>
@@ -1394,7 +1498,7 @@ export default function LessonPage() {
 
   return (
     <LessonPlayerProvider lesson={state.lesson} runId={id ?? ""}>
-      <LessonPlayerShell />
+      <LessonPlayerShell sourcePrepRunId={sourcePrepRunId} />
     </LessonPlayerProvider>
   );
 }

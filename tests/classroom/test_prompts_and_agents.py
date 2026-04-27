@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import AIMessage
 
+from classroom.agents._common import list_slide_prompt_names, validate_slide_prompt_name
 from classroom.agents.slide_agent import SlideHtmlAgent, SlideHtmlGenerationError
 
 
@@ -30,11 +31,19 @@ def test_page_script_prompt_contains_tag_contract() -> None:
 
 def test_card_prompt_contains_required_contract() -> None:
     prompt = (PROMPT_ROOT / "slide.md").read_text(encoding="utf-8")
-    assert 'window.to_next = function ()' in prompt
+    assert "window.to_next = function()" in prompt
     assert '<section class="card" data-idx="{idx}">' in prompt
     assert "MathJax" in prompt
     assert "display_hint" in prompt
-    assert "高密度视觉化展现" in prompt
+    assert "第一屏必须有内容" in prompt
+
+
+def test_slide_prompt_variants_are_discoverable() -> None:
+    prompt_names = list_slide_prompt_names()
+
+    assert "slide.md" in prompt_names
+    assert "slide.creative.md" in prompt_names
+    assert validate_slide_prompt_name("slide.creative.md") == "slide.creative.md"
 
 
 def test_slide_html_validation_rejects_leaked_summary() -> None:

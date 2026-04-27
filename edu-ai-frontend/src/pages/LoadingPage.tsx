@@ -394,18 +394,18 @@ export default function LoadingPage() {
               备课全部完成
             </h2>
             <p className="text-muted-foreground mb-8 max-w-sm text-center">
-              所有 AI 智能体子任务均已正确执行，讲义、题库及动画材料就绪。
+              所有 AI 智能体子任务均已正确执行，先进入课前准备区检查素材，再继续准备课中播放。
             </p>
             <button
               onClick={() => {
                 if (id) {
-                  navigate(`/study/${id}`);
+                  navigate(`/study/${id}?tab=prep-classroom`);
                 }
               }}
               className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5"
             >
               <CheckCircle2 className="w-5 h-5" />
-              进入课堂
+              进入课前准备
             </button>
           </motion.div>
         )}

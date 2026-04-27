@@ -60,6 +60,7 @@ def build_graph(
     page_plan_agent: StateNode | None = None,
     page_script_agent: Callable[[PageScriptTaskState | dict[str, Any]], Mapping[str, Any]] | None = None,
     slide_html_agent: Callable[[SlideTaskState | dict[str, Any]], Mapping[str, Any]] | None = None,
+    slide_prompt_file: str = "slide.md",
     event_callback: GraphEventCallback | None = None,
 ):
     if page_plan_agent is None:
@@ -77,7 +78,7 @@ def build_graph(
             raise ValueError(
                 "build_graph requires llm when slide_html_agent is not provided."
             )
-        slide_html_agent = SlideHtmlAgent(llm)
+        slide_html_agent = SlideHtmlAgent(llm, prompt_name=slide_prompt_file)
 
     graph = StateGraph(ClassState)
     graph.add_node("outline", _instrument_node("outline", outline_agent, event_callback))

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
+  ArrowRight,
   BookOpen,
   Brain,
+  CheckCircle2,
   ChevronRight,
   ChevronDown,
   FolderOpen,
@@ -15,6 +17,7 @@ import {
   LayoutDashboard,
   LoaderCircle,
   Package,
+  Play,
   Target,
   X,
 } from "lucide-react";
@@ -130,7 +133,7 @@ interface StudyWorkspaceData {
 interface WorkspaceTab {
   id: string;
   title: string;
-  type: "workspace" | "markdown" | "html" | "video";
+  type: "workspace" | "prep" | "markdown" | "html" | "video";
   status: "ready" | "loading" | "error";
   content?: string;
   error?: string;
@@ -139,6 +142,8 @@ interface WorkspaceTab {
 }
 
 const WORKSPACE_TAB_ID = "workspace";
+const PREP_CLASSROOM_TAB_ID = "prep-classroom";
+const PREP_CLASSROOM_QUERY_VALUE = "prep-classroom";
 
 const DEFAULT_WORKSPACE_TAB: WorkspaceTab = {
   id: WORKSPACE_TAB_ID,
@@ -146,6 +151,18 @@ const DEFAULT_WORKSPACE_TAB: WorkspaceTab = {
   type: "workspace",
   status: "ready",
 };
+
+const DEFAULT_PREP_CLASSROOM_TAB: WorkspaceTab = {
+  id: PREP_CLASSROOM_TAB_ID,
+  title: "准备课中",
+  type: "prep",
+  status: "ready",
+};
+
+const DEFAULT_STICKY_TABS: WorkspaceTab[] = [
+  DEFAULT_WORKSPACE_TAB,
+  DEFAULT_PREP_CLASSROOM_TAB,
+];
 
 const MOCK_PRACTICE_QUESTIONS: PracticeQuestionRecord[] = [
   {
@@ -445,8 +462,6 @@ function buildWorkspaceData(
   };
 }
 
-
-
 function MainWorkspaceQuestions({
   learningGoal,
   questions,
@@ -468,6 +483,219 @@ function MainWorkspaceQuestions({
       error={error}
       emptyHint={emptyHint}
     />
+  );
+}
+
+function MainPreparationWorkspace({
+  workspaceData,
+  canPrepareClassroom,
+  isPreparingClassroom,
+  prepareClassroomError,
+  onPrepareClassroom,
+  onOpenMaterial,
+}: {
+  workspaceData: StudyWorkspaceData;
+  canPrepareClassroom: boolean;
+  isPreparingClassroom: boolean;
+  prepareClassroomError: string | null;
+  onPrepareClassroom: () => void;
+  onOpenMaterial: (material: StudyMaterialItem) => void;
+}) {
+  const featuredMaterials = workspaceData.materials.slice(0, 6);
+
+  return (
+    <div className="h-full min-h-0 overflow-y-auto pr-1">
+      <div className="relative overflow-hidden rounded-[28px] border border-slate-200/70 bg-[linear-gradient(135deg,rgba(246,248,252,0.96),rgba(255,255,255,0.98))] p-6 shadow-[0_24px_80px_rgba(15,23,42,0.06)] md:p-8">
+        <div className="absolute right-0 top-0 h-36 w-36 rounded-full bg-sky-100/70 blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-emerald-100/70 blur-3xl" />
+
+        <div className="relative flex flex-col gap-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl space-y-4">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-slate-500">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                课前准备
+              </div>
+              <div className="space-y-3">
+                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-[2rem]">
+                  先把课前多智能体产物收拢好，再一键带入课中生成
+                </h2>
+                <p className="max-w-2xl text-sm leading-7 text-slate-600 md:text-[15px]">
+                  这里会统一检查学案、题型蓝图、讲解备注和辅助素材。点击“准备课中”后，后端会把这些课前
+                  material 自动整理并透传给课中工作流，用同一个主题继续生成课堂播放内容。
+                </p>
+              </div>
+            </div>
+
+            <div className="w-full max-w-sm rounded-[24px] border border-slate-200/80 bg-white/92 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">当前状态</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">{workspaceData.statusLabel}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{workspaceData.workspaceSubtitle}</p>
+                </div>
+                <div className="rounded-2xl bg-slate-100 px-3 py-2 text-right">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">素材数</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-900">{workspaceData.materials.length}</div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onPrepareClassroom}
+                disabled={!canPrepareClassroom || isPreparingClassroom}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-[0_16px_32px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {isPreparingClassroom ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    正在准备课中
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    准备课中
+                  </>
+                )}
+              </button>
+
+              {!canPrepareClassroom && (
+                <p className="mt-3 text-xs leading-6 text-slate-500">
+                  {workspaceData.usingMock
+                    ? "当前是示例数据，创建真实课前任务后才能进入课中生成。"
+                    : "请等待课前任务完成后，再继续准备课中播放。"}
+                </p>
+              )}
+
+              {prepareClassroomError && (
+                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-6 text-rose-600">
+                  {prepareClassroomError}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr_1fr]">
+            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">课中将沿用</p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900">核心教学目标</h3>
+                </div>
+                <Target className="h-5 w-5 text-sky-500" />
+              </div>
+              <div className="mt-4 space-y-2">
+                {workspaceData.goals.map((goal, index) => (
+                  <div
+                    key={`${goal}-${index}`}
+                    className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-700"
+                  >
+                    {goal}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">进入课中前</p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900">教师检查项</h3>
+                </div>
+                <Brain className="h-5 w-5 text-emerald-500" />
+              </div>
+              <div className="mt-4 space-y-3 text-sm text-slate-600">
+                {workspaceData.teacherChecklist.length > 0 ? (
+                  workspaceData.teacherChecklist.map((item, index) => (
+                    <div key={`${item}-${index}`} className="flex items-start gap-3">
+                      <span className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
+                      <span className="leading-6">{item}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="leading-6 text-slate-500">当前还没有额外的教师检查项。</p>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">透传到课中</p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900">重点素材</h3>
+                </div>
+                <Package className="h-5 w-5 text-amber-500" />
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {featuredMaterials.length > 0 ? (
+                  featuredMaterials.map((material) => (
+                    <button
+                      key={material.id}
+                      type="button"
+                      onClick={() => onOpenMaterial(material)}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/80 px-3 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900"
+                    >
+                      <span>{material.label}</span>
+                      <span className="max-w-28 truncate text-slate-400">{material.name}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-sm leading-6 text-slate-500">当前还没有可透传的素材文件。</p>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.9fr]">
+            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">准备说明</p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900">课中生成会继承什么</h3>
+                </div>
+                <ArrowRight className="h-5 w-5 text-slate-400" />
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">1</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">保留课前主题</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">继续沿用当前学习目标、学段、学情和总控规划重点。</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">2</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">透传多智能体材料</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">学案、题型蓝图、教师备注等文本素材会作为 materials 输入给课中工作流。</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">3</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">生成可播放课堂</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">课中生成完成后会自动进入播放器，随后再进入独立练习区。</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">质量基线</p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">当前备课标准</h3>
+              <div className="mt-4 space-y-3">
+                {workspaceData.qualityBar.length > 0 ? (
+                  workspaceData.qualityBar.map((item, index) => (
+                    <div
+                      key={`${item}-${index}`}
+                      className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-700"
+                    >
+                      {item}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm leading-6 text-slate-500">当前还没有额外的质量要求。</p>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -568,6 +796,8 @@ function MaterialFileTree({ materials, handleMaterialAction }: { materials: Stud
 
 export default function StudyArea() {
   const { runId } = useParams();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [drawerWidth, setDrawerWidth] = useState(320);
   const [isDragging, setIsDragging] = useState(false);
@@ -576,18 +806,37 @@ export default function StudyArea() {
     useState<PracticeQuestionRecord[]>(MOCK_PRACTICE_QUESTIONS);
   const [practiceQuestionsError, setPracticeQuestionsError] = useState<string | null>(null);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
-  const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>([DEFAULT_WORKSPACE_TAB]);
-  const [activeTabId, setActiveTabId] = useState(WORKSPACE_TAB_ID);
+  const [isPreparingClassroom, setIsPreparingClassroom] = useState(false);
+  const [prepareClassroomError, setPrepareClassroomError] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>(DEFAULT_STICKY_TABS);
+  const [activeTabId, setActiveTabId] = useState<string>(WORKSPACE_TAB_ID);
 
-  const activeTab = openTabs.find((tab) => tab.id === activeTabId) ?? DEFAULT_WORKSPACE_TAB;
+  const activeTab =
+    openTabs.find((tab) => tab.id === activeTabId) ?? DEFAULT_WORKSPACE_TAB;
 
   const togglePanel = (panel: string) => {
     setActivePanel((current) => (current === panel ? null : panel));
   };
 
+  const resolveBuiltInTabId = (requestedTab: string | null) =>
+    requestedTab === PREP_CLASSROOM_QUERY_VALUE ? PREP_CLASSROOM_TAB_ID : WORKSPACE_TAB_ID;
+
+  const setBuiltInTab = (tabId: typeof WORKSPACE_TAB_ID | typeof PREP_CLASSROOM_TAB_ID) => {
+    setActiveTabId(tabId);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (tabId === PREP_CLASSROOM_TAB_ID) {
+      nextSearchParams.set("tab", PREP_CLASSROOM_QUERY_VALUE);
+    } else {
+      nextSearchParams.delete("tab");
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
   useEffect(() => {
-    setOpenTabs([DEFAULT_WORKSPACE_TAB]);
-    setActiveTabId(WORKSPACE_TAB_ID);
+    setOpenTabs(DEFAULT_STICKY_TABS);
+    setActiveTabId(resolveBuiltInTabId(searchParams.get("tab")));
+    setPrepareClassroomError(null);
+    setIsPreparingClassroom(false);
   }, [runId]);
 
   useEffect(() => {
@@ -747,9 +996,12 @@ export default function StudyArea() {
   };
 
   const closeTab = (tabId: string) => {
+    if (tabId === WORKSPACE_TAB_ID || tabId === PREP_CLASSROOM_TAB_ID) {
+      return;
+    }
     setOpenTabs((currentTabs) => currentTabs.filter((tab) => tab.id !== tabId));
     if (activeTabId === tabId) {
-      setActiveTabId(WORKSPACE_TAB_ID);
+      setActiveTabId(resolveBuiltInTabId(searchParams.get("tab")));
     }
   };
 
@@ -828,6 +1080,53 @@ export default function StudyArea() {
     window.open(targetUrl, "_blank", "noopener,noreferrer");
   };
 
+  const handlePrepareClassroom = async () => {
+    if (!runId || workspaceData.usingMock || isPreparingClassroom) {
+      return;
+    }
+
+    setPrepareClassroomError(null);
+    setIsPreparingClassroom(true);
+
+    try {
+      const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) {
+        let message = `准备课中失败（${response.status}）`;
+        try {
+          const payload = (await response.json()) as { detail?: string | Array<{ msg?: string }> };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            const firstMessage = payload.detail[0]?.msg;
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage;
+            }
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as { run_id?: string };
+      if (!payload.run_id) {
+        throw new Error("后端未返回课中任务 ID，暂时无法进入课中播放页。");
+      }
+
+      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`);
+    } catch (error) {
+      setPrepareClassroomError(
+        error instanceof Error ? error.message : "准备课中失败，请稍后重试。"
+      );
+    } finally {
+      setIsPreparingClassroom(false);
+    }
+  };
+
   const renderWorkspaceContent = () => {
     if (activeTab.type === "workspace") {
       return (
@@ -841,6 +1140,21 @@ export default function StudyArea() {
               ? "当前展示的是示例题库。创建真实任务后，这里会自动切换为生成产物里的练习题。"
               : "当前还没有真实题库，请等待练习 Agent 完成生成。"
           }
+        />
+      );
+    }
+
+    if (activeTab.type === "prep") {
+      return (
+        <MainPreparationWorkspace
+          workspaceData={workspaceData}
+          canPrepareClassroom={
+            Boolean(runId) && !workspaceData.usingMock && workspaceData.statusLabel === "已完成"
+          }
+          isPreparingClassroom={isPreparingClassroom}
+          prepareClassroomError={prepareClassroomError}
+          onPrepareClassroom={handlePrepareClassroom}
+          onOpenMaterial={handleMaterialAction}
         />
       );
     }
@@ -939,14 +1253,25 @@ export default function StudyArea() {
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
-                onClick={() => setActiveTabId(WORKSPACE_TAB_ID)}
+                onClick={() => setBuiltInTab(WORKSPACE_TAB_ID)}
               >
                 <LayoutDashboard className="w-4 h-4" />
                 学习区
               </button>
 
+              <button
+                className={`flex items-center gap-2 h-full px-2 border-b-2 font-medium text-sm transition-colors ${activeTabId === PREP_CLASSROOM_TAB_ID
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                onClick={() => setBuiltInTab(PREP_CLASSROOM_TAB_ID)}
+              >
+                <Play className="w-4 h-4" />
+                准备课中
+              </button>
+
               {openTabs
-                .filter((tab) => tab.type === "markdown")
+                .filter((tab) => tab.id !== WORKSPACE_TAB_ID && tab.id !== PREP_CLASSROOM_TAB_ID)
                 .map((tab) => (
                   <div
                     key={tab.id}
@@ -957,7 +1282,13 @@ export default function StudyArea() {
                       className="flex items-center gap-2 text-sm min-w-0"
                       onClick={() => setActiveTabId(tab.id)}
                     >
-                      <FileText className="w-3.5 h-3.5 shrink-0" />
+                      {tab.type === "html" ? (
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      ) : tab.type === "video" ? (
+                        <Play className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                      )}
                       <span className="truncate max-w-40">{tab.title}</span>
                     </button>
                     <button

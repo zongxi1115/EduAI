@@ -42,10 +42,11 @@ class SlideHtmlAgent:
         llm: BaseChatModel,
         *,
         system_prompt: str | None = None,
+        prompt_name: str = "slide.md",
         max_attempts: int = 3,
     ) -> None:
         self._llm = llm
-        self._system_prompt = system_prompt or load_prompt("slide.md")
+        self._system_prompt = system_prompt or load_prompt(prompt_name)
         self._max_attempts = max_attempts
 
     def __call__(self, state: SlideTaskState | dict[str, Any]) -> dict[str, dict[int, str]]:

@@ -120,6 +120,7 @@ def test_generate_classroom_endpoint_creates_task(tmp_path: Path) -> None:
             "topic": "牛顿第二定律",
             "materials": ["教材"],
             "outline": "定义 -> 公式 -> 例题",
+            "slide_prompt_file": "slide.creative.md",
         },
     )
 
@@ -129,6 +130,21 @@ def test_generate_classroom_endpoint_creates_task(tmp_path: Path) -> None:
     assert payload["links"]["events"] == "/api/v1/classroom/run_123/events"
     assert registry.created_payload is not None
     assert registry.created_payload["outline"] == "定义 -> 公式 -> 例题"
+    assert registry.created_payload["slide_prompt_file"] == "slide.creative.md"
+
+
+def test_list_classroom_prompt_files_endpoint_returns_slide_variants(tmp_path: Path) -> None:
+    app = create_app(settings=_make_settings(tmp_path), llm_client=DummyLLMClient())
+    client = TestClient(app)
+
+    response = client.get("/api/v1/classroom/prompt-files")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "slide"
+    assert payload["default_filename"] == "slide.md"
+    assert any(item["filename"] == "slide.md" and item["is_default"] for item in payload["files"])
+    assert any(item["filename"] == "slide.creative.md" for item in payload["files"])
 
 
 def test_get_classroom_task_status_returns_snapshot(tmp_path: Path, monkeypatch) -> None:

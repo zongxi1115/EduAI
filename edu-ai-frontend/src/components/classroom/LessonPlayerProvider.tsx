@@ -1128,7 +1128,14 @@ export function LessonPlayerProvider({
   );
 
   const bindStageFrame = useCallback((node: HTMLIFrameElement | null) => {
-    frameRef.current = node;
+    if (node) {
+      frameRef.current = node;
+      return;
+    }
+
+    if (frameRef.current && !frameRef.current.isConnected) {
+      frameRef.current = null;
+    }
   }, []);
 
   useEffect(() => {

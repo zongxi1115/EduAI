@@ -7,11 +7,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Path as ApiPath, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+from classroom.agents._common import list_slide_prompt_names
 from edu_multi_agent.file_io import now_iso
 
 from ..dependencies import get_classroom_task_registry
 from ..schemas.classroom import (
     ClassroomGenerateRequest,
+    ClassroomPromptFileListResponse,
+    ClassroomPromptFileOptionResponse,
     ClassroomGenerateResponse,
     ClassroomParseScriptRequest,
     ClassroomParseScriptResponse,
@@ -78,6 +81,31 @@ def create_classroom_task(
         created_at=session.created_at,
         output_dir=str(session.output_dir),
         links=_build_links(session.run_id),
+    )
+
+
+@router.get(
+    "/prompt-files",
+    response_model=ClassroomPromptFileListResponse,
+    summary="获取可选的课堂 HTML 提示词文件",
+    description=(
+        "返回当前 `src/classroom/prompts` 目录下可用于 HTML 卡片生成的 slide 提示词文件。"
+        "前端可以据此渲染下拉选择，例如 `slide.md`、`slide.creative.md`。"
+    ),
+    response_description="当前可选的 slide 提示词文件列表。",
+)
+def list_classroom_prompt_files() -> ClassroomPromptFileListResponse:
+    files = list_slide_prompt_names()
+    return ClassroomPromptFileListResponse(
+        kind="slide",
+        default_filename="slide.md",
+        files=[
+            ClassroomPromptFileOptionResponse(
+                filename=filename,
+                is_default=filename == "slide.md",
+            )
+            for filename in files
+        ],
     )
 
 

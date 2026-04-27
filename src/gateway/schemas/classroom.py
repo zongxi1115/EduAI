@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from classroom.agents._common import validate_slide_prompt_name
 
 from .prep_runs import RunStatus
 
@@ -15,6 +17,10 @@ class ClassroomGenerateRequest(BaseModel):
         default_factory=list,
         description="辅助该课堂生成的素材列表，例如原文、题目、知识点说明等。",
     )
+    source_prep_run_id: str | None = Field(
+        default=None,
+        description="若该课堂由某个课前准备任务衍生而来，则记录对应的课前 run_id。",
+    )
     outline: Any | None = Field(
         default=None,
         description=(
@@ -22,6 +28,30 @@ class ClassroomGenerateRequest(BaseModel):
             "服务端会统一归一成 outline 对象；若不提供，则需要服务端已注入 classroom_outline_agent。"
         ),
     )
+    slide_prompt_file: str = Field(
+        default="slide.md",
+        validate_default=True,
+        description=(
+            "用于生成 HTML 卡片的系统提示词文件名。默认 `slide.md`；"
+            "也支持同目录下的 `slide.*.md` 变体，例如 `slide.creative.md`。"
+        ),
+    )
+
+    @field_validator("slide_prompt_file")
+    @classmethod
+    def _validate_slide_prompt_file(cls, value: str) -> str:
+        return validate_slide_prompt_name(value)
+
+
+class ClassroomPromptFileOptionResponse(BaseModel):
+    filename: str = Field(description="可选的提示词文件名。")
+    is_default: bool = Field(description="该文件是否为默认提示词。")
+
+
+class ClassroomPromptFileListResponse(BaseModel):
+    kind: Literal["slide"] = Field(description="提示词类别。")
+    default_filename: str = Field(description="默认使用的提示词文件名。")
+    files: list[ClassroomPromptFileOptionResponse] = Field(description="当前可选的提示词文件列表。")
 
 
 class ClassroomRevealResponse(BaseModel):
