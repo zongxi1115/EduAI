@@ -47,18 +47,18 @@ python -m pip install -e .
 启动后端：
 
 ```bash
-edu-prep-api --host 0.0.0.0 --port 8000
+edu-prep-api --host 0.0.0.0 --port 1234
 ```
 
 健康检查：
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:1234/health
 ```
 
 接口文档：
 
-- `http://127.0.0.1:8000/api/docs`
+- `http://127.0.0.1:1234/api/docs`
 
 ### systemd 示例（推荐）
 
@@ -73,7 +73,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/opt/edu
 EnvironmentFile=/opt/edu/.env
-ExecStart=/opt/venv/bin/edu-prep-api --host 0.0.0.0 --port 8000
+ExecStart=/opt/venv/bin/edu-prep-api --host 0.0.0.0 --port 1234
 Restart=always
 RestartSec=3
 User=www-data
@@ -117,7 +117,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:1234;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -129,7 +129,7 @@ server {
     }
 
     location = /health {
-        proxy_pass http://127.0.0.1:8000/health;
+        proxy_pass http://127.0.0.1:1234/health;
     }
 }
 ```
@@ -144,7 +144,7 @@ server {
 
 1. 前端报 `404 /api/...`
    - 检查 Nginx 是否配置了 `location /api/` 反代。
-   - 检查后端是否监听在 `0.0.0.0:8000`。
+   - 检查后端是否监听在 `0.0.0.0:1234`。
 
 2. 后端启动时报缺少环境变量
    - 检查 `.env` 是否存在并包含 `BASE_URL`、`API_KEY`、`MODEL_NAME`。

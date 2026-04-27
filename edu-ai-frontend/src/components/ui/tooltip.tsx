@@ -34,10 +34,13 @@ function TooltipContent({
   className,
   sideOffset = 0,
   children,
+  portalContainer,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & {
+  portalContainer?: React.ComponentProps<typeof TooltipPrimitive.Portal>["container"]
+}) {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={portalContainer}>
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}

@@ -14,7 +14,11 @@ from edu_multi_agent.config import Settings
 from edu_multi_agent.file_io import now_iso
 from edu_multi_agent.models import GenerationRequest
 
-from ..dependencies import get_run_registry, get_settings
+from ..dependencies import get_classroom_task_registry, get_run_registry, get_settings
+from ..schemas.classroom import (
+    ClassroomTaskCreatedResponse,
+    ClassroomTaskLinks,
+)
 from ..schemas.prep_runs import (
     ArtifactListResponse,
     RunCreatedResponse,
@@ -22,6 +26,8 @@ from ..schemas.prep_runs import (
     RunStatus,
     RunStatusResponse,
 )
+from ..services.classroom import build_classroom_request_from_prep_view
+from ..services.classroom_tasks import ClassroomTaskRegistry
 from ..services.prep_runs import (
     build_artifacts_response,
     build_links,
@@ -39,6 +45,7 @@ from ..services.run_registry import RunRegistry
 router = APIRouter(prefix="/api/v1/prep-runs", tags=["课前准备任务"])
 
 RunRegistryDep = Annotated[RunRegistry, Depends(get_run_registry)]
+ClassroomTaskRegistryDep = Annotated[ClassroomTaskRegistry, Depends(get_classroom_task_registry)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 RUN_EVENTS_SSE_EXAMPLE = """event: run_created
@@ -84,6 +91,15 @@ def _parse_optional_run_status(raw_status: str | None) -> RunStatus | None:
                 }
             ],
         ) from exc
+
+
+def _build_classroom_links(run_id: str) -> ClassroomTaskLinks:
+    base = f"/api/v1/classroom/{run_id}"
+    return ClassroomTaskLinks(
+        status=base,
+        events=f"{base}/events",
+        result=f"{base}/result",
+    )
 
 
 @router.post(
@@ -169,6 +185,46 @@ def get_prep_run(
     """返回指定任务的最新状态视图。"""
     view = load_run_view(registry, settings, run_id)
     return build_status_response(view)
+
+
+@router.post(
+    "/{run_id}/classroom",
+    response_model=ClassroomTaskCreatedResponse,
+    summary="基于课前任务创建课中任务",
+    description=(
+        "读取指定课前准备任务的计划与多智能体产物，自动整理成课中生成所需的 "
+        "`topic`、`materials` 和 `outline`，然后创建一个新的 AI 课堂任务。"
+    ),
+    response_description="新创建的课中任务信息与后续访问链接。",
+)
+def create_classroom_from_prep_run(
+    registry: RunRegistryDep,
+    classroom_registry: ClassroomTaskRegistryDep,
+    settings: SettingsDep,
+    run_id: str = ApiPath(description="课前准备任务的唯一标识符。"),
+    slide_prompt_file: str = Query(
+        "slide.md",
+        min_length=1,
+        description=(
+            "用于生成课堂 HTML 卡片的提示词文件名。"
+            "默认 `slide.md`，也可以传 `slide.creative.md` 这类变体。"
+        ),
+    ),
+) -> ClassroomTaskCreatedResponse:
+    """Create a classroom task by reusing the outputs of a completed prep run."""
+    prep_view = load_run_view(registry, settings, run_id)
+    classroom_request = build_classroom_request_from_prep_view(
+        prep_view,
+        slide_prompt_file=slide_prompt_file,
+    )
+    session = classroom_registry.create_run(classroom_request)
+    return ClassroomTaskCreatedResponse(
+        run_id=session.run_id,
+        status=session.status,
+        created_at=session.created_at,
+        output_dir=str(session.output_dir),
+        links=_build_classroom_links(session.run_id),
+    )
 
 
 @router.delete(

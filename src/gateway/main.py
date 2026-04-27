@@ -23,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser for running the API gateway."""
     parser = argparse.ArgumentParser(description="Run the Edu Multi-Agent FastAPI gateway.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host.")
-    parser.add_argument("--port", type=int, default=8000, help="Bind port.")
+    parser.add_argument("--port", type=int, default=1234, help="Bind port.")
     parser.add_argument(
         "--reload",
         action="store_true",
