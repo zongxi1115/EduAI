@@ -286,6 +286,9 @@ File requirements:
 - Use `need_ai_judge` to mark whether the frontend should hand the submission to AI review.
   Set it to `true` for subjective/open-ended responses such as most ShortAnswer, Coding,
   and Drawing items, and set it to `false` for questions that can be judged directly.
+- Every question should also include:
+  - `skill_tags`: 1-3 个中文技能标签，表示这道题主要诊断或训练的能力点。
+  - `difficulty`: 0-1 之间的小数，表示该题对当前学习目标的相对难度。
 - Do not output the legacy field name `requires_ai_judgment`.
 - You must generate exactly {blueprint.total_questions} questions in total.
 - The count of each `question_type` must exactly match the practice blueprint.

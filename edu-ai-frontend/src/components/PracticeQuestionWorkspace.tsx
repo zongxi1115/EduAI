@@ -26,6 +26,8 @@ interface PracticeQuestionBase {
   analysis: string;
   need_ai_judge?: boolean;
   requires_ai_judgment?: boolean;
+  skill_tags?: string[];
+  difficulty?: number | null;
 }
 
 interface FillInTheBlankPracticeQuestion extends PracticeQuestionBase {
@@ -80,6 +82,32 @@ interface PracticeReviewResponse {
   review_advice: string[];
   reference_points: string[];
   limitations: string[];
+  skill_judgments: Array<{
+    skill_id: string;
+    display_name: string;
+    score: number;
+    coverage: number;
+    confidence: number;
+    reasoning_quality: number;
+    misconception_tags: string[];
+    observation: string;
+  }>;
+  learner_observations: string[];
+  learner_snapshot?: {
+    learner_id: string;
+    overall_mastery: number;
+    overall_confidence: number;
+    overall_band: string;
+    total_events: number;
+    total_sessions: number;
+    strong_skills: string[];
+    weak_skills: string[];
+    key_misconceptions: string[];
+    recommended_focus: string[];
+    prompt_profile: string;
+    evaluation_summary: string;
+    updated_at: string;
+  } | null;
   judged_at?: string | null;
 }
 
@@ -98,6 +126,8 @@ interface PracticeReviewCapabilitiesResponse {
 interface PracticeQuestionWorkspaceProps {
   learningGoal: string;
   questions: PracticeQuestionRecord[];
+  learnerId?: string | null;
+  sessionId?: string | null;
   isLoading?: boolean;
   error?: string | null;
   emptyHint?: string;
@@ -201,6 +231,8 @@ function buildPracticeReviewQuestionPayload(question: PracticeQuestionRecord) {
     test_cases: [] as unknown[],
     audio_src: null as string | null,
     reference_image: null as string | null,
+    skill_tags: question.skill_tags ?? [],
+    difficulty: question.difficulty ?? null,
   };
 
   switch (question.question_type) {
@@ -308,6 +340,9 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
           expectedAnswers.length !== submittedAnswers.length
             ? ["题目标准答案未明确拆分为多空结构，本次判定按顺序近似比对。"]
             : [],
+        skill_judgments: [],
+        learner_observations: [],
+        learner_snapshot: null,
         judged_at: judgedAt,
       };
     }
@@ -329,6 +364,9 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
           : ["先定位题干中的关键限定词。", "再逐项排除与题意不符的干扰项。"],
         reference_points: [`参考答案：${question.correct_answer}`],
         limitations: [],
+        skill_judgments: [],
+        learner_observations: [],
+        learner_snapshot: null,
         judged_at: judgedAt,
       };
     }
@@ -347,6 +385,9 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
           : ["回放一遍音频并记录关键词。", "核对数字、专有名词或否定词是否听漏。"],
         reference_points: [`参考答案：${question.answer}`],
         limitations: [],
+        skill_judgments: [],
+        learner_observations: [],
+        learner_snapshot: null,
         judged_at: judgedAt,
       };
     }
@@ -360,6 +401,9 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
         review_advice: ["请开启 AI 批阅，或补充更明确的标准答案结构。"],
         reference_points: [],
         limitations: ["当前前端只对部分客观题提供本地判题。"],
+        skill_judgments: [],
+        learner_observations: [],
+        learner_snapshot: null,
         judged_at: judgedAt,
       };
   }
@@ -393,6 +437,8 @@ function parseQuestion(item: unknown): PracticeQuestionRecord | null {
     analysis,
     need_ai_judge: needAIJudge,
     requires_ai_judgment: requiresAIJudgment,
+    skill_tags: isStringArray(item.skill_tags) ? item.skill_tags : undefined,
+    difficulty: typeof item.difficulty === "number" ? item.difficulty : undefined,
   };
 
   switch (questionType as PracticeQuestionType) {
@@ -898,6 +944,8 @@ function renderQuestionCard(
 export function PracticeQuestionWorkspace({
   learningGoal,
   questions,
+  learnerId,
+  sessionId,
   isLoading = false,
   error,
   emptyHint = "当前还没有可展示的练习题，请等待题库生成完成。",
@@ -952,6 +1000,40 @@ export function PracticeQuestionWorkspace({
   useEffect(() => {
     void loadReviewCapabilities();
   }, []);
+
+  const persistReviewedEvent = async (
+    question: PracticeQuestionRecord,
+    studentAnswer: unknown,
+    submissionContext: Record<string, unknown>,
+    review: PracticeReviewResponse,
+    source: "practice_review_ai" | "practice_review_local"
+  ) => {
+    if (!learnerId?.trim()) {
+      return;
+    }
+
+    try {
+      await fetch("/api/v1/learner-models/ingest-review", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          learner_id: learnerId,
+          session_id: sessionId ?? null,
+          source,
+          learning_goal: learningGoal,
+          question: buildPracticeReviewQuestionPayload(question),
+          student_answer: studentAnswer,
+          submission_context: submissionContext,
+          review,
+        }),
+      });
+    } catch {
+      // Keep the visible review result even if background persistence fails.
+    }
+  };
 
   const handleQuestionSubmit = async (
     question: PracticeQuestionRecord,
@@ -1015,6 +1097,13 @@ export function PracticeQuestionWorkspace({
           review,
         },
       }));
+      void persistReviewedEvent(
+        question,
+        studentAnswer,
+        submissionContext,
+        review,
+        "practice_review_local"
+      );
       return;
     }
 
@@ -1026,6 +1115,8 @@ export function PracticeQuestionWorkspace({
           Accept: "application/json",
         },
         body: JSON.stringify({
+          learner_id: learnerId ?? null,
+          session_id: sessionId ?? null,
           learning_goal: learningGoal,
           question: buildPracticeReviewQuestionPayload(question),
           student_answer: studentAnswer,

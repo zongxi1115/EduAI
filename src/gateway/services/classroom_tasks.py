@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import threading
 from dataclasses import dataclass, field
 from html import escape
@@ -146,6 +147,7 @@ class ClassroomTaskRegistry:
                     "summary": "AI 课堂生成任务开始执行。",
                 },
             )
+            _copy_prep_media_to_classroom_dir(session)
             result = run_classroom_workflow(
                 session.request,
                 self.llm_client,
@@ -630,3 +632,30 @@ def _render_preview_index(topic: Any, links: list[str]) -> str:
   </body>
 </html>
 """
+
+
+def _copy_prep_media_to_classroom_dir(session: ClassroomTaskSession) -> None:
+    """Copy prep-generated media files into the classroom output directory.
+
+    This makes them accessible via the classroom file-serving endpoint
+    ``/api/v1/classroom/{run_id}/files/{path}`` and updates the
+    ``media_resources`` relative_path values accordingly.
+    """
+    media_resources = session.request.media_resources
+    if not media_resources:
+        return
+
+    media_dir = session.output_dir / "prep_media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    for resource in media_resources:
+        src_path = Path(resource.get("file_path", ""))
+        if not src_path.is_file():
+            continue
+        dest = media_dir / src_path.name
+        try:
+            shutil.copy2(src_path, dest)
+        except OSError as exc:
+            logger.warning("Failed to copy prep media %s: %s", src_path, exc)
+            continue
+        resource["relative_path"] = f"prep_media/{dest.name}"

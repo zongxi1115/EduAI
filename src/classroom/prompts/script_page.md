@@ -18,6 +18,7 @@
 - 按输入中的 `target_reveal_count` 生成 3 到 6 个 reveal。
 - 如果输入里提供了 `quiz_goal`，本页必须包含 1 个 `<question>`，并紧跟 `<false_intro>`。
 - 如果 `quiz_goal` 为 `null`，通常不要强行插入题目。
+- **练习题复用**：如果 `outline` 中存在 `practice_questions_summary` 字段，请优先从中选择与本页 `quiz_goal` 相关的课前题目进行改编，而非从零设计全新题目。这样可以保持课中测验与课前练习的一致性。
 - 标签不可嵌套。
 - `<question>` 内必须是合法 XML。
 - 选择题答案必须与某一个 `<option>` 的完整文本完全一致。

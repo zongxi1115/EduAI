@@ -23,7 +23,7 @@ from ..schemas.prep_runs import RunStatus
 
 OutlineNode = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
-TEXTUAL_MATERIAL_SUFFIXES = {".md", ".txt", ".json"}
+TEXTUAL_MATERIAL_SUFFIXES = {".md", ".txt", ".json", ".py", ".html"}
 MAX_CLASSROOM_MATERIAL_COUNT = 16
 MAX_CLASSROOM_MATERIAL_CHARS = 28_000
 MAX_CLASSROOM_FILE_CHARS = 3_600
@@ -36,7 +36,9 @@ PREFERRED_CLASSROOM_FILE_NAMES = {
     "render_guide.md": 5,
     "usage_notes.md": 6,
     "practice_questions.json": 7,
-    "final_report.md": 8,
+    "lesson_animation.py": 8,
+    "index.html": 9,
+    "final_report.md": 10,
 }
 
 
@@ -65,6 +67,7 @@ def run_classroom_workflow(
             {
                 "topic": payload.topic,
                 "materials": payload.materials,
+                "media_resources": payload.media_resources,
             }
         )
     except ScriptParseError as exc:
@@ -148,6 +151,11 @@ def build_classroom_request_from_prep_view(
         request=request,
         plan=plan,
         artifacts=artifacts,
+        output_dir=output_dir,
+    )
+    media_resources = _build_classroom_media_resources(
+        artifacts=artifacts,
+        output_dir=output_dir,
     )
 
     try:
@@ -155,6 +163,7 @@ def build_classroom_request_from_prep_view(
             topic=request.learning_goal,
             materials=materials,
             outline=outline,
+            media_resources=media_resources,
             source_prep_run_id=run_id,
             slide_prompt_file=slide_prompt_file,
         )
@@ -320,12 +329,15 @@ def _build_classroom_outline(
     request: GenerationRequest,
     plan: Mapping[str, Any],
     artifacts: list[ArtifactResult],
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
+    practice_summary = _extract_practice_questions_summary(artifacts, output_dir)
     return {
         "source_prep_run_id": prep_run_id,
         "learning_goal": request.learning_goal,
         "subject": request.subject,
         "grade_level": request.grade_level,
+        "learner_id": request.learner_id,
         "learner_profile": request.learner_profile,
         "notes": request.notes,
         "language": request.language,
@@ -334,12 +346,26 @@ def _build_classroom_outline(
         "required_materials": _clean_string_list(plan.get("required_materials")),
         "teacher_checklist": _clean_string_list(plan.get("teacher_checklist")),
         "quality_bar": _clean_string_list(plan.get("quality_bar")),
+        "practice_questions_summary": practice_summary,
         "artifact_summaries": [
             {
                 "agent_name": artifact.agent_name,
                 "title": artifact.title,
                 "summary": artifact.summary,
                 "status": artifact.status,
+                "file_types": sorted(
+                    {Path(f).suffix for f in artifact.files if isinstance(f, (str, Path))}
+                ),
+                "has_video": any(
+                    Path(f).suffix.lower() == ".mp4"
+                    for f in artifact.files
+                    if isinstance(f, (str, Path))
+                ),
+                "has_interactive_html": any(
+                    Path(f).suffix.lower() == ".html"
+                    for f in artifact.files
+                    if isinstance(f, (str, Path))
+                ),
             }
             for artifact in artifacts
         ],
@@ -419,6 +445,7 @@ def _format_request_material(request: GenerationRequest) -> str:
             f"学习目标：{request.learning_goal}",
             f"学科：{request.subject}",
             f"学段：{request.grade_level}",
+            f"学习者：{request.learner_id or '（未提供 learner_id）'}",
             f"学情：{request.learner_profile}",
             f"备注：{request.notes}",
         ]
@@ -523,9 +550,63 @@ def _read_material_file_snippet(path: Path, *, max_chars: int) -> str | None:
         except Exception:
             pass
 
-    if len(text) > max_chars:
-        return f"{text[:max_chars].rstrip()}…"
-    return text
+    if len(text) <= max_chars:
+        return text
+
+    if path.suffix.lower() == ".md":
+        smart = _smart_truncate_markdown(text, max_chars)
+        if smart:
+            return smart
+
+    return f"{text[:max_chars].rstrip()}…"
+
+
+def _smart_truncate_markdown(text: str, max_chars: int) -> str | None:
+    """Extract headings and their following paragraphs, prioritizing key sections."""
+    import re
+
+    lines = text.split("\n")
+    sections: list[tuple[str, str]] = []
+    current_heading = ""
+    current_body: list[str] = []
+
+    for line in lines:
+        if re.match(r"^#{1,3}\s", line):
+            if current_heading or current_body:
+                sections.append((current_heading, "\n".join(current_body).strip()))
+            current_heading = line.strip()
+            current_body = []
+        else:
+            current_body.append(line)
+
+    if current_heading or current_body:
+        sections.append((current_heading, "\n".join(current_body).strip()))
+
+    priority_keywords = ["目标", "重点", "概念", "核心", "关键", "总结", "要点", "objective", "key", "summary"]
+
+    def section_priority(heading: str) -> int:
+        lower = heading.lower()
+        for idx, kw in enumerate(priority_keywords):
+            if kw in lower:
+                return idx
+        return len(priority_keywords)
+
+    sections.sort(key=lambda s: section_priority(s[0]))
+
+    result: list[str] = []
+    total = 0
+    for heading, body in sections:
+        entry = f"{heading}\n{body}" if heading else body
+        entry_len = len(entry) + 1
+        if total + entry_len > max_chars:
+            remaining = max_chars - total
+            if remaining > 60:
+                result.append(entry[:remaining - 1].rstrip() + "…")
+            break
+        result.append(entry)
+        total += entry_len
+
+    return "\n".join(result) if result else None
 
 
 def _optional_str(value: Any) -> str | None:
@@ -549,3 +630,100 @@ def _clean_string_list(value: Any) -> list[str]:
         cleaned.append(normalized)
         seen.add(normalized)
     return cleaned
+
+
+MEDIA_RESOURCE_SUFFIX_MAP: dict[str, str] = {
+    ".mp4": "video",
+    ".html": "interactive_html",
+    ".svg": "image",
+}
+
+
+def _build_classroom_media_resources(
+    *,
+    artifacts: list[ArtifactResult],
+    output_dir: Path,
+) -> list[dict[str, str]]:
+    """Extract non-textual media resources from prep artifacts for classroom use."""
+    resources: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+
+    for artifact in artifacts:
+        for raw_path in artifact.files:
+            if not isinstance(raw_path, (str, Path)):
+                continue
+            path = Path(str(raw_path))
+            suffix = path.suffix.lower()
+            resource_type = MEDIA_RESOURCE_SUFFIX_MAP.get(suffix)
+            if not resource_type:
+                continue
+            if not path.is_absolute():
+                path = output_dir / path
+            try:
+                resolved = path.resolve()
+            except Exception:
+                continue
+            if not resolved.is_file():
+                continue
+            str_path = str(resolved)
+            if str_path in seen_paths:
+                continue
+            seen_paths.add(str_path)
+            try:
+                relative = resolved.relative_to(output_dir.resolve()).as_posix()
+            except Exception:
+                relative = resolved.name
+            resources.append({
+                "resource_type": resource_type,
+                "file_path": str_path,
+                "relative_path": relative,
+                "description": f"{artifact.title} - {artifact.summary}",
+                "source_agent": artifact.agent_name,
+            })
+
+    return resources
+
+
+def _extract_practice_questions_summary(
+    artifacts: list[ArtifactResult],
+    output_dir: Path | None,
+) -> list[dict[str, str]] | None:
+    """Extract a lightweight summary of practice questions for classroom reuse."""
+    if not output_dir:
+        return None
+
+    for artifact in artifacts:
+        if artifact.agent_name != "practice":
+            continue
+        for raw_path in artifact.files:
+            path = Path(str(raw_path))
+            if path.name != "practice_questions.json":
+                continue
+            if not path.is_absolute():
+                path = output_dir / path
+            if not path.is_file():
+                continue
+            try:
+                raw_text = path.read_text(encoding="utf-8")
+                questions = json.loads(raw_text)
+            except Exception:
+                continue
+            if not isinstance(questions, list) or not questions:
+                continue
+            summary: list[dict[str, str]] = []
+            for q in questions[:10]:
+                if not isinstance(q, dict):
+                    continue
+                q_type = str(q.get("question_type", q.get("type", "unknown")))
+                question_text = str(q.get("question", q.get("prompt", "")))[:200]
+                entry: dict[str, str] = {
+                    "question_type": q_type,
+                    "question": question_text,
+                }
+                correct = q.get("correct_answer", q.get("answer"))
+                if correct is not None:
+                    entry["correct_answer"] = str(correct)[:100]
+                summary.append(entry)
+            return summary if summary else None
+
+    return None

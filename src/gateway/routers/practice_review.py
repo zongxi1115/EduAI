@@ -8,12 +8,13 @@ from edu_multi_agent.config import Settings
 from edu_multi_agent.file_io import now_iso
 from edu_multi_agent.llm import LLMClient
 
-from ..dependencies import get_llm_client, get_settings
+from ..dependencies import get_learner_model_service, get_llm_client, get_settings
 from ..schemas.practice_review import (
     PracticeReviewCapabilitiesResponse,
     PracticeReviewRequest,
     PracticeReviewResponse,
 )
+from ..services.learner_models import LearnerModelService
 from ..services.practice_review import build_practice_review_prompts
 
 
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/api/v1/practice-review", tags=["题目批阅"])
 
 LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+LearnerModelServiceDep = Annotated[LearnerModelService, Depends(get_learner_model_service)]
 
 
 @router.get(
@@ -51,6 +53,7 @@ def judge_practice_answer(
     payload: PracticeReviewRequest,
     llm_client: LLMClientDep,
     settings: SettingsDep,
+    learner_model_service: LearnerModelServiceDep,
 ) -> PracticeReviewResponse:
     """Judge a practice-question submission with the shared LLM client."""
 
@@ -69,4 +72,15 @@ def judge_practice_answer(
 
     system_prompt, user_prompt = build_practice_review_prompts(payload)
     result = llm_client.invoke_json(system_prompt, user_prompt, PracticeReviewResponse)
-    return result.model_copy(update={"judged_at": now_iso()})
+    judged_result = result.model_copy(update={"judged_at": now_iso()})
+    learner_id = (payload.learner_id or "").strip()
+    if learner_id:
+        _record, _event = learner_model_service.ingest_review(
+            payload,
+            judged_result,
+            source="practice_review_ai",
+        )
+        judged_result = judged_result.model_copy(
+            update={"learner_snapshot": learner_model_service.get_model_response(learner_id, event_limit=1).snapshot}
+        )
+    return judged_result

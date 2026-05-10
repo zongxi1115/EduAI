@@ -293,8 +293,19 @@ function renderMathInHtml(html: string) {
   return doc.body.innerHTML;
 }
 
-function buildLessonStageDocument(sectionHtml: string) {
-  const renderedSection = renderMathInHtml(sectionHtml);
+function rewritePrepMediaPaths(html: string, runId: string): string {
+  const prefix = `/api/v1/classroom/${encodeURIComponent(runId)}/files/`;
+  return html.replace(
+    /((?:src|href)\s*=\s*["'])prep_media\//g,
+    `$1${prefix}prep_media/`
+  );
+}
+
+function buildLessonStageDocument(sectionHtml: string, runId?: string) {
+  let renderedSection = renderMathInHtml(sectionHtml);
+  if (runId) {
+    renderedSection = rewritePrepMediaPaths(renderedSection, runId);
+  }
   return `<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
@@ -337,7 +348,7 @@ function buildLessonStageDocument(sectionHtml: string) {
 </html>`;
 }
 
-function mergeLessonPages(lesson: LessonResult): ResolvedLessonPage[] {
+function mergeLessonPages(lesson: LessonResult, runId?: string): ResolvedLessonPage[] {
   const htmlByIdx = new Map<number, LessonBundlePage>();
   lesson.bundle.pages.forEach((page) => {
     htmlByIdx.set(page.idx, page);
@@ -377,7 +388,7 @@ function mergeLessonPages(lesson: LessonResult): ResolvedLessonPage[] {
         theme: normalizeLessonText(blueprint?.theme) || `第 ${page.idx + 1} 页`,
         objective: normalizeLessonText(blueprint?.objective),
         html: bundlePage.html,
-        srcDoc: buildLessonStageDocument(bundlePage.html),
+        srcDoc: buildLessonStageDocument(bundlePage.html, runId),
         reveals,
         quizzes,
         onSlideSummary: normalizeLessonText(page.on_slide_summary),
@@ -398,7 +409,7 @@ export function LessonPlayerProvider({
   runId: string;
   children: ReactNode;
 }) {
-  const pages = useMemo(() => mergeLessonPages(lesson), [lesson]);
+  const pages = useMemo(() => mergeLessonPages(lesson, runId), [lesson, runId]);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [currentRevealIndex, setCurrentRevealIndex] = useState(0);
   const [hasStarted, setHasStarted] = useState(false);

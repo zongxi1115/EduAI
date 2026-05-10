@@ -27,6 +27,7 @@ def fanout_page_scripts(state: ClassState) -> list[Send]:
                 "topic": state.get("topic"),
                 "materials": state.get("materials"),
                 "outline": state.get("outline"),
+                "media_resources": state.get("media_resources"),
                 "page_blueprint": page_blueprints[idx],
                 "total_pages": len(page_blueprints),
                 "prev_theme": page_blueprints[idx - 1]["theme"] if idx > 0 else None,
@@ -47,6 +48,7 @@ def fanout(state: ClassState) -> list[Send]:
                 "page": pages[idx],
                 "page_blueprint": page_blueprints[idx] if idx < len(page_blueprints) else None,
                 "window_context": _build_window_context(state, idx),
+                "media_resources": state.get("media_resources"),
             },
         )
         for idx in range(len(pages))

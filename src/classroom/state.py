@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from operator import or_
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
+
+
+class MediaResource(TypedDict):
+    resource_type: Literal["video", "interactive_html", "image"]
+    file_path: str
+    relative_path: str
+    description: str
+    source_agent: str
 
 
 class PageBlueprint(TypedDict):
@@ -46,6 +54,7 @@ class ClassState(TypedDict, total=False):
     topic: str
     materials: list[str]
     outline: dict[str, Any]
+    media_resources: list[MediaResource]
     page_blueprints: list[PageBlueprint]
     page_scripts: Annotated[dict[int, str], or_]
     script: str
@@ -58,6 +67,7 @@ class PageScriptTaskState(TypedDict, total=False):
     topic: str
     materials: list[str]
     outline: dict[str, Any]
+    media_resources: list[MediaResource]
     page_blueprint: PageBlueprint
     total_pages: int
     prev_theme: str | None
@@ -76,4 +86,5 @@ class SlideTaskState(TypedDict, total=False):
     page: PageSpec
     page_blueprint: PageBlueprint | None
     window_context: list[WindowContext]
+    media_resources: list[MediaResource]
     htmls: Annotated[dict[int, str], or_]

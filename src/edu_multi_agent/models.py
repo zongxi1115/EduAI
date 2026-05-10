@@ -32,6 +32,10 @@ class GenerationRequest(BaseModel):
         default="Unspecified",
         description="年级、学段或适用对象。",
     )
+    learner_id: str | None = Field(
+        default=None,
+        description="可选的学习者唯一标识，用于关联长期学情画像。",
+    )
     learner_profile: str = Field(
         default=(
             "Mixed-ability class that needs clear guidance, visual explanation, "
@@ -54,6 +58,7 @@ class GenerationRequest(BaseModel):
                 "learning_goal": "理解二次函数图像与性质",
                 "subject": "Mathematics",
                 "grade_level": "Grade 8",
+                "learner_id": "stu_demo_001",
                 "learner_profile": (
                     "Mixed-ability class that needs visual explanation and structured practice."
                 ),

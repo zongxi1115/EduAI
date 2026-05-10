@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--grade-level", default="Unspecified", help="Grade level or phase."
     )
     parser.add_argument(
+        "--learner-id",
+        default="",
+        help="Optional learner identifier for linking long-term learner models.",
+    )
+    parser.add_argument(
         "--learner-profile",
         default=(
             "Mixed-ability class that needs clear scaffolding, visual support, "
@@ -68,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_goal=goal,
         subject=args.subject,
         grade_level=args.grade_level,
+        learner_id=args.learner_id.strip() or None,
         learner_profile=args.learner_profile,
         notes=args.notes,
     )

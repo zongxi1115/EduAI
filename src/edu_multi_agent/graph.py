@@ -517,6 +517,17 @@ def _normalize_practice_question(item: dict[str, Any]) -> dict[str, Any]:
         if key not in {"id", "question_id", "requires_ai_judgment"}
     }
     normalized_item["need_ai_judge"] = _resolve_need_ai_judge(item)
+    if isinstance(normalized_item.get("skill_tags"), list):
+        normalized_item["skill_tags"] = [
+            str(tag).strip()
+            for tag in normalized_item["skill_tags"]
+            if str(tag).strip()
+        ]
+    if isinstance(normalized_item.get("difficulty"), (int, float)):
+        normalized_item["difficulty"] = round(
+            max(0.0, min(1.0, float(normalized_item["difficulty"]))),
+            4,
+        )
     return normalized_item
 
 
@@ -1161,6 +1172,22 @@ def _validate_generated_files(
                         f"practice_questions.json item {index} has invalid "
                         "requires_ai_judgment; expected boolean."
                     )
+                if "skill_tags" in item:
+                    skill_tags = item.get("skill_tags")
+                    if not isinstance(skill_tags, list) or not all(
+                        isinstance(tag, str) for tag in skill_tags
+                    ):
+                        raise ValueError(
+                            f"practice_questions.json item {index} has invalid "
+                            "skill_tags; expected list[str]."
+                        )
+                if "difficulty" in item:
+                    difficulty = item.get("difficulty")
+                    if difficulty is not None and not isinstance(difficulty, (int, float)):
+                        raise ValueError(
+                            f"practice_questions.json item {index} has invalid "
+                            "difficulty; expected number."
+                        )
                 question_type = item.get("question_type")
                 if question_type not in allowed_types:
                     raise ValueError(

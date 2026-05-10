@@ -17,6 +17,13 @@ class ClassroomGenerateRequest(BaseModel):
         default_factory=list,
         description="辅助该课堂生成的素材列表，例如原文、题目、知识点说明等。",
     )
+    media_resources: list[dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "课前生成的非文本媒体资源（视频、交互网页等），"
+            "每项包含 resource_type、file_path、relative_path、description、source_agent。"
+        ),
+    )
     source_prep_run_id: str | None = Field(
         default=None,
         description="若该课堂由某个课前准备任务衍生而来，则记录对应的课前 run_id。",

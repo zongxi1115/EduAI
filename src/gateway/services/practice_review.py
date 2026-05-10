@@ -76,7 +76,20 @@ def build_practice_review_prompts(
   "issues": ["问题 1", "问题 2"],
   "review_advice": ["建议 1", "建议 2"],
   "reference_points": ["参考点 1", "参考点 2"],
-  "limitations": ["局限说明 1"]
+  "limitations": ["局限说明 1"],
+  "skill_judgments": [
+    {{
+      "skill_id": "skill_id_1",
+      "display_name": "技能名称 1",
+      "score": 0.68,
+      "coverage": 0.9,
+      "confidence": 0.8,
+      "reasoning_quality": 0.62,
+      "misconception_tags": ["误区标签 1"],
+      "observation": "一句简短观察"
+    }}
+  ],
+  "learner_observations": ["观察 1", "观察 2"]
 }}
 
 批阅要求：
@@ -87,6 +100,14 @@ def build_practice_review_prompts(
 - 如果是作图题，请结合学生提交的图像，从图形结构、标注、比例/方向、信息完整度等角度进行评价。{drawing_note}
 - 如果题目证据不足，`correctness` 设为 `ungradable`，并在 `limitations` 中明确原因。
 - 如果学生答案基本方向正确但不完整，使用 `partially_correct`。
+- `skill_judgments` 返回 1 到 3 个最关键的技能判断。
+- 若题目快照中已提供 `skill_tags`，优先沿用这些标签语义，不要随意偏离。
+- `skill_id` 应尽量稳定、简洁，适合作为长期画像中的技能键；可用英文蛇形命名，也可对中文技能点做稳定缩写。
+- `score` 表示这次作答对该技能提供的正向证据强度，范围 0-1。
+- `coverage` 表示该题对该技能覆盖度，范围 0-1。
+- `confidence` 表示你对该技能判断的把握，范围 0-1。
+- `reasoning_quality` 表示学生在该技能上的推理质量，范围 0-1。
+- `learner_observations` 提炼本次作答反映出的学习特点、错误倾向或支架需求，优先给 1 到 3 条。
 - 不要输出 Markdown 代码块，不要输出 JSON 以外的任何文字。
 """.strip()
 

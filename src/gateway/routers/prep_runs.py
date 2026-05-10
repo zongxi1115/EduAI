@@ -14,7 +14,12 @@ from edu_multi_agent.config import Settings
 from edu_multi_agent.file_io import now_iso
 from edu_multi_agent.models import GenerationRequest
 
-from ..dependencies import get_classroom_task_registry, get_run_registry, get_settings
+from ..dependencies import (
+    get_classroom_task_registry,
+    get_learner_model_service,
+    get_run_registry,
+    get_settings,
+)
 from ..schemas.classroom import (
     ClassroomTaskCreatedResponse,
     ClassroomTaskLinks,
@@ -28,6 +33,7 @@ from ..schemas.prep_runs import (
 )
 from ..services.classroom import build_classroom_request_from_prep_view
 from ..services.classroom_tasks import ClassroomTaskRegistry
+from ..services.learner_models import LearnerModelService
 from ..services.prep_runs import (
     build_artifacts_response,
     build_links,
@@ -47,6 +53,7 @@ router = APIRouter(prefix="/api/v1/prep-runs", tags=["课前准备任务"])
 RunRegistryDep = Annotated[RunRegistry, Depends(get_run_registry)]
 ClassroomTaskRegistryDep = Annotated[ClassroomTaskRegistry, Depends(get_classroom_task_registry)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+LearnerModelServiceDep = Annotated[LearnerModelService, Depends(get_learner_model_service)]
 
 RUN_EVENTS_SSE_EXAMPLE = """event: run_created
 id: 0
@@ -115,9 +122,10 @@ def _build_classroom_links(run_id: str) -> ClassroomTaskLinks:
 def create_prep_run(
     payload: GenerationRequest,
     registry: RunRegistryDep,
+    learner_model_service: LearnerModelServiceDep,
 ) -> RunCreatedResponse:
     """创建新任务，并立即返回可跟踪该任务的元信息。"""
-    session = registry.create_run(payload)
+    session = registry.create_run(learner_model_service.enrich_generation_request(payload))
     return RunCreatedResponse(
         run_id=session.run_id,
         status=session.status,

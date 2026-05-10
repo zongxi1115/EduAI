@@ -49,6 +49,7 @@ interface GenerationRequestSnapshot {
   learning_goal: string;
   subject: string;
   grade_level: string;
+  learner_id?: string | null;
   learner_profile: string;
   notes: string;
   language: string;
@@ -116,6 +117,7 @@ interface StudyMaterialItem {
 interface StudyWorkspaceData {
   workspaceTitle: string;
   workspaceSubtitle: string;
+  learnerId?: string | null;
   goals: string[];
   requiredMaterials: string[];
   teacherChecklist: string[];
@@ -207,6 +209,7 @@ const MOCK_PRACTICE_QUESTIONS: PracticeQuestionRecord[] = [
 const MOCK_WORKSPACE_DATA: StudyWorkspaceData = {
   workspaceTitle: "Edu AI Workspace",
   workspaceSubtitle: "未指定 run_id，先展示示例学习区数据。",
+  learnerId: null,
   goals: ["理解核心概念", "掌握实践技能", "完成进阶挑战"],
   requiredMaterials: ["准备一份学习指南草稿", "检查课堂中可用的演示材料"],
   teacherChecklist: ["确认练习题层次清晰", "准备可直接展示的讲义内容"],
@@ -447,6 +450,7 @@ function buildWorkspaceData(
     workspaceSubtitle:
       statusResponse.plan_summary?.trim() ||
       `${statusLabel} · 当前已识别 ${statusResponse.artifact_count} 份产物`,
+    learnerId: statusResponse.request?.learner_id ?? null,
     goals,
     requiredMaterials,
     teacherChecklist: checklist,
@@ -464,12 +468,16 @@ function buildWorkspaceData(
 
 function MainWorkspaceQuestions({
   learningGoal,
+  learnerId,
+  sessionId,
   questions,
   isLoading,
   error,
   emptyHint,
 }: {
   learningGoal: string;
+  learnerId?: string | null;
+  sessionId?: string | null;
   questions: PracticeQuestionRecord[];
   isLoading: boolean;
   error?: string | null;
@@ -478,6 +486,8 @@ function MainWorkspaceQuestions({
   return (
     <PracticeQuestionWorkspace
       learningGoal={learningGoal}
+      learnerId={learnerId}
+      sessionId={sessionId}
       questions={questions}
       isLoading={isLoading}
       error={error}
@@ -1132,6 +1142,8 @@ export default function StudyArea() {
       return (
         <MainWorkspaceQuestions
           learningGoal={workspaceData.workspaceTitle}
+          learnerId={workspaceData.learnerId}
+          sessionId={runId ?? null}
           questions={practiceQuestions}
           isLoading={isLoadingWorkspace && !workspaceData.usingMock}
           error={practiceQuestionsError}

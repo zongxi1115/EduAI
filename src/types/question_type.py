@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -11,6 +11,8 @@ class BaseQuestion(ABC):
     question: str
     analysis: str
     need_ai_judge: bool = False
+    skill_tags: list[str] = field(default_factory=list)
+    difficulty: float | None = None
 
     @abstractmethod
     def validate_answer(self, answer: Any) -> bool:
