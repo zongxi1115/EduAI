@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { DraftBoard } from "@/components/DraftBoard";
 import { X } from "lucide-react";
-import Editor from "@monaco-editor/react";
+import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
 import { Textarea } from "@/components/ui/textarea";
 
 export interface ProgrammingQuestionProps {
@@ -16,10 +16,11 @@ export interface ProgrammingQuestionProps {
   initialCode?: string;
   initialRunnerCode?: string;
   language?: string;
-  onSubmit?: (code: string) => void;
+  onSubmit?: (code: string, language: EditorLanguage) => void;
 }
 
 type OutputLineType = "log" | "warn" | "error" | "result" | "meta";
+type EditorLanguage = "javascript" | "python";
 
 interface OutputLine {
   type: OutputLineType;
@@ -50,6 +51,161 @@ const RUNNER_PANEL_DEFAULT_HEIGHT = 320;
 const RUNNER_PANEL_MAX_HEIGHT = 520;
 const PYTHON_RUN_ENDPOINT = "/api/v1/code-execution/execute";
 
+interface SnippetDefinition {
+  label: string;
+  insertText: string;
+  detail: string;
+  documentation: string;
+}
+
+const EDITOR_LANGUAGE_OPTIONS: Array<{ value: EditorLanguage; label: string }> = [
+  { value: "javascript", label: "JavaScript" },
+  { value: "python", label: "Python" },
+];
+
+const DEFAULT_EDITOR_TEMPLATES: Record<EditorLanguage, string> = {
+  javascript: ["function solve(nums, target) {", "  ", "}"].join("\n"),
+  python: ["def solve(nums, target):", "    pass"].join("\n"),
+};
+
+const JAVASCRIPT_SNIPPETS: SnippetDefinition[] = [
+  {
+    label: "fn",
+    insertText: "function ${1:name}(${2:args}) {\n\t$0\n}",
+    detail: "function 声明",
+    documentation: "插入一个 JavaScript 函数模板。",
+  },
+  {
+    label: "forof",
+    insertText: "for (const ${1:item} of ${2:items}) {\n\t$0\n}",
+    detail: "for...of 循环",
+    documentation: "遍历可迭代对象。",
+  },
+  {
+    label: "fori",
+    insertText: "for (let ${1:i} = 0; ${1:i} < ${2:array}.length; ${1:i}++) {\n\t$0\n}",
+    detail: "索引 for 循环",
+    documentation: "按索引遍历数组。",
+  },
+  {
+    label: "try",
+    insertText: "try {\n\t$0\n} catch (error) {\n\tconsole.error(error);\n}",
+    detail: "try/catch",
+    documentation: "插入错误处理模板。",
+  },
+  {
+    label: "log",
+    insertText: "console.log(${1:value});",
+    detail: "输出日志",
+    documentation: "插入 console.log 调试语句。",
+  },
+  {
+    label: "map",
+    insertText: "${1:array}.map((${2:item}) => {\n\treturn ${0:item};\n});",
+    detail: "map 变换",
+    documentation: "插入数组 map 模板。",
+  },
+  {
+    label: "filter",
+    insertText: "${1:array}.filter((${2:item}) => {\n\treturn ${0:true};\n});",
+    detail: "filter 过滤",
+    documentation: "插入数组 filter 模板。",
+  },
+  {
+    label: "reduce",
+    insertText: "${1:array}.reduce((${2:acc}, ${3:item}) => {\n\treturn ${0:acc};\n}, ${4:initialValue});",
+    detail: "reduce 累加",
+    documentation: "插入数组 reduce 模板。",
+  },
+];
+
+const PYTHON_SNIPPETS: SnippetDefinition[] = [
+  {
+    label: "def",
+    insertText: "def ${1:name}(${2:args}):\n    $0",
+    detail: "函数定义",
+    documentation: "插入一个 Python 函数模板。",
+  },
+  {
+    label: "for",
+    insertText: "for ${1:item} in ${2:items}:\n    $0",
+    detail: "for 循环",
+    documentation: "遍历可迭代对象。",
+  },
+  {
+    label: "fori",
+    insertText: "for ${1:i} in range(${2:n}):\n    $0",
+    detail: "索引循环",
+    documentation: "按索引进行循环。",
+  },
+  {
+    label: "if",
+    insertText: "if ${1:condition}:\n    $0",
+    detail: "if 条件",
+    documentation: "插入 if 语句模板。",
+  },
+  {
+    label: "ifel",
+    insertText: "if ${1:condition}:\n    $0\nelse:\n    pass",
+    detail: "if/else 分支",
+    documentation: "插入 if/else 分支模板。",
+  },
+  {
+    label: "while",
+    insertText: "while ${1:condition}:\n    $0",
+    detail: "while 循环",
+    documentation: "插入 while 循环模板。",
+  },
+  {
+    label: "class",
+    insertText: "class ${1:ClassName}:\n    def __init__(self, ${2:args}):\n        $0",
+    detail: "类定义",
+    documentation: "插入 Python 类模板。",
+  },
+  {
+    label: "print",
+    insertText: "print(${1:value})",
+    detail: "打印输出",
+    documentation: "插入 print 调试语句。",
+  },
+  {
+    label: "input",
+    insertText: "${1:value} = input(${2:'Enter value: '})",
+    detail: "输入语句",
+    documentation: "插入 input 读取输入。",
+  },
+  {
+    label: "list",
+    insertText: "${1:items} = [${2}]",
+    detail: "列表字面量",
+    documentation: "插入列表初始化模板。",
+  },
+  {
+    label: "dict",
+    insertText: "${1:mapping} = {${2}}",
+    detail: "字典字面量",
+    documentation: "插入字典初始化模板。",
+  },
+  {
+    label: "try",
+    insertText: "try:\n    $0\nexcept Exception as err:\n    print(err)",
+    detail: "异常处理",
+    documentation: "插入 Python try/except 模板。",
+  },
+  {
+    label: "lambda",
+    insertText: "${1:func} = lambda ${2:args}: ${0:result}",
+    detail: "lambda 表达式",
+    documentation: "插入 lambda 表达式模板。",
+  },
+  {
+    label: "main",
+    insertText: "if __name__ == \"__main__\":\n    $0",
+    detail: "主入口",
+    documentation: "插入 Python 主入口模板。",
+  },
+];
+
 interface RemoteRunnerResponse {
   ok: boolean;
   logs: OutputLine[];
@@ -64,6 +220,41 @@ function isJavaScriptLanguage(language: string) {
 
 function isPythonLanguage(language: string) {
   return SUPPORTED_PYTHON_LANGUAGES.has(language.trim().toLowerCase());
+}
+
+function normalizeEditorLanguage(language: string | undefined): EditorLanguage {
+  return language && isPythonLanguage(language) ? "python" : "javascript";
+}
+
+function buildEditorStarterCode(language: EditorLanguage) {
+  return DEFAULT_EDITOR_TEMPLATES[language];
+}
+
+function createCompletionProvider(monaco: Monaco, snippets: SnippetDefinition[]) {
+  return {
+    provideCompletionItems(model: any, position: { lineNumber: number; column: number }) {
+      const word = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      };
+
+      return {
+        suggestions: snippets.map((snippet) => ({
+          label: snippet.label,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: snippet.insertText,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range,
+          detail: snippet.detail,
+          documentation: snippet.documentation,
+          filterText: snippet.label,
+        })),
+      };
+    },
+  };
 }
 
 function buildRunnerPlaceholder(language: string) {
@@ -193,10 +384,12 @@ export function ProgrammingQuestion({
   questionContent,
   initialCode = "",
   initialRunnerCode = "",
-  language = "javascript",
+  language: questionLanguage = "javascript",
   onSubmit,
 }: ProgrammingQuestionProps) {
-  const [code, setCode] = useState(initialCode);
+  const initialLanguage = normalizeEditorLanguage(questionLanguage);
+  const [editorLanguage, setEditorLanguage] = useState<EditorLanguage>(initialLanguage);
+  const [code, setCode] = useState(() => initialCode || buildEditorStarterCode(initialLanguage));
   const [runnerCode, setRunnerCode] = useState(initialRunnerCode);
   const [isRunning, setIsRunning] = useState(false);
   const [runDurationMs, setRunDurationMs] = useState<number | null>(null);
@@ -209,8 +402,19 @@ export function ProgrammingQuestion({
   const timeoutRef = useRef<number | null>(null);
   const remoteAbortControllerRef = useRef<AbortController | null>(null);
   const runnerPanelResizeStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const canRunOnline = isJavaScriptLanguage(language) || isPythonLanguage(language);
-  const runnerExamples = buildRunnerExample(language);
+  const completionProviderDisposablesRef = useRef<Array<{ dispose: () => void }>>([]);
+  const starterCodeRef = useRef<Record<EditorLanguage, string>>({
+    javascript:
+      initialLanguage === "javascript" && initialCode ? initialCode : buildEditorStarterCode("javascript"),
+    python: initialLanguage === "python" && initialCode ? initialCode : buildEditorStarterCode("python"),
+  });
+  const codeCacheRef = useRef<Record<EditorLanguage, string>>({
+    javascript:
+      initialLanguage === "javascript" && initialCode ? initialCode : buildEditorStarterCode("javascript"),
+    python: initialLanguage === "python" && initialCode ? initialCode : buildEditorStarterCode("python"),
+  });
+  const canRunOnline = isJavaScriptLanguage(editorLanguage) || isPythonLanguage(editorLanguage);
+  const runnerExamples = buildRunnerExample(editorLanguage);
 
   const cleanupRunner = () => {
     if (timeoutRef.current !== null) {
@@ -236,9 +440,28 @@ export function ProgrammingQuestion({
 
   useEffect(() => {
     return () => {
+      completionProviderDisposablesRef.current.forEach((disposable) => disposable.dispose());
+      completionProviderDisposablesRef.current = [];
       cleanupRunner();
     };
   }, []);
+
+  useEffect(() => {
+    const normalizedLanguage = normalizeEditorLanguage(questionLanguage);
+    starterCodeRef.current = {
+      javascript:
+        normalizedLanguage === "javascript" && initialCode ? initialCode : buildEditorStarterCode("javascript"),
+      python: normalizedLanguage === "python" && initialCode ? initialCode : buildEditorStarterCode("python"),
+    };
+    codeCacheRef.current = {
+      javascript:
+        normalizedLanguage === "javascript" && initialCode ? initialCode : buildEditorStarterCode("javascript"),
+      python: normalizedLanguage === "python" && initialCode ? initialCode : buildEditorStarterCode("python"),
+    };
+    setEditorLanguage(normalizedLanguage);
+    setCode(codeCacheRef.current[normalizedLanguage]);
+    setRunnerCode(initialRunnerCode);
+  }, [questionLanguage, initialCode, initialRunnerCode]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -271,7 +494,26 @@ export function ProgrammingQuestion({
   }, []);
 
   const handleSubmit = () => {
-    if (onSubmit) onSubmit(code);
+    if (onSubmit) onSubmit(code, editorLanguage);
+  };
+
+  const handleEditorMount: OnMount = (_editor, monaco) => {
+    completionProviderDisposablesRef.current.forEach((disposable) => disposable.dispose());
+    completionProviderDisposablesRef.current = [
+      monaco.languages.registerCompletionItemProvider(
+        "javascript",
+        createCompletionProvider(monaco, JAVASCRIPT_SNIPPETS),
+      ),
+      monaco.languages.registerCompletionItemProvider("python", createCompletionProvider(monaco, PYTHON_SNIPPETS)),
+    ];
+  };
+
+  const handleEditorLanguageChange = (nextLanguage: EditorLanguage) => {
+    codeCacheRef.current[editorLanguage] = code;
+    setEditorLanguage(nextLanguage);
+    const nextCode = codeCacheRef.current[nextLanguage] || starterCodeRef.current[nextLanguage] || buildEditorStarterCode(nextLanguage);
+    codeCacheRef.current[nextLanguage] = nextCode;
+    setCode(nextCode);
   };
 
   const runPythonRemotely = async () => {
@@ -350,13 +592,13 @@ export function ProgrammingQuestion({
 
     if (!canRunOnline) {
       setRunDurationMs(null);
-      setOutputLines([{ type: "error", text: `暂不支持 ${language} 在线运行，目前先支持 JavaScript 和 Python。` }]);
+      setOutputLines([{ type: "error", text: `暂不支持 ${editorLanguage} 在线运行，目前先支持 JavaScript 和 Python。` }]);
       return;
     }
 
     cleanupRunner();
 
-    if (isPythonLanguage(language)) {
+    if (isPythonLanguage(editorLanguage)) {
       void runPythonRemotely();
       return;
     }
@@ -473,7 +715,24 @@ export function ProgrammingQuestion({
       {/* Right side: Code Editor */}
       <div className="w-full md:w-1/2 flex flex-col h-full min-h-0 bg-[#1e1e1e] relative z-20">
         <div className="flex items-center justify-between p-3 pl-5 border-b border-white/10 shrink-0 bg-[#252526]">
-          <span className="text-xs font-semibold text-muted-foreground  tracking-widest">{language}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground tracking-widest">{editorLanguage}</span>
+            <label className="sr-only" htmlFor="programming-language-select">
+              选择编辑器语言
+            </label>
+            <select
+              id="programming-language-select"
+              value={editorLanguage}
+              onChange={(event) => handleEditorLanguageChange(event.target.value as EditorLanguage)}
+              className="h-8 rounded-md border border-white/10 bg-white/10 px-2 text-xs font-medium text-white outline-none transition-colors hover:bg-white/15 focus:border-white/25"
+            >
+              {EDITOR_LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-zinc-900 text-white">
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex gap-3">
             <Button
               variant="secondary"
@@ -494,10 +753,15 @@ export function ProgrammingQuestion({
         <div className="flex-1 min-h-0 relative bg-[#1e1e1e]">
           <Editor
             height="100%"
-            language={language}
+            language={editorLanguage}
             theme="vs-dark"
             value={code}
-            onChange={(val) => setCode(val || "")}
+            onChange={(val) => {
+              const nextCode = val || "";
+              setCode(nextCode);
+              codeCacheRef.current[editorLanguage] = nextCode;
+            }}
+            onMount={handleEditorMount}
             options={{
               minimap: { enabled: true, scale: 0.75 },
               fontSize: 14,
@@ -558,7 +822,7 @@ export function ProgrammingQuestion({
                   <Textarea
                     value={runnerCode}
                     onChange={(event) => setRunnerCode(event.target.value)}
-                    placeholder={buildRunnerPlaceholder(language)}
+                    placeholder={buildRunnerPlaceholder(editorLanguage)}
                     className="min-h-24 resize-y border-white/10 bg-white/5 text-sm text-slate-100 placeholder:text-muted-foreground font-mono focus-visible:border-primary/60 focus-visible:ring-primary/20"
                     spellCheck={false}
                   />

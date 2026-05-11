@@ -861,9 +861,10 @@ function renderQuestionCard(
           language={language}
           initialCode={buildStarterCode(question.reference_code, language)}
           initialRunnerCode={buildRunnerCode(question, language)}
-          onSubmit={(code) =>
+          onSubmit={(code, editorLanguage) =>
             onSubmitQuestion(question, code, {
-              language,
+              language: editorLanguage,
+              detected_language: language,
             })
           }
         />
