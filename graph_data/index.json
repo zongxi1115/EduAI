@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "description": "高等数学、Python、民法、大学物理、线性代数、概率论与数理统计、数据结构、大学国文以及人工智能基础课程群的多层次知识图谱索引。",
+  "datasets": [
+    {
+      "id": "high_math",
+      "title": "高等数学",
+      "file": "high_math_graph.json",
+      "entry_points": [
+        "函数、极限与连续"
+      ]
+    },
+    {
+      "id": "python",
+      "title": "Python",
+      "file": "python_graph.json",
+      "entry_points": [
+        "运行环境与基础语法"
+      ]
+    },
+    {
+      "id": "civil_law",
+      "title": "民法",
+      "file": "civil_law_graph.json",
+      "entry_points": [
+        "民法基础与总论"
+      ]
+    },
+    {
+      "id": "university_physics",
+      "title": "大学物理",
+      "file": "university_physics_graph.json",
+      "entry_points": [
+        "经典力学"
+      ]
+    },
+    {
+      "id": "linear_algebra",
+      "title": "线性代数",
+      "file": "linear_algebra_graph.json",
+      "entry_points": [
+        "向量、矩阵与线性方程组"
+      ]
+    },
+    {
+      "id": "probability_statistics",
+      "title": "概率论与数理统计",
+      "file": "probability_statistics_graph.json",
+      "entry_points": [
+        "课程导学/先修"
+      ]
+    },
+    {
+      "id": "data_structures",
+      "title": "数据结构",
+      "file": "data_structures_graph.json",
+      "entry_points": [
+        "绪论"
+      ]
+    },
+    {
+      "id": "university_chinese",
+      "title": "大学国文",
+      "file": "university_chinese_graph.json",
+      "entry_points": [
+        "课程导论与两条主线"
+      ]
+    },
+    {
+      "id": "ai_foundation_course_groups",
+      "title": "人工智能基础课程群",
+      "file": "ai_foundation_course_groups.json",
+      "entry_points": [
+        "数学基础课程群",
+        "编程基础课程群"
+      ]
+    }
+  ]
+}

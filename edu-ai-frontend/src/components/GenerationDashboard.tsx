@@ -463,6 +463,8 @@ export function GenerationDashboard({
       : topic
       ? `${topic} 正在生成课堂`
       : 'AI 课堂正在生成');
+  const doneHeadline = topic ? `${topic} 课堂已就绪` : 'AI 课堂已就绪';
+  const isDone = status === 'succeeded' || effectiveGlobalPhase === 'done';
 
   useEffect(() => {
     if (effectiveGlobalPhase !== 'outline_seq') {
@@ -493,7 +495,20 @@ export function GenerationDashboard({
           <div className="w-8 h-8 flex items-center justify-center bg-zinc-950 text-white rounded-[8px] shadow-sm">
             <Sparkles className="w-4 h-4" />
           </div>
-          <span className="font-bold tracking-tight text-sm text-zinc-900 truncate">{headline}</span>
+          <div className="overflow-hidden">
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={isDone ? 'done' : 'loading'}
+                initial={{ y: '100%', opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: '-100%', opacity: 0 }}
+                transition={{ duration: 0.45, ease: [0.25, 0.46, 0.45, 0.94] }}
+                className="font-bold tracking-tight text-sm text-zinc-900 truncate block"
+              >
+                {isDone ? doneHeadline : headline}
+              </motion.span>
+            </AnimatePresence>
+          </div>
         </div>
       </nav>
 
@@ -688,7 +703,7 @@ function SlideBlock({ slide, title }: { slide: SlideState; title: string }) {
                             ))}
                           </div>
                         ) : (
-                          <span className="text-[10px] text-zinc-500">已可以进入正式课堂播放</span>
+                          <span className="text-[10px] text-zinc-500">即将自动进入课堂播放…</span>
                         )}
                       </div>
                     </div>

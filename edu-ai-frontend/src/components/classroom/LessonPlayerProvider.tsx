@@ -15,6 +15,7 @@ export interface LessonReveal {
   narration: string;
   on_slide?: string | null;
   audio_src?: string | null;
+  pause?: boolean;
 }
 
 export interface LessonQuizPayload {
@@ -692,6 +693,14 @@ export function LessonPlayerProvider({
       }
     }
 
+    // Pause point: if the current reveal has pause=true, stop and let the student
+    // observe the slide content manually until they choose to continue.
+    const currentReveal = page.reveals[currentRevealIndex];
+    if (currentReveal?.pause) {
+      setIsPlaying(false);
+      return;
+    }
+
     if (currentRevealIndex < page.reveals.length - 1) {
       syncStageToReveal(1);
 
@@ -1096,6 +1105,12 @@ export function LessonPlayerProvider({
       return;
     }
 
+    // If we are paused at a pause point, skip the current reveal and advance
+    if (phase === "narrating" && !activeMedia && currentReveal?.pause) {
+      advanceAfterReveal({ skipQuizCheck: false });
+      return;
+    }
+
     if (activeMedia) {
       setActiveMedia({
         ...activeMedia,
@@ -1109,7 +1124,9 @@ export function LessonPlayerProvider({
     });
   }, [
     activeMedia,
+    advanceAfterReveal,
     currentPageIndex,
+    currentReveal,
     currentRevealIndex,
     currentSegmentElapsedMs,
     hasStarted,

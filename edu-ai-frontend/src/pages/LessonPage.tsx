@@ -352,6 +352,7 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
     currentPage,
     pages,
     currentPageIndex,
+    currentReveal,
     currentTheme,
     hasStarted,
     isPlaying,
@@ -823,9 +824,31 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
               </div>
             )}
 
+            {/* 停顿点提示层 */}
+            {!isPlaying && hasStarted && !isEnded && phase === "narrating" && currentReveal?.pause && (
+              <div
+                className="absolute inset-0 z-[85] flex items-center justify-center pointer-events-auto cursor-pointer"
+                onClick={() => togglePlayback()}
+              >
+                <div className="rounded-2xl bg-black/50 backdrop-blur-md px-8 py-5 text-white shadow-2xl flex flex-col items-center gap-2 animate-in fade-in zoom-in-95 duration-300">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
+                    <Play className="w-7 h-7 ml-1" />
+                  </div>
+                  <span className="text-sm font-medium tracking-wide">点击继续</span>
+                </div>
+              </div>
+            )}
+
             {/* 顶部的 IFrame 画布 */}
             <div
-              className="relative aspect-[16/9] w-full bg-slate-950 flex-1 isolate overflow-hidden min-h-0"
+              className={cn(
+                "relative w-full bg-slate-950 isolate overflow-hidden",
+                isFullscreen
+                  ? "flex-1 min-h-0"
+                  : isTheater
+                    ? "h-[clamp(420px,68vh,900px)] min-h-[420px]"
+                    : "h-[clamp(360px,58vh,780px)] min-h-[360px] lg:h-[clamp(440px,64vh,860px)] lg:min-h-[440px]"
+              )}
               onDoubleClick={() => {
                 togglePlayback();
                 triggerOsd(

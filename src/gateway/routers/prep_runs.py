@@ -33,6 +33,7 @@ from ..schemas.prep_runs import (
 )
 from ..services.classroom import build_classroom_request_from_prep_view
 from ..services.classroom_tasks import ClassroomTaskRegistry
+from ..services.classroom_tasks import find_existing_run_for_prep_run
 from ..services.learner_models import LearnerModelService
 from ..services.prep_runs import (
     build_artifacts_response,
@@ -106,6 +107,16 @@ def _build_classroom_links(run_id: str) -> ClassroomTaskLinks:
         status=base,
         events=f"{base}/events",
         result=f"{base}/result",
+    )
+
+
+def _build_classroom_task_created_response(view: dict[str, Any]) -> ClassroomTaskCreatedResponse:
+    return ClassroomTaskCreatedResponse(
+        run_id=view["run_id"],
+        status=view["status"],
+        created_at=str(view.get("created_at") or now_iso()),
+        output_dir=view["output_dir"],
+        links=_build_classroom_links(view["run_id"]),
     )
 
 
@@ -220,6 +231,10 @@ def create_classroom_from_prep_run(
     ),
 ) -> ClassroomTaskCreatedResponse:
     """Create a classroom task by reusing the outputs of a completed prep run."""
+    existing_view = find_existing_run_for_prep_run(classroom_registry, run_id)
+    if existing_view is not None:
+        return _build_classroom_task_created_response(existing_view)
+
     prep_view = load_run_view(registry, settings, run_id)
     classroom_request = build_classroom_request_from_prep_view(
         prep_view,
@@ -233,6 +248,29 @@ def create_classroom_from_prep_run(
         output_dir=str(session.output_dir),
         links=_build_classroom_links(session.run_id),
     )
+
+
+@router.get(
+    "/{run_id}/classroom",
+    response_model=ClassroomTaskCreatedResponse,
+    summary="查询课前任务是否已有对应课中任务",
+    description=(
+        "如果该课前准备任务已经创建过对应的 AI 课堂任务，则返回已有任务的基础信息；"
+        "否则返回 404，前端可据此决定是否继续创建。"
+    ),
+    response_description="已存在的课中任务基础信息。",
+)
+def get_existing_classroom_for_prep_run(
+    classroom_registry: ClassroomTaskRegistryDep,
+    run_id: str = ApiPath(description="课前准备任务的唯一标识符。"),
+) -> ClassroomTaskCreatedResponse:
+    existing_view = find_existing_run_for_prep_run(classroom_registry, run_id)
+    if existing_view is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No classroom task is linked to this prep run yet.",
+        )
+    return _build_classroom_task_created_response(existing_view)
 
 
 @router.delete(

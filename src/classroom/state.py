@@ -24,6 +24,7 @@ class PageBlueprint(TypedDict):
 class Reveal(TypedDict):
     narration: str
     on_slide: str | None
+    pause: bool
 
 
 class Quiz(TypedDict):

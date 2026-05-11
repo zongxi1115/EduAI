@@ -19,6 +19,7 @@ import {
   Package,
   Play,
   Target,
+  User,
   X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,6 +27,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "@/components/ui/markdown";
+import { cn } from "@/lib/utils";
 import {
   parsePracticeQuestionsPayload,
   PracticeQuestionWorkspace,
@@ -130,6 +132,48 @@ interface StudyWorkspaceData {
   goalsProgress: number;
   checklistProgress: number;
   usingMock: boolean;
+}
+
+type AbilityBand = "evidence_needed" | "needs_support" | "developing" | "proficient" | "advanced";
+
+interface LearnerModelSnapshot {
+  learner_id: string;
+  overall_mastery: number;
+  overall_confidence: number;
+  overall_band: AbilityBand;
+  total_events: number;
+  total_sessions: number;
+  strong_skills: string[];
+  weak_skills: string[];
+  key_misconceptions: string[];
+  recommended_focus: string[];
+  prompt_profile: string;
+  evaluation_summary: string;
+  updated_at: string;
+}
+
+interface SkillJudgment {
+  skill_id: string;
+  display_name: string;
+  score: number;
+  observation: string;
+}
+
+interface LearningEvidenceEvent {
+  event_id: string;
+  learner_id: string;
+  question_id: string;
+  question_type: string;
+  correctness: string;
+  score: number;
+  skill_judgments: SkillJudgment[];
+  learner_observations: string[];
+  timestamp: string;
+}
+
+interface LearnerModelData {
+  snapshot: LearnerModelSnapshot;
+  recent_events: LearningEvidenceEvent[];
 }
 
 interface WorkspaceTab {
@@ -818,6 +862,8 @@ export default function StudyArea() {
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [isPreparingClassroom, setIsPreparingClassroom] = useState(false);
   const [prepareClassroomError, setPrepareClassroomError] = useState<string | null>(null);
+  const [learnerModel, setLearnerModel] = useState<LearnerModelData | null>(null);
+  const [isLoadingLearnerModel, setIsLoadingLearnerModel] = useState(false);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>(DEFAULT_STICKY_TABS);
   const [activeTabId, setActiveTabId] = useState<string>(WORKSPACE_TAB_ID);
 
@@ -948,6 +994,36 @@ export default function StudyArea() {
       controller.abort();
     };
   }, [runId]);
+
+  useEffect(() => {
+    if (!workspaceData.learnerId || workspaceData.usingMock) {
+      setLearnerModel(null);
+      return;
+    }
+    const controller = new AbortController();
+    let cancelled = false;
+    setIsLoadingLearnerModel(true);
+    fetch(`/api/v1/learner-models/${encodeURIComponent(workspaceData.learnerId)}`, {
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        return res.json();
+      })
+      .then((data: LearnerModelData) => {
+        if (!cancelled) setLearnerModel(data);
+      })
+      .catch(() => {
+        if (!cancelled) setLearnerModel(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingLearnerModel(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [workspaceData.learnerId, workspaceData.usingMock]);
 
   const progressWidgets = useMemo(
     () => [
@@ -1099,6 +1175,39 @@ export default function StudyArea() {
     setIsPreparingClassroom(true);
 
     try {
+      const classroomLookupResponse = await fetch(
+        `/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`,
+        {
+          headers: { Accept: "application/json" },
+        }
+      );
+
+      if (classroomLookupResponse.ok) {
+        const existingPayload = (await classroomLookupResponse.json()) as { run_id?: string };
+        if (existingPayload.run_id) {
+          navigate(`/lesson/${encodeURIComponent(existingPayload.run_id)}`);
+          return;
+        }
+      } else if (classroomLookupResponse.status !== 404) {
+        let message = `检查已有课中任务失败（${classroomLookupResponse.status}）`;
+        try {
+          const payload = (await classroomLookupResponse.json()) as {
+            detail?: string | Array<{ msg?: string }>;
+          };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            const firstMessage = payload.detail[0]?.msg;
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage;
+            }
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
+      }
+
       const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`, {
         method: "POST",
         headers: { Accept: "application/json" },
@@ -1352,6 +1461,11 @@ export default function StudyArea() {
                       <Activity className="w-4 h-4 text-primary" /> 学习进度
                     </>
                   )}
+                  {activePanel === "profile" && (
+                    <>
+                      <User className="w-4 h-4 text-primary" /> 学生画像
+                    </>
+                  )}
                 </span>
                 <Button
                   variant="ghost"
@@ -1449,6 +1563,163 @@ export default function StudyArea() {
                     </Card>
                   </div>
                 )}
+
+                {activePanel === "profile" && (
+                  <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200 pb-4">
+                    {isLoadingLearnerModel && (
+                      <div className="flex items-center justify-center py-8 text-muted-foreground">
+                        <LoaderCircle className="w-5 h-5 animate-spin mr-2" /> 加载学生画像...
+                      </div>
+                    )}
+                    {!isLoadingLearnerModel && !learnerModel && (
+                      <div className="text-sm text-muted-foreground p-4 text-center">
+                        {workspaceData.learnerId
+                          ? "暂无学情数据，完成练习后画像将自动更新。"
+                          : "当前未关联学习者，无法显示画像。"}
+                      </div>
+                    )}
+                    {learnerModel && (
+                      <>
+                        {/* Overall Band */}
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0",
+                            learnerModel.snapshot.overall_band === "advanced" && "bg-violet-500",
+                            learnerModel.snapshot.overall_band === "proficient" && "bg-emerald-500",
+                            learnerModel.snapshot.overall_band === "developing" && "bg-amber-500",
+                            learnerModel.snapshot.overall_band === "needs_support" && "bg-orange-500",
+                            learnerModel.snapshot.overall_band === "evidence_needed" && "bg-slate-400",
+                          )}>
+                            {learnerModel.snapshot.overall_mastery != null
+                              ? Math.round(learnerModel.snapshot.overall_mastery * 100)
+                              : "?"}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-foreground">
+                              {({ advanced: "优秀", proficient: "良好", developing: "发展中", needs_support: "需支持", evidence_needed: "待评估" } as Record<string, string>)[learnerModel.snapshot.overall_band] ?? learnerModel.snapshot.overall_band}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              掌握度 {Math.round(learnerModel.snapshot.overall_mastery * 100)}% · 可信度 {Math.round(learnerModel.snapshot.overall_confidence * 100)}%
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Mastery Bar */}
+                        <div>
+                          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
+                            <span>整体掌握度</span>
+                            <span>{Math.round(learnerModel.snapshot.overall_mastery * 100)}%</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all duration-500"
+                              style={{ width: `${Math.round(learnerModel.snapshot.overall_mastery * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Evaluation Summary */}
+                        {learnerModel.snapshot.evaluation_summary && (
+                          <div className="rounded-lg bg-muted/50 border border-border p-3">
+                            <p className="text-xs text-muted-foreground mb-1 font-medium">整体评价</p>
+                            <p className="text-sm text-foreground leading-relaxed">{learnerModel.snapshot.evaluation_summary}</p>
+                          </div>
+                        )}
+
+                        {/* Strong / Weak Skills */}
+                        {learnerModel.snapshot.strong_skills.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5 font-medium">优势技能</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {learnerModel.snapshot.strong_skills.map((s, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-xs border border-emerald-100">{s}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {learnerModel.snapshot.weak_skills.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5 font-medium">薄弱技能</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {learnerModel.snapshot.weak_skills.map((s, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-xs border border-amber-100">{s}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Misconceptions */}
+                        {learnerModel.snapshot.key_misconceptions.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5 font-medium">常见误区</p>
+                            <ul className="space-y-1">
+                              {learnerModel.snapshot.key_misconceptions.map((m, i) => (
+                                <li key={i} className="text-xs text-rose-600 flex items-start gap-1.5">
+                                  <span className="shrink-0 mt-0.5">•</span>
+                                  <span>{m}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Recommended Focus */}
+                        {learnerModel.snapshot.recommended_focus.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5 font-medium">建议关注</p>
+                            <ul className="space-y-1">
+                              {learnerModel.snapshot.recommended_focus.map((f, i) => (
+                                <li key={i} className="text-xs text-indigo-600 flex items-start gap-1.5">
+                                  <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
+                                  <span>{f}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Stats */}
+                        <div className="flex gap-4 text-xs text-muted-foreground">
+                          <span>累计事件 <strong className="text-foreground">{learnerModel.snapshot.total_events}</strong></span>
+                          <span>会话数 <strong className="text-foreground">{learnerModel.snapshot.total_sessions}</strong></span>
+                        </div>
+
+                        {/* Recent Events Timeline */}
+                        {learnerModel.recent_events.length > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-2 font-medium">近期学习记录</p>
+                            <div className="space-y-2">
+                              {learnerModel.recent_events.slice(0, 8).map((evt) => (
+                                <div key={evt.event_id} className="rounded-lg border border-border bg-card p-2.5">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className={cn(
+                                      "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                                      evt.correctness === "correct" && "bg-emerald-50 text-emerald-700",
+                                      evt.correctness === "partial" && "bg-amber-50 text-amber-700",
+                                      evt.correctness === "incorrect" && "bg-rose-50 text-rose-700",
+                                      !["correct", "partial", "incorrect"].includes(evt.correctness) && "bg-muted text-muted-foreground",
+                                    )}>
+                                      {evt.correctness === "correct" ? "正确" : evt.correctness === "partial" ? "部分正确" : evt.correctness === "incorrect" ? "错误" : evt.correctness}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">{evt.score}分</span>
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {evt.question_type} · {new Date(evt.timestamp).toLocaleDateString()}
+                                  </div>
+                                  {evt.learner_observations.length > 0 && (
+                                    <p className="text-[11px] text-foreground mt-1 leading-relaxed line-clamp-2">
+                                      {evt.learner_observations[0]}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </div>
           </div>
@@ -1493,6 +1764,25 @@ export default function StudyArea() {
             </Tooltip>
 
             <div className="w-8 h-[1px] bg-border my-1 rounded-full" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={activePanel === "profile" ? "secondary" : "ghost"}
+                  size="icon"
+                  className={`w-10 h-10 rounded-xl ${activePanel === "profile"
+                    ? "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "text-muted-foreground"
+                    }`}
+                  onClick={() => togglePanel("profile")}
+                >
+                  <User className="w-5 h-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="font-medium">
+                学生画像
+              </TooltipContent>
+            </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>

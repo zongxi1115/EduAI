@@ -11,6 +11,7 @@ from .routers.assistant import router as assistant_router
 from .routers.classroom import router as classroom_router
 from .routers.code_execution import router as code_execution_router
 from .routers.health import router as health_router
+from .routers.knowledge_graphs import router as knowledge_graphs_router
 from .routers.learner_models import router as learner_models_router
 from .routers.prep_runs import router as prep_runs_router
 from .routers.practice_review import router as practice_review_router
@@ -53,6 +54,10 @@ OPENAPI_TAGS = [
     {
         "name": "学习者画像",
         "description": "用于记录学习事件、维护长期学情画像，并向后续教学流程回流。",
+    },
+    {
+        "name": "知识图谱",
+        "description": "用于返回图谱索引及其对应的课程知识图谱内容。",
     },
 ]
 
@@ -114,6 +119,7 @@ def create_app(
     app.include_router(classroom_router)
     app.include_router(code_execution_router)
     app.include_router(health_router)
+    app.include_router(knowledge_graphs_router)
     app.include_router(learner_models_router)
     app.include_router(prep_runs_router)
     app.include_router(practice_review_router)

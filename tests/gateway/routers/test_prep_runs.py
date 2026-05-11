@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import threading
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -23,6 +24,14 @@ class FakeClassroomSession:
     status: RunStatus = RunStatus.queued
     created_at: str = "2026-04-25T12:00:00+08:00"
     output_dir: Path | None = None
+    request: Any | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    current_node: str | None = None
+    latest_summary: str | None = None
+    final_result: dict[str, Any] | None = None
+    condition: threading.Condition = field(default_factory=threading.Condition)
 
 
 class FakeClassroomRegistry:
@@ -35,7 +44,16 @@ class FakeClassroomRegistry:
 
     def create_run(self, request) -> FakeClassroomSession:
         self.created_payload = request.model_dump(mode="json")
+        self.session.request = request
         return self.session
+
+    def get_session(self, run_id: str) -> FakeClassroomSession | None:
+        if run_id == self.session.run_id:
+            return self.session
+        return None
+
+    def list_session_ids(self) -> list[str]:
+        return [self.session.run_id] if self.session.request is not None else []
 
 
 def _make_settings(tmp_path: Path) -> Settings:
@@ -107,3 +125,46 @@ def test_create_classroom_from_prep_run_endpoint(tmp_path: Path, monkeypatch) ->
     assert classroom_registry.created_payload["source_prep_run_id"] == "prep_run_001"
     assert classroom_registry.created_payload["slide_prompt_file"] == "slide.creative.md"
     assert any("学案 Agent" in material for material in classroom_registry.created_payload["materials"])
+
+
+def test_get_existing_classroom_for_prep_run_returns_existing_session(tmp_path: Path) -> None:
+    app = create_app(settings=_make_settings(tmp_path), llm_client=DummyLLMClient())
+    classroom_registry = FakeClassroomRegistry(tmp_path)
+    classroom_registry.session.request = ClassroomRequestStub(source_prep_run_id="prep_run_001")
+    app.state.classroom_task_registry = classroom_registry
+
+    client = TestClient(app)
+    response = client.get("/api/v1/prep-runs/prep_run_001/classroom")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "classroom_run_123"
+    assert payload["links"]["result"] == "/api/v1/classroom/classroom_run_123/result"
+
+
+def test_create_classroom_from_prep_run_reuses_existing_session(tmp_path: Path, monkeypatch) -> None:
+    app = create_app(settings=_make_settings(tmp_path), llm_client=DummyLLMClient())
+    classroom_registry = FakeClassroomRegistry(tmp_path)
+    classroom_registry.session.request = ClassroomRequestStub(source_prep_run_id="prep_run_001")
+    app.state.classroom_task_registry = classroom_registry
+
+    monkeypatch.setattr(
+        "gateway.routers.prep_runs.load_run_view",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("load_run_view should not be called when classroom task already exists")),
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/v1/prep-runs/prep_run_001/classroom")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "classroom_run_123"
+    assert classroom_registry.created_payload is None
+
+
+class ClassroomRequestStub:
+    def __init__(self, *, source_prep_run_id: str | None = None) -> None:
+        self.source_prep_run_id = source_prep_run_id
+
+    def model_dump(self, mode: str = "json") -> dict[str, Any]:
+        return {"source_prep_run_id": self.source_prep_run_id}

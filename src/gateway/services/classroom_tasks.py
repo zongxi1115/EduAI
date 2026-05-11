@@ -344,6 +344,51 @@ def load_run_view(registry: ClassroomTaskRegistry, run_id: str) -> dict[str, Any
     return build_run_view_from_disk(registry, run_id)
 
 
+def find_existing_run_for_prep_run(
+    registry: ClassroomTaskRegistry,
+    source_prep_run_id: str,
+) -> dict[str, Any] | None:
+    normalized_run_id = source_prep_run_id.strip()
+    if not normalized_run_id:
+        return None
+
+    for run_id in registry.list_session_ids():
+        session = registry.get_session(run_id)
+        if session is None:
+            continue
+        if session.request.source_prep_run_id == normalized_run_id:
+            return build_run_view_from_session(session)
+
+    if not registry.output_root.is_dir():
+        return None
+
+    candidate_views: list[dict[str, Any]] = []
+    for run_dir in registry.output_root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        request_payload = load_json_file(run_dir / REQUEST_FILENAME)
+        if not isinstance(request_payload, dict):
+            continue
+        if str(request_payload.get("source_prep_run_id") or "").strip() != normalized_run_id:
+            continue
+        try:
+            candidate_views.append(build_run_view_from_disk(registry, run_dir.name))
+        except HTTPException:
+            continue
+
+    if not candidate_views:
+        return None
+
+    candidate_views.sort(
+        key=lambda view: (
+            str(view.get("created_at") or ""),
+            str(view.get("run_id") or ""),
+        ),
+        reverse=True,
+    )
+    return candidate_views[0]
+
+
 def load_stored_events(registry: ClassroomTaskRegistry, run_id: str) -> list[dict[str, Any]]:
     run_dir = registry.resolve_run_dir(run_id)
     return load_jsonl_file(run_dir / EVENTS_FILENAME)

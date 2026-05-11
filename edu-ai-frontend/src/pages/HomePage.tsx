@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
 import { useState, useEffect, useLayoutEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock, Network } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -293,7 +293,16 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
-      <div className="absolute top-6 right-6 z-50">
+      <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate("/graphs/ai_foundation_course_groups")}
+          className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm gap-1.5 h-9 px-3"
+        >
+          <Network className="w-4 h-4" />
+          <span className="text-sm font-medium">课程图谱</span>
+        </Button>
         <div className="rounded-xl border border-zinc-200/50 bg-white/80 shadow-sm backdrop-blur-md dark:border-zinc-800/50 dark:bg-zinc-950/80">
           <ThemeToggle />
         </div>
