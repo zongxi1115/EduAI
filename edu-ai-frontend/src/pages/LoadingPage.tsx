@@ -62,6 +62,8 @@ export default function LoadingPage() {
   const [fileContent, setFileContent] = useState<string>('');
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [showArtifactPanel, setShowArtifactPanel] = useState(false);
+  const [isStartingClassroom, setIsStartingClassroom] = useState(false);
+  const [startClassroomError, setStartClassroomError] = useState<string | null>(null);
 
   const [isComplete, setIsComplete] = useState(false);
   const [showFocusMode, setShowFocusMode] = useState(false);
@@ -308,6 +310,90 @@ export default function LoadingPage() {
     }
   };
 
+  const handleEnterClassroomPreparation = async () => {
+    if (!id || isStartingClassroom) {
+      return;
+    }
+
+    setStartClassroomError(null);
+    setIsStartingClassroom(true);
+
+    try {
+      const classroomLookupResponse = await fetch(
+        `/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`,
+        { headers: { Accept: "application/json" } }
+      );
+
+      if (classroomLookupResponse.ok) {
+        const existingPayload = (await classroomLookupResponse.json()) as { run_id?: string };
+        if (existingPayload.run_id) {
+          navigate(`/lesson/${encodeURIComponent(existingPayload.run_id)}`, {
+            state: { classroomLaunchMode: "existing" },
+          });
+          return;
+        }
+      } else if (classroomLookupResponse.status !== 404) {
+        let message = `检查已有课中任务失败（${classroomLookupResponse.status}）`;
+        try {
+          const payload = (await classroomLookupResponse.json()) as {
+            detail?: string | Array<{ msg?: string }>;
+          };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            const firstMessage = payload.detail[0]?.msg;
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage;
+            }
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
+      }
+
+      const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) {
+        let message = `准备课中失败（${response.status}）`;
+        try {
+          const payload = (await response.json()) as {
+            detail?: string | Array<{ msg?: string }>;
+          };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            const firstMessage = payload.detail[0]?.msg;
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage;
+            }
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as { run_id?: string };
+      if (!payload.run_id) {
+        throw new Error("后端未返回课中任务 ID，暂时无法进入课件文稿准备页。");
+      }
+
+      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`, {
+        state: { classroomLaunchMode: "new" },
+      });
+    } catch (error) {
+      setStartClassroomError(
+        error instanceof Error ? error.message : "进入课件文稿准备失败，请稍后重试。"
+      );
+    } finally {
+      setIsStartingClassroom(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-[#09f]/20 transition-colors duration-1000 relative">
 
@@ -403,15 +489,19 @@ export default function LoadingPage() {
                 </p>
                 <button
                   onClick={() => {
-                    if (id) {
-                      navigate(`/study/${id}?tab=prep-classroom`);
-                    }
+                    void handleEnterClassroomPreparation();
                   }}
-                  className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5"
+                  disabled={isStartingClassroom}
+                  className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] disabled:bg-[#09f]/60 disabled:hover:bg-[#09f]/60 text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-5 h-5" />
-                  进入课前准备
+                  {isStartingClassroom ? "正在进入课件文稿准备..." : "进入课件文稿准备"}
                 </button>
+                {startClassroomError && (
+                  <p className="mt-4 max-w-sm text-sm text-rose-500">
+                    {startClassroomError}
+                  </p>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

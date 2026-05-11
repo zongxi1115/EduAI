@@ -1185,7 +1185,9 @@ export default function StudyArea() {
       if (classroomLookupResponse.ok) {
         const existingPayload = (await classroomLookupResponse.json()) as { run_id?: string };
         if (existingPayload.run_id) {
-          navigate(`/lesson/${encodeURIComponent(existingPayload.run_id)}`);
+          navigate(`/lesson/${encodeURIComponent(existingPayload.run_id)}`, {
+            state: { classroomLaunchMode: "existing" },
+          });
           return;
         }
       } else if (classroomLookupResponse.status !== 404) {
@@ -1236,7 +1238,9 @@ export default function StudyArea() {
         throw new Error("后端未返回课中任务 ID，暂时无法进入课中播放页。");
       }
 
-      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`);
+      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`, {
+        state: { classroomLaunchMode: "new" },
+      });
     } catch (error) {
       setPrepareClassroomError(
         error instanceof Error ? error.message : "准备课中失败，请稍后重试。"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
@@ -68,6 +68,24 @@ SWAGGER_UI_PARAMETERS = {
     "deepLinking": True,
     "filter": True,
 }
+
+SCALAR_HTML = """\
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <title>Edu API Docs</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script
+      id="api-reference"
+      data-url="/api/openapi.json"
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference">
+    </script>
+  </body>
+</html>
+"""
 
 
 def create_app(
@@ -138,5 +156,15 @@ def create_app(
     def redirect_openapi() -> RedirectResponse:
         """将旧的 OpenAPI 地址重定向到新的命名空间路径。"""
         return RedirectResponse(url=app.openapi_url or "/api/openapi.json")
+
+    @app.get("/api/scalar", include_in_schema=False)
+    def scalar_docs() -> HTMLResponse:
+        """提供 Scalar API 文档页面。"""
+        return HTMLResponse(SCALAR_HTML)
+
+    @app.get("/scalar", include_in_schema=False)
+    def redirect_scalar() -> RedirectResponse:
+        """将旧的 Scalar 地址重定向到新的命名空间路径。"""
+        return RedirectResponse(url="/api/scalar")
 
     return app

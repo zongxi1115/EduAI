@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowLeft,
@@ -54,6 +54,10 @@ type PageState =
   | { status: "pending" }
   | { status: "error"; message: string }
   | { status: "ready"; lesson: LessonResult };
+
+type LessonLaunchState = {
+  classroomLaunchMode?: "existing" | "new";
+};
 
 const CLASSROOM_STREAM_EVENTS = [
   "run_created",
@@ -1247,6 +1251,8 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
 
 export default function LessonPage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const launchState = (location.state as LessonLaunchState | null) ?? null;
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [progress, setProgress] = useState<ClassroomRunProgress>(() => buildInitialProgress());
   const [sourcePrepRunId, setSourcePrepRunId] = useState<string | null>(null);
@@ -1270,7 +1276,9 @@ export default function LessonPage() {
     const seenEventIndexes = new Set<number>();
 
     loadedResultRef.current = false;
-    setState({ status: "loading" });
+    setState(
+      launchState?.classroomLaunchMode === "new" ? { status: "pending" } : { status: "loading" }
+    );
     setProgress(buildInitialProgress());
     setSourcePrepRunId(null);
 
@@ -1471,10 +1479,10 @@ export default function LessonPage() {
         eventSource.close();
       }
     };
-  }, [id]);
+  }, [id, launchState?.classroomLaunchMode]);
 
   if (state.status !== "ready") {
-    if (state.status !== "error") {
+    if (state.status === "pending") {
       return (
         <GenerationDashboard
           topic={progress.topic}
@@ -1482,6 +1490,26 @@ export default function LessonPage() {
           summary={progress.summary}
           events={progress.events}
         />
+      );
+    }
+
+    if (state.status === "loading") {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6 text-slate-900">
+          <Card className="w-full max-w-xl border-slate-200 bg-white shadow-sm ring-1 ring-slate-200/50">
+            <CardContent className="flex items-center gap-4 px-6 py-6">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-600 ring-1 ring-sky-100">
+                <Sparkles className="h-5 w-5 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900">正在打开课堂内容</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  如果课件已经生成完成，我们会直接进入播放器。
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       );
     }
 
