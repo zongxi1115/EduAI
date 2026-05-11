@@ -10,6 +10,8 @@ from gateway.services.prep_runs import (
     relative_path,
     load_json_file,
     load_jsonl_file,
+    list_run_views,
+    _RUN_ID_RE,
 )
 from gateway.schemas.prep_runs import (
     RunLinks,
@@ -130,3 +132,70 @@ class TestRunStatus:
         assert RunStatus.succeeded.value == "succeeded"
         assert RunStatus.failed.value == "failed"
         assert RunStatus.unknown.value == "unknown"
+
+
+class TestRunIdPattern:
+    """Verify the regex that guards which disk directories are treated as run directories."""
+
+    def test_valid_run_id(self):
+        assert _RUN_ID_RE.match("20260416_103000_quadratic-functions")
+
+    def test_valid_run_id_minimal_slug(self):
+        assert _RUN_ID_RE.match("20260101_000000_a")
+
+    def test_invalid_no_timestamp(self):
+        assert not _RUN_ID_RE.match("quadratic-functions")
+
+    def test_invalid_partial_timestamp(self):
+        assert not _RUN_ID_RE.match("20260416_quadratic")
+
+    def test_invalid_only_timestamp(self):
+        # Missing slug part after second underscore
+        assert not _RUN_ID_RE.match("20260416_103000")
+
+    def test_invalid_non_numeric_date(self):
+        assert not _RUN_ID_RE.match("2026AB16_103000_slug")
+
+    def test_invalid_random_folder(self):
+        assert not _RUN_ID_RE.match("some-random-folder")
+
+    def test_invalid_dotgit(self):
+        assert not _RUN_ID_RE.match(".git")
+
+
+class TestListRunViewsFiltersIrrelevantDirs:
+    """list_run_views must ignore directories that do not match the run-ID naming pattern."""
+
+    def test_irrelevant_directories_are_excluded(self, tmp_path):
+        from unittest.mock import MagicMock
+        from edu_multi_agent.config import Settings
+
+        # Create directories: one valid run dir and two irrelevant dirs
+        valid_run = tmp_path / "20260416_103000_quadratic-functions"
+        valid_run.mkdir()
+        irrelevant1 = tmp_path / "some-random-folder"
+        irrelevant1.mkdir()
+        irrelevant2 = tmp_path / "classroom_outputs"
+        irrelevant2.mkdir()
+
+        settings = MagicMock(spec=Settings)
+        settings.output_root = tmp_path
+
+        registry = MagicMock()
+        registry.list_session_ids.return_value = []
+        registry.get_session.return_value = None
+
+        views = list_run_views(registry, settings)
+
+        # The valid run dir is loaded (with status=unknown because it has no files).
+        # The two irrelevant dirs must NOT appear in the results.
+        returned_ids = [v["run_id"] for v in views]
+        assert "some-random-folder" not in returned_ids
+        assert "classroom_outputs" not in returned_ids
+        # The valid run directory is the only one attempted
+        assert "20260416_103000_quadratic-functions" in returned_ids
+
+        # Confirm the irrelevant directory names were never sent to get_session
+        called_ids = [call.args[0] for call in registry.get_session.call_args_list]
+        assert "some-random-folder" not in called_ids
+        assert "classroom_outputs" not in called_ids
