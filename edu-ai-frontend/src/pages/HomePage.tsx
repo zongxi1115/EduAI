@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
-import { useState, useEffect, useLayoutEffect } from "react"
+import { useState, useEffect, useLayoutEffect, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock, Search, ArrowUpDown } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -39,6 +39,33 @@ interface PrepRun {
 
 interface CreatePrepRunResponse {
   run_id?: string
+}
+
+type HistoryStatusFilter = "all" | "running" | "succeeded" | "failed"
+type HistorySortOrder = "latest" | "earliest"
+
+const HISTORY_STATUS_FILTERS: Array<{ value: HistoryStatusFilter; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "running", label: "进行中" },
+  { value: "succeeded", label: "已完成" },
+  { value: "failed", label: "失败" },
+]
+
+function getHistoryStatusFilter(status: string): Exclude<HistoryStatusFilter, "all"> {
+  if (status === "queued" || status === "running") {
+    return "running"
+  }
+
+  if (status === "succeeded") {
+    return "succeeded"
+  }
+
+  return "failed"
+}
+
+function getCreatedAtValue(run: PrepRun) {
+  const timestamp = new Date(run.created_at).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
 }
 
 function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
@@ -88,6 +115,9 @@ export default function HomePage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [historyRuns, setHistoryRuns] = useState<PrepRun[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
+  const [historySearchQuery, setHistorySearchQuery] = useState("")
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<HistoryStatusFilter>("all")
+  const [historySortOrder, setHistorySortOrder] = useState<HistorySortOrder>("latest")
   const [runToDelete, setRunToDelete] = useState<string | null>(null)
 
   // Extra options
@@ -270,6 +300,34 @@ export default function HomePage() {
     void handleSearch()
   }
 
+  const filteredRuns = useMemo(() => {
+    const normalizedQuery = historySearchQuery.trim().toLowerCase()
+
+    return historyRuns
+      .filter((run) => {
+        const matchesQuery =
+          normalizedQuery.length === 0 ||
+          run.run_id.toLowerCase().includes(normalizedQuery) ||
+          (run.request?.learning_goal ?? "").toLowerCase().includes(normalizedQuery)
+
+        const matchesStatus =
+          historyStatusFilter === "all" || getHistoryStatusFilter(run.status) === historyStatusFilter
+
+        return matchesQuery && matchesStatus
+      })
+      .sort((left, right) => {
+        const leftValue = getCreatedAtValue(left)
+        const rightValue = getCreatedAtValue(right)
+        return historySortOrder === "latest" ? rightValue - leftValue : leftValue - rightValue
+      })
+  }, [historyRuns, historySearchQuery, historyStatusFilter, historySortOrder])
+
+  const clearHistoryFilters = () => {
+    setHistorySearchQuery("")
+    setHistoryStatusFilter("all")
+    setHistorySortOrder("latest")
+  }
+
   return (
     <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
       <div className="absolute top-6 right-6 z-50">
@@ -317,8 +375,56 @@ export default function HomePage() {
               </Button>
             </div>
 
+            <div className="border-b border-zinc-100/50 dark:border-zinc-800/50 px-3.5 py-3.5 space-y-3">
+              <div className="relative">
+                <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={historySearchQuery}
+                  onChange={(event) => setHistorySearchQuery(event.target.value)}
+                  placeholder="搜索 run_id 或学习目标"
+                  className="w-full h-9 rounded-xl border border-zinc-200/70 dark:border-zinc-800/70 bg-white/80 dark:bg-zinc-950/60 pl-9 pr-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 outline-none transition-colors focus:border-blue-400/70 dark:focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/10"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {HISTORY_STATUS_FILTERS.map((filter) => {
+                    const isActive = historyStatusFilter === filter.value
+
+                    return (
+                      <Badge
+                        key={filter.value}
+                        asChild
+                        variant={isActive ? "default" : "outline"}
+                        className={
+                          "h-7 rounded-full px-3 text-xs font-medium transition-all duration-200 " +
+                          (isActive
+                            ? "bg-zinc-900 text-white hover:bg-zinc-900 dark:bg-white dark:text-zinc-900 dark:hover:bg-white"
+                            : "cursor-pointer border-zinc-200/70 bg-white/70 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800/70 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100")
+                        }
+                      >
+                        <button type="button" onClick={() => setHistoryStatusFilter(filter.value)}>
+                          {filter.label}
+                        </button>
+                      </Badge>
+                    )
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setHistorySortOrder((previous) => (previous === "latest" ? "earliest" : "latest"))}
+                  className="h-7 rounded-full border-zinc-200/70 bg-white/70 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800/70 dark:bg-zinc-950/50 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5 mr-1.5" />
+                  {historySortOrder === "latest" ? "最新" : "最早"}
+                </Button>
+              </div>
+            </div>
+
             {/* Content list */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 custom-scrollbar">
               {isLoadingHistory ? (
                 <div className="flex flex-col items-center justify-center p-8 text-zinc-400 gap-3">
                   <LoaderCircle className="w-5 h-5 animate-spin" />
@@ -329,8 +435,21 @@ export default function HomePage() {
                   <History className="w-8 h-8 opacity-20" />
                   <span className="text-sm">暂无历史任务</span>
                 </div>
+              ) : filteredRuns.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 text-zinc-400 gap-3 h-40 text-center">
+                  <Search className="w-8 h-8 opacity-20" />
+                  <span className="text-sm text-zinc-500">没有找到匹配的任务</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={clearHistoryFilters}
+                    className="h-8 rounded-full border-zinc-200/70 bg-white/70 px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800/70 dark:bg-zinc-950/50 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    清除筛选
+                  </Button>
+                </div>
               ) : (
-                historyRuns.map((run) => (
+                filteredRuns.map((run) => (
                   <motion.div
                     initial={{ opacity: 0, y: 5 }}
                     animate="rest"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 import mimetypes
 from pathlib import Path
@@ -26,13 +27,19 @@ from .run_registry import RunRegistry, RunSession
 
 TERMINAL_EVENTS = {"workflow_completed", "workflow_failed"}
 AGENT_ORDER = {spec.agent_name: index for index, spec in enumerate(AGENT_SPECS)}
+logger = logging.getLogger(__name__)
 
 
 def load_json_file(path: Path) -> dict[str, Any] | None:
     """Load a JSON object from disk when the file exists."""
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        logger.warning("Skipping invalid JSON file %s: %s", path, exc)
+        return None
 
 
 def load_jsonl_file(path: Path) -> list[dict[str, Any]]:
@@ -41,11 +48,15 @@ def load_jsonl_file(path: Path) -> list[dict[str, Any]]:
         return []
 
     items: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
-        items.append(json.loads(line))
+        try:
+            items.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            logger.warning("Skipping invalid JSONL line %s in %s: %s", line_number, path, exc)
+            continue
     return items
 
 
@@ -250,6 +261,9 @@ def list_run_views(
         try:
             view = load_run_view(registry, settings, run_id)
         except HTTPException:
+            continue
+        except Exception as exc:
+            logger.warning("Skipping unreadable run %s while listing runs: %s", run_id, exc)
             continue
         if status is not None and view.get("status") != status:
             continue

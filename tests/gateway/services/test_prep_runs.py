@@ -102,6 +102,12 @@ class TestLoadJsonFile:
         result = load_json_file(tmp_path / "nonexistent.json")
         assert result is None
 
+    def test_invalid_json(self, tmp_path):
+        test_file = tmp_path / "broken.json"
+        test_file.write_text('{"key": "value"')
+        result = load_json_file(test_file)
+        assert result is None
+
 
 class TestLoadJsonlFile:
     def test_valid_jsonl(self, tmp_path):
@@ -121,6 +127,14 @@ class TestLoadJsonlFile:
         test_file.write_text("")
         result = load_jsonl_file(test_file)
         assert result == []
+
+    def test_invalid_lines_are_skipped(self, tmp_path):
+        test_file = tmp_path / "mixed.jsonl"
+        test_file.write_text('{"a": 1}\nnot-json\n{"b": 2}\n')
+        result = load_jsonl_file(test_file)
+        assert len(result) == 2
+        assert result[0]["a"] == 1
+        assert result[1]["b"] == 2
 
 
 class TestRunStatus:
