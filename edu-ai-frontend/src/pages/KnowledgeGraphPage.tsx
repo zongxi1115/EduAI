@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { ChevronLeft, ChevronRight, X, ArrowLeft, Network, Play, LoaderCircle } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  X,
+  ArrowLeft,
+  Network,
+  Play,
+  LoaderCircle,
+} from "lucide-react";
 
 /* ───────── Types ───────── */
 
@@ -35,6 +43,20 @@ function hexToRgba(hex: string, alpha: number) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function formatDifficultyStars(difficulty: unknown) {
+  const numericDifficulty =
+    typeof difficulty === "number" && Number.isFinite(difficulty)
+      ? Math.max(1, Math.min(6, Math.round(difficulty)))
+      : null;
+
+  if (numericDifficulty == null) return null;
+
+  return {
+    level: numericDifficulty,
+    stars: `${"★".repeat(numericDifficulty)}${"☆".repeat(6 - numericDifficulty)}`,
+  };
+}
+
 /**
  * Course-group aware color map.
  * When the active dataset is ai_foundation_course_groups, each top-level node
@@ -42,17 +64,20 @@ function hexToRgba(hex: string, alpha: number) {
  * at reduced saturation.  Otherwise fall back to the original two-colour scheme.
  */
 const GROUP_PALETTE: Record<string, string> = {
-  数学基础课程群: "#6366f1",   // indigo
-  编程基础课程群: "#10b981",   // emerald
-  AI核心课程群: "#8b5cf6",    // violet
-  数据处理课程群: "#f59e0b",   // amber
-  实践应用课程群: "#f43f5e",   // rose
+  数学基础课程群: "#6366f1", // indigo
+  编程基础课程群: "#10b981", // emerald
+  AI核心课程群: "#8b5cf6", // violet
+  数据处理课程群: "#f59e0b", // amber
+  实践应用课程群: "#f43f5e", // rose
 };
 
 const MODULE_COLOR = "#3b82f6";
 const SUB_COLOR = "#10b981";
 
-function resolveNodeColor(node: Record<string, any>, isCourseGroups: boolean): string {
+function resolveNodeColor(
+  node: Record<string, any>,
+  isCourseGroups: boolean,
+): string {
   if (!isCourseGroups) {
     return node.isModule ? MODULE_COLOR : SUB_COLOR;
   }
@@ -118,20 +143,27 @@ export default function KnowledgeGraphPage() {
         const response = await fetch("/api/knowledge-graphs", {
           headers: { Accept: "application/json" },
         });
-        if (!response.ok) throw new Error(`读取知识图谱失败（${response.status}）`);
+        if (!response.ok)
+          throw new Error(`读取知识图谱失败（${response.status}）`);
         const data = (await response.json()) as GraphIndexResponse;
         if (!active) return;
         setDatasets(data.datasets || []);
         setDescription(data.description || "");
       } catch (fetchError) {
         if (!active) return;
-        setError(fetchError instanceof Error ? fetchError.message : "读取知识图谱失败。");
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "读取知识图谱失败。",
+        );
       } finally {
         if (active) setLoading(false);
       }
     }
     void loadGraphs();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Sync selected dataset with route param
@@ -139,6 +171,9 @@ export default function KnowledgeGraphPage() {
     if (routeId && datasets.length > 0) {
       const found = datasets.find((d) => d.id === routeId);
       if (found) setSelectedGraphId(found.id);
+      else {
+        navigate("/graphs");
+      }
     } else if (!routeId && datasets.length > 0 && !selectedGraphId) {
       setSelectedGraphId(datasets[0].id);
     }
@@ -158,6 +193,7 @@ export default function KnowledgeGraphPage() {
   const simulationVelocityDecay = viewMode === "full" ? 0.32 : 0.24;
   const simulationAlphaDecay = viewMode === "full" ? 0.055 : 0.04;
   const selectedNodeId = selectedNode?.id ?? null;
+  const selectedNodeDifficulty = formatDifficultyStars(selectedNode?.difficulty);
 
   /* ── Build graph data ── */
 
@@ -168,7 +204,10 @@ export default function KnowledgeGraphPage() {
     const payload = activeDataset.graph;
 
     payload.nodes.forEach((node) => {
-      const color = resolveNodeColor({ ...node, isModule: true }, isCourseGroups);
+      const color = resolveNodeColor(
+        { ...node, isModule: true },
+        isCourseGroups,
+      );
       nodes.push({
         ...node,
         id: node.id,
@@ -193,7 +232,12 @@ export default function KnowledgeGraphPage() {
             isModule: false,
             parentId: node.id,
           });
-          links.push({ source: node.id, target: sub.id, color: "#cbd5e1", relation: "contains" });
+          links.push({
+            source: node.id,
+            target: sub.id,
+            color: "#cbd5e1",
+            relation: "contains",
+          });
         });
       }
     });
@@ -202,11 +246,18 @@ export default function KnowledgeGraphPage() {
       const edgeColor = isCourseGroups
         ? (EDGE_RELATION_COLORS[edge.relation] ?? "#94a3b8")
         : "#94a3b8";
-      links.push({ source: edge.source, target: edge.target, color: edgeColor, relation: edge.relation });
+      links.push({
+        source: edge.source,
+        target: edge.target,
+        color: edgeColor,
+        relation: edge.relation,
+      });
     });
 
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const validLinks = links.filter((l) => nodeIds.has(l.source) && nodeIds.has(l.target));
+    const validLinks = links.filter(
+      (l) => nodeIds.has(l.source) && nodeIds.has(l.target),
+    );
     return { nodes, links: validLinks };
   }, [activeDataset, viewMode, isCourseGroups]);
 
@@ -239,7 +290,10 @@ export default function KnowledgeGraphPage() {
 
   /* ── Effects ── */
 
-  useEffect(() => { setHoverNode(null); setSelectedNode(null); }, [activeDataset, viewMode]);
+  useEffect(() => {
+    setHoverNode(null);
+    setSelectedNode(null);
+  }, [activeDataset, viewMode]);
 
   useEffect(() => {
     const graph = graphRef.current;
@@ -248,21 +302,32 @@ export default function KnowledgeGraphPage() {
     const chargeStrength = viewMode === "full" ? -180 : -320;
     graph.d3Force("charge")?.strength(chargeStrength);
     graph.d3Force("charge")?.distanceMax(viewMode === "full" ? 320 : 520);
-    graph.d3Force("link")?.distance((link: any) =>
-      String(link.color || "") === "#cbd5e1" ? linkDistance * 0.72 : linkDistance,
-    );
-    graph.d3Force("link")?.strength((link: any) =>
-      String(link.color || "") === "#cbd5e1" ? 0.2 : 0.1,
-    );
+    graph
+      .d3Force("link")
+      ?.distance((link: any) =>
+        String(link.color || "") === "#cbd5e1"
+          ? linkDistance * 0.72
+          : linkDistance,
+      );
+    graph
+      .d3Force("link")
+      ?.strength((link: any) =>
+        String(link.color || "") === "#cbd5e1" ? 0.2 : 0.1,
+      );
     graph.d3ReheatSimulation();
-    const timer = window.setTimeout(() => { graph.zoomToFit(450, 80); }, 900);
+    const timer = window.setTimeout(() => {
+      graph.zoomToFit(450, 80);
+    }, 900);
     return () => window.clearTimeout(timer);
   }, [activeDataset, graphData, viewMode]);
 
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph) return;
-    if (!selectedNode) { graph.zoomToFit(450, 80); return; }
+    if (!selectedNode) {
+      graph.zoomToFit(450, 80);
+      return;
+    }
     const nodeX = typeof selectedNode.x === "number" ? selectedNode.x : 0;
     const nodeY = typeof selectedNode.y === "number" ? selectedNode.y : 0;
     const targetZoom = viewMode === "full" ? 2 : 2.4;
@@ -291,24 +356,29 @@ export default function KnowledgeGraphPage() {
     }
   };
 
-  const returnGraphId = (location.state as { from?: string } | null)?.from ?? null;
-  const showBackButton = returnGraphId != null && returnGraphId !== activeDataset?.id;
+  const returnGraphId =
+    (location.state as { from?: string } | null)?.from ?? null;
+  const showBackButton =
+    returnGraphId != null && returnGraphId !== activeDataset?.id;
 
   const handleStartLearning = async (knowledgePoint: string) => {
     if (learningTaskId) return;
 
     const courseName = selectedNode?.name ?? activeDataset?.title ?? "";
     const subject = isCourseGroups
-      ? (selectedNode?.parentId
-          ? String(selectedNode.parentId).split("::")[0]
-          : courseName)
+      ? selectedNode?.parentId
+        ? String(selectedNode.parentId).split("::")[0]
+        : courseName
       : (activeDataset?.title ?? courseName);
 
     setLearningTaskId(knowledgePoint);
     try {
       const response = await fetch("/api/v1/prep-runs", {
         method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           learning_goal: `学习${courseName}中的：${knowledgePoint}`,
           subject,
@@ -342,7 +412,9 @@ export default function KnowledgeGraphPage() {
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-500 mb-1">
             Knowledge Graphs
           </p>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">课程图谱</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            课程图谱
+          </h1>
           <p className="mt-2 text-sm text-slate-500 leading-relaxed max-w-[90%]">
             {description || "选择不同的学科，探索知识维度的关联与结构。"}
           </p>
@@ -403,7 +475,10 @@ export default function KnowledgeGraphPage() {
                       {dataset.graph.nodes.length} N
                     </span>
                   </div>
-                  <p className="text-[11px] font-medium text-slate-400 truncate mb-3" title={dataset.file}>
+                  <p
+                    className="text-[11px] font-medium text-slate-400 truncate mb-3"
+                    title={dataset.file}
+                  >
                     {dataset.file}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -441,7 +516,11 @@ export default function KnowledgeGraphPage() {
         style={{ left: isSidebarOpen ? "20rem" : "0" }}
         title={isSidebarOpen ? "收起侧边栏" : "展开侧边栏"}
       >
-        {isSidebarOpen ? <ChevronLeft size={16} strokeWidth={2.5} /> : <ChevronRight size={16} strokeWidth={2.5} />}
+        {isSidebarOpen ? (
+          <ChevronLeft size={16} strokeWidth={2.5} />
+        ) : (
+          <ChevronRight size={16} strokeWidth={2.5} />
+        )}
       </button>
 
       <div className="relative flex-1 flex overflow-hidden bg-slate-50/50">
@@ -457,22 +536,26 @@ export default function KnowledgeGraphPage() {
             </button>
           )}
           <div className="flex p-1 bg-white/80 backdrop-blur-md border border-slate-200 shadow-sm rounded-xl">
-          <button
-            onClick={() => setViewMode("module")}
-            className={`px-4 py-1.5 text-xs font-bold transition-colors rounded-lg ${
-              viewMode === "module" ? "bg-slate-900 text-white shadow-sm" : "bg-transparent text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-            }`}
-          >
-            模块视图
-          </button>
-          <button
-            onClick={() => setViewMode("full")}
-            className={`px-4 py-1.5 text-xs font-bold transition-colors rounded-lg ${
-              viewMode === "full" ? "bg-slate-900 text-white shadow-sm" : "bg-transparent text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-            }`}
-          >
-            全量视图
-          </button>
+            <button
+              onClick={() => setViewMode("module")}
+              className={`px-4 py-1.5 text-xs font-bold transition-colors rounded-lg ${
+                viewMode === "module"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "bg-transparent text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              模块视图
+            </button>
+            <button
+              onClick={() => setViewMode("full")}
+              className={`px-4 py-1.5 text-xs font-bold transition-colors rounded-lg ${
+                viewMode === "full"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "bg-transparent text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              全量视图
+            </button>
           </div>
         </div>
 
@@ -480,36 +563,63 @@ export default function KnowledgeGraphPage() {
         <div className="absolute top-5 right-5 z-10 bg-white/80 backdrop-blur-md rounded-xl border border-slate-200 p-4 shadow-sm min-w-[200px]">
           <div className="flex items-center gap-2 mb-1">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">活跃图谱</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              活跃图谱
+            </p>
           </div>
-          <h2 className="text-base font-bold text-slate-800 truncate max-w-[200px]" title={activeDataset?.title}>
+          <h2
+            className="text-base font-bold text-slate-800 truncate max-w-[200px]"
+            title={activeDataset?.title}
+          >
             {activeDataset?.title ?? "加载中..."}
           </h2>
           <div className="mt-2 flex gap-4 text-xs font-medium text-slate-500">
             <div>
-              <span className="text-slate-900">{activeDataset?.graph.nodes.length || 0}</span> 节点
+              <span className="text-slate-900">
+                {activeDataset?.graph.nodes.length || 0}
+              </span>{" "}
+              节点
             </div>
             <div>
-              <span className="text-slate-900">{activeDataset?.graph.edges.length || 0}</span> 关系
+              <span className="text-slate-900">
+                {activeDataset?.graph.edges.length || 0}
+              </span>{" "}
+              关系
             </div>
           </div>
           {/* Legend for course groups */}
           {isCourseGroups && (
             <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">课程群</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                课程群
+              </p>
               {Object.entries(GROUP_PALETTE).map(([name, color]) => (
-                <div key={name} className="flex items-center gap-2 text-[11px] text-slate-600">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                <div
+                  key={name}
+                  className="flex items-center gap-2 text-[11px] text-slate-600"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: color }}
+                  />
                   {name}
                 </div>
               ))}
               <div className="flex gap-3 mt-2 text-[10px] text-slate-400">
                 <span className="flex items-center gap-1">
-                  <span className="inline-block w-4 h-0.5 rounded" style={{ backgroundColor: EDGE_RELATION_COLORS.prerequisite }} />
+                  <span
+                    className="inline-block w-4 h-0.5 rounded"
+                    style={{
+                      backgroundColor: EDGE_RELATION_COLORS.prerequisite,
+                    }}
+                  />
                   先修
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="inline-block w-4 h-0.5 rounded" style={{ backgroundColor: EDGE_RELATION_COLORS.supports }} />
+                  <span
+                    className="inline-block w-4 h-0.5 rounded"
+                    style={{ backgroundColor: EDGE_RELATION_COLORS.supports }}
+                  />
                   支撑
                 </span>
               </div>
@@ -527,14 +637,21 @@ export default function KnowledgeGraphPage() {
               nodeColor={(node: any) => {
                 if (!highlightedNodeIds) return node.color;
                 if (node.id === selectedNodeId) return node.color;
-                if (highlightedNodeIds.has(node.id)) return hexToRgba(node.color, 0.92);
+                if (highlightedNodeIds.has(node.id))
+                  return hexToRgba(node.color, 0.92);
                 return "rgba(148, 163, 184, 0.28)";
               }}
               nodeRelSize={4}
               linkColor={(link: any) => {
                 if (!highlightedLinkKeys) return link.color;
-                const s = typeof link.source === "object" ? link.source?.id : link.source;
-                const t = typeof link.target === "object" ? link.target?.id : link.target;
+                const s =
+                  typeof link.source === "object"
+                    ? link.source?.id
+                    : link.source;
+                const t =
+                  typeof link.target === "object"
+                    ? link.target?.id
+                    : link.target;
                 return highlightedLinkKeys.has(`${String(s)}::${String(t)}`)
                   ? link.color
                   : "rgba(203, 213, 225, 0.32)";
@@ -545,11 +662,24 @@ export default function KnowledgeGraphPage() {
               cooldownTicks={160}
               warmupTicks={80}
               linkWidth={(link: any) => {
-                const s = typeof link.source === "object" ? link.source?.id : link.source;
-                const t = typeof link.target === "object" ? link.target?.id : link.target;
-                const isHighlighted = highlightedLinkKeys?.has(`${String(s)}::${String(t)}`) ?? false;
+                const s =
+                  typeof link.source === "object"
+                    ? link.source?.id
+                    : link.source;
+                const t =
+                  typeof link.target === "object"
+                    ? link.target?.id
+                    : link.target;
+                const isHighlighted =
+                  highlightedLinkKeys?.has(`${String(s)}::${String(t)}`) ??
+                  false;
                 const isPrereq = link.relation === "prerequisite";
-                const baseWidth = String(link.color || "") === "#cbd5e1" ? 1.2 : isPrereq ? 2.4 : 1.8;
+                const baseWidth =
+                  String(link.color || "") === "#cbd5e1"
+                    ? 1.2
+                    : isPrereq
+                      ? 2.4
+                      : 1.8;
                 if (!highlightedNodeIds) return baseWidth;
                 return isHighlighted ? baseWidth + 0.8 : 0.8;
               }}
@@ -561,7 +691,8 @@ export default function KnowledgeGraphPage() {
                 const label = node.name;
                 const isSelected = node.id === selectedNodeId;
                 const isNeighbor = highlightedNodeIds?.has(node.id) ?? false;
-                const isDimmed = Boolean(highlightedNodeIds) && !isNeighbor && !isSelected;
+                const isDimmed =
+                  Boolean(highlightedNodeIds) && !isNeighbor && !isSelected;
 
                 const nodeFill = isSelected
                   ? node.color
@@ -571,11 +702,21 @@ export default function KnowledgeGraphPage() {
                       ? "rgba(148, 163, 184, 0.28)"
                       : node.color;
 
-                const fontSize = Math.max(node.isModule ? 12 : 9, (node.isModule ? 14 : 10) / globalScale);
+                const fontSize = Math.max(
+                  node.isModule ? 12 : 9,
+                  (node.isModule ? 14 : 10) / globalScale,
+                );
                 ctx.font = `${node.isModule ? "bold " : ""}${fontSize}px Sans-Serif`;
                 ctx.fillStyle = nodeFill;
                 ctx.beginPath();
-                ctx.arc(node.x || 0, node.y || 0, node.val, 0, 2 * Math.PI, false);
+                ctx.arc(
+                  node.x || 0,
+                  node.y || 0,
+                  node.val,
+                  0,
+                  2 * Math.PI,
+                  false,
+                );
                 ctx.fill();
 
                 if (isSelected) {
@@ -586,13 +727,20 @@ export default function KnowledgeGraphPage() {
 
                 const safeLabel = typeof label === "string" ? label : "";
                 const maxLen = node.isModule ? 14 : 10;
-                const truncatedLabel = safeLabel.length > maxLen ? `${safeLabel.slice(0, maxLen)}…` : safeLabel;
+                const truncatedLabel =
+                  safeLabel.length > maxLen
+                    ? `${safeLabel.slice(0, maxLen)}…`
+                    : safeLabel;
                 const textY = (node.y || 0) + node.val + fontSize + 4;
                 const textWidth = ctx.measureText(truncatedLabel).width;
                 const backgroundPaddingX = 6;
                 const backgroundHeight = fontSize + 6;
-                const labelBackground = isDimmed ? "rgba(241, 245, 249, 0.74)" : "rgba(248, 250, 252, 0.92)";
-                const labelText = isDimmed ? "rgba(100, 116, 139, 0.72)" : "#334155";
+                const labelBackground = isDimmed
+                  ? "rgba(241, 245, 249, 0.74)"
+                  : "rgba(248, 250, 252, 0.92)";
+                const labelText = isDimmed
+                  ? "rgba(100, 116, 139, 0.72)"
+                  : "#334155";
 
                 ctx.fillStyle = labelBackground;
                 ctx.fillRect(
@@ -623,12 +771,22 @@ export default function KnowledgeGraphPage() {
               className="absolute bg-white/95 backdrop-blur-xl p-4 rounded-xl shadow-lg border border-slate-200 pointer-events-none z-20 transition-opacity duration-200"
               style={{ left: 24, bottom: 24, maxWidth: 320 }}
             >
-              <h3 className="text-sm font-bold text-slate-900 mb-1.5">{hoverNode.name}</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-1.5">
+                {hoverNode.name}
+              </h3>
               <p className="text-xs text-slate-500 leading-relaxed max-w-[280px] break-words">
                 {hoverNode.summary && hoverNode.summary.length > 80
                   ? hoverNode.summary.substring(0, 80) + "..."
                   : hoverNode.summary || "暂无简短描述"}
               </p>
+              {formatDifficultyStars(hoverNode.difficulty) && (
+                <div className="mt-2 text-[11px] font-medium text-amber-500">
+                  难度 {formatDifficultyStars(hoverNode.difficulty)?.stars}
+                  <span className="ml-1 text-slate-400">
+                    ({formatDifficultyStars(hoverNode.difficulty)?.level}/6)
+                  </span>
+                </div>
+              )}
               {hoverNode.isModule && (
                 <div className="mt-2 text-[10px] font-medium text-indigo-500 bg-indigo-50 inline-block px-2 py-0.5 rounded">
                   核心模块
@@ -650,12 +808,25 @@ export default function KnowledgeGraphPage() {
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
               <div className="pr-4">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: selectedNode.color }} />
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: selectedNode.color }}
+                  />
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     {selectedNode.isModule ? "模块节点" : "知识点"}
                   </span>
                 </div>
-                <h2 className="font-bold text-xl text-slate-900 leading-tight">{selectedNode.name}</h2>
+                <h2 className="font-bold text-xl text-slate-900 leading-tight">
+                  {selectedNode.name}
+                </h2>
+                {selectedNodeDifficulty && (
+                  <div className="mt-2 text-xs font-medium text-amber-500">
+                    难度 {selectedNodeDifficulty.stars}
+                    <span className="ml-1 text-slate-400">
+                      ({selectedNodeDifficulty.level}/6)
+                    </span>
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => setSelectedNode(null)}
@@ -667,21 +838,26 @@ export default function KnowledgeGraphPage() {
 
             <div className="p-6 flex-1 overflow-y-auto custom-scrollbar bg-white">
               {/* Graph navigation link */}
-              {selectedNode.graph_id && datasetMap.has(selectedNode.graph_id) && (
-                <div className="mb-6">
-                  <button
-                    onClick={() => navigateToGraph(selectedNode.graph_id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100/60 hover:border-indigo-300 transition-colors text-left"
-                  >
-                    <Network className="w-4 h-4 text-indigo-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-indigo-700">查看详细图谱</p>
-                      <p className="text-[11px] text-indigo-500/80 truncate">{datasetMap.get(selectedNode.graph_id)}</p>
-                    </div>
-                    <ArrowLeft className="w-3.5 h-3.5 text-indigo-400 rotate-180 shrink-0" />
-                  </button>
-                </div>
-              )}
+              {selectedNode.graph_id &&
+                datasetMap.has(selectedNode.graph_id) && (
+                  <div className="mb-6">
+                    <button
+                      onClick={() => navigateToGraph(selectedNode.graph_id)}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100/60 hover:border-indigo-300 transition-colors text-left"
+                    >
+                      <Network className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-indigo-700">
+                          查看详细图谱
+                        </p>
+                        <p className="text-[11px] text-indigo-500/80 truncate">
+                          {datasetMap.get(selectedNode.graph_id)}
+                        </p>
+                      </div>
+                      <ArrowLeft className="w-3.5 h-3.5 text-indigo-400 rotate-180 shrink-0" />
+                    </button>
+                  </div>
+                )}
 
               <div className="mb-8">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 flex items-center gap-2">
@@ -694,46 +870,56 @@ export default function KnowledgeGraphPage() {
               </div>
 
               {/* For course-group module nodes: list sub-courses with graph links */}
-              {isCourseGroups && selectedNode.isModule && selectedNode.sub_nodes && (
-                <div className="mb-8">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 flex items-center gap-2">
-                    <span className="w-1 h-3 rounded-full bg-violet-500" />
-                    包含课程
-                  </h3>
-                  <div className="space-y-2">
-                    {selectedNode.sub_nodes.map((sub: any) => {
-                      const hasGraph = !!sub.graph_id && datasetMap.has(sub.graph_id);
-                      return (
-                        <div
-                          key={sub.id}
-                          className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: selectedNode.color }} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-700">{sub.title}</p>
-                            {sub.summary && (
-                              <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5 line-clamp-2">{sub.summary}</p>
+              {isCourseGroups &&
+                selectedNode.isModule &&
+                selectedNode.sub_nodes && (
+                  <div className="mb-8">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 flex items-center gap-2">
+                      <span className="w-1 h-3 rounded-full bg-violet-500" />
+                      包含课程
+                    </h3>
+                    <div className="space-y-2">
+                      {selectedNode.sub_nodes.map((sub: any) => {
+                        const hasGraph =
+                          !!sub.graph_id && datasetMap.has(sub.graph_id);
+                        return (
+                          <div
+                            key={sub.id}
+                            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors"
+                          >
+                            <span
+                              className="w-1.5 h-1.5 rounded-full shrink-0"
+                              style={{ backgroundColor: selectedNode.color }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-slate-700">
+                                {sub.title}
+                              </p>
+                              {sub.summary && (
+                                <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5 line-clamp-2">
+                                  {sub.summary}
+                                </p>
+                              )}
+                            </div>
+                            {hasGraph ? (
+                              <button
+                                onClick={() => navigateToGraph(sub.graph_id)}
+                                className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 transition-colors"
+                              >
+                                <Network className="w-3 h-3" />
+                                图谱
+                              </button>
+                            ) : (
+                              <span className="shrink-0 text-[10px] text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                                暂无
+                              </span>
                             )}
                           </div>
-                          {hasGraph ? (
-                            <button
-                              onClick={() => navigateToGraph(sub.graph_id)}
-                              className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 transition-colors"
-                            >
-                              <Network className="w-3 h-3" />
-                              图谱
-                            </button>
-                          ) : (
-                            <span className="shrink-0 text-[10px] text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                              暂无
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-3 flex items-center gap-2">
@@ -744,7 +930,8 @@ export default function KnowledgeGraphPage() {
                   <ul className="space-y-2">
                     {selectedNode.content.map((c: string, i: number) => {
                       const isSubmitting = learningTaskId === c;
-                      const isOtherSubmitting = learningTaskId != null && learningTaskId !== c;
+                      const isOtherSubmitting =
+                        learningTaskId != null && learningTaskId !== c;
                       return (
                         <li
                           key={i}
@@ -754,6 +941,11 @@ export default function KnowledgeGraphPage() {
                             {String(i + 1).padStart(2, "0")}.
                           </span>
                           <span className="flex-1 min-w-0">{c}</span>
+                          {selectedNodeDifficulty && (
+                            <span className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-600">
+                              {selectedNodeDifficulty.stars}
+                            </span>
+                          )}
                           <button
                             onClick={() => void handleStartLearning(c)}
                             disabled={isSubmitting || isOtherSubmitting}

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronDown, ChevronUp, LoaderCircle, Sparkles } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, FileDown, LoaderCircle, Sparkles } from "lucide-react";
+import { marked } from "marked";
+import katex from "katex";
+import katexCssUrl from "katex/dist/katex.min.css?url";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -151,6 +154,400 @@ const QUESTION_TYPE_BADGE_CLASS: Record<PracticeQuestionType, string> = {
   Drawing: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700",
 };
 
+const PDF_TYPE_ACCENT: Record<PracticeQuestionType, string> = {
+  FillInTheBlank: "#b45309",
+  MultipleChoice: "#0369a1",
+  ShortAnswer: "#047857",
+  Listening: "#4338ca",
+  Coding: "#be123c",
+  Drawing: "#9333ea",
+};
+
+const PDF_ANSWER_LINES: Record<PracticeQuestionType, number> = {
+  FillInTheBlank: 3,
+  MultipleChoice: 2,
+  ShortAnswer: 8,
+  Listening: 6,
+  Coding: 14,
+  Drawing: 0,
+};
+
+const PDF_SECTION_ORDER: PracticeQuestionType[] = [
+  "MultipleChoice",
+  "FillInTheBlank",
+  "ShortAnswer",
+  "Listening",
+  "Coding",
+  "Drawing",
+];
+
+const PDF_SECTION_LABELS: Record<PracticeQuestionType, string> = {
+  MultipleChoice: "选择题",
+  FillInTheBlank: "填空题",
+  ShortAnswer: "简答题",
+  Listening: "听力题",
+  Coding: "编程题",
+  Drawing: "作图题",
+};
+
+const PDF_SECTION_NUMBERS = ["一", "二", "三", "四", "五", "六"];
+
+const PDF_PAGE_STYLE = `
+  @page {
+    size: A4;
+    margin: 18mm 16mm;
+  }
+
+  .practice-pdf-sheet, .practice-pdf-sheet * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  html, body { background: #ffffff; }
+
+  .practice-pdf-sheet {
+    width: 794px;
+    box-sizing: border-box;
+    background: #ffffff;
+    color: #1f2937;
+    font-family: "Times New Roman", "SimSun", "宋体", "Songti SC", serif;
+    padding: 40px 48px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* ── cover ── */
+  .practice-pdf-cover {
+    text-align: center;
+    padding: 36px 24px 28px;
+    margin-bottom: 28px;
+    border-bottom: 2px solid #d1d5db;
+  }
+
+  .practice-pdf-kicker {
+    color: #9ca3af;
+    font-family: "Times New Roman", serif;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.3em;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+
+  .practice-pdf-title {
+    color: #111827;
+    font-family: "SimHei", "黑体", "Microsoft YaHei", sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.4;
+    margin: 0 0 4px;
+  }
+
+  .practice-pdf-subtitle {
+    color: #6b7280;
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+
+  .practice-pdf-info-grid {
+    display: flex;
+    flex-wrap: wrap;
+    max-width: 400px;
+    margin: 0 auto;
+    gap: 8px 0;
+  }
+
+  .practice-pdf-info-row {
+    display: flex;
+    align-items: baseline;
+    width: 50%;
+    gap: 6px;
+    font-size: 13px;
+    color: #374151;
+  }
+
+  .practice-pdf-info-cell {
+    display: inline;
+  }
+
+  .practice-pdf-info-label {
+    color: #9ca3af;
+    font-family: "SimHei", "黑体", "Microsoft YaHei", sans-serif;
+    flex-shrink: 0;
+    min-width: 48px;
+  }
+
+  .practice-pdf-info-value {
+    flex: 1;
+    border-bottom: 1px solid #d1d5db;
+    min-width: 100px;
+    padding-bottom: 1px;
+  }
+
+  .practice-pdf-cover-meta {
+    margin-top: 18px;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+
+  /* ── section header ── */
+  .practice-pdf-section {
+    margin-top: 20px;
+    page-break-after: avoid;
+  }
+
+  .practice-pdf-section:first-of-type {
+    margin-top: 0;
+  }
+
+  .practice-pdf-section-title {
+    font-family: "SimHei", "黑体", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+    border-bottom: 1.5px solid #111827;
+    padding-bottom: 5px;
+    margin-bottom: 14px;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── question ── */
+  .practice-pdf-question {
+    margin-bottom: 16px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .practice-pdf-question-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    line-height: 1.7;
+    margin-bottom: 4px;
+  }
+
+  .practice-pdf-question-title .q-badge {
+    display: inline-block;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-right: 4px;
+    position: relative;
+    top: -1px;
+  }
+
+  .practice-pdf-question-title .q-diff {
+    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 400;
+    margin-left: 6px;
+  }
+
+  .practice-pdf-question-body {
+    padding-left: 2px;
+  }
+
+  /* ── markdown ── */
+  .practice-pdf-markdown {
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  .practice-pdf-markdown > :first-child { margin-top: 0; }
+  .practice-pdf-markdown > :last-child { margin-bottom: 0; }
+  .practice-pdf-markdown p { margin: 0 0 6px; }
+  .practice-pdf-markdown ul,
+  .practice-pdf-markdown ol { margin: 4px 0 6px 20px; padding: 0; }
+  .practice-pdf-markdown li { margin-bottom: 2px; }
+
+  .practice-pdf-markdown pre {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    color: #1f2937;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 8px 0;
+    padding: 8px 10px;
+    white-space: pre-wrap;
+  }
+
+  .practice-pdf-markdown code {
+    background: #f3f4f6;
+    border-radius: 2px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    padding: 1px 3px;
+  }
+
+  .practice-pdf-markdown pre code { background: none; padding: 0; }
+  .practice-pdf-markdown strong { font-weight: 700; }
+  .practice-pdf-markdown em { font-style: italic; }
+
+  /* ── choice options ── */
+  .practice-pdf-options {
+    margin-top: 6px;
+  }
+
+  .practice-pdf-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 3px 0;
+  }
+
+  .practice-pdf-option-label {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    min-width: 18px;
+  }
+
+  .practice-pdf-option .practice-pdf-markdown {
+    font-size: 13px;
+    line-height: 1.7;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ── option multi-column layouts ── */
+  .practice-pdf-options--2col,
+  .practice-pdf-options--4col {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .practice-pdf-options--2col > .practice-pdf-option {
+    width: 50%;
+    box-sizing: border-box;
+    padding-right: 8px;
+  }
+
+  .practice-pdf-options--4col > .practice-pdf-option {
+    width: 25%;
+    box-sizing: border-box;
+    padding-right: 6px;
+  }
+
+  /* ── blank underlines ── */
+  .practice-pdf-blank-line {
+    display: block;
+    margin: 4px 0 2px 0;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #374151;
+    min-height: 1.4em;
+  }
+
+  .practice-pdf-blank-inline {
+    display: inline-block;
+    width: 4em;
+    border-bottom: 1px solid #374151;
+    vertical-align: baseline;
+    height: 0;
+    position: relative;
+    top: 3px;
+    margin: 0 2px;
+  }
+
+  .practice-pdf-blank-label {
+    color: #9ca3af;
+    font-size: 12px;
+    margin-right: 4px;
+  }
+
+  /* ── answer area ── */
+  .practice-pdf-answer {
+    margin-top: 10px;
+  }
+
+  .practice-pdf-answer-title {
+    color: #6b7280;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+
+  .practice-pdf-answer-underline {
+    display: inline-block;
+    width: 6em;
+    height: 0;
+    border-bottom: 1px solid #374151;
+    vertical-align: baseline;
+    margin-left: 4px;
+    position: relative;
+    top: 2px;
+  }
+
+  .practice-pdf-lines {
+    /* stacked block divs */
+  }
+
+  .practice-pdf-line {
+    border-bottom: 1px solid #d1d5db;
+    height: 26px;
+  }
+
+  .practice-pdf-code-lines {
+    background-image: none;
+    border: 1px solid #d1d5db;
+    min-height: 320px;
+    background-color: #ffffff;
+  }
+
+  .practice-pdf-code-line {
+    height: 24px;
+    border-bottom: 1px solid #e5e7eb;
+    box-sizing: border-box;
+  }
+
+  .practice-pdf-code-line:last-child {
+    border-bottom: none;
+  }
+
+  .practice-pdf-drawing-box {
+    border: 1px dashed #d1d5db;
+    min-height: 260px;
+  }
+
+  .practice-pdf-note {
+    color: #9ca3af;
+    font-size: 12px;
+    font-style: italic;
+    line-height: 1.6;
+    margin: 6px 0;
+  }
+
+  /* ── KaTeX math ── */
+  .practice-pdf-markdown .katex {
+    font-size: 1.05em;
+  }
+
+  .practice-pdf-markdown .katex-display {
+    margin: 10px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .practice-pdf-markdown .katex-display > .katex {
+    font-size: 1.15em;
+  }
+
+  .practice-pdf-option .katex {
+    font-size: 1em;
+  }
+
+  @media print {
+    .practice-pdf-question { page-break-inside: avoid; }
+    .practice-pdf-section-title { page-break-after: avoid; }
+  }
+`;
+
 const CORRECTNESS_META: Record<
   ReviewCorrectness,
   { label: string; badgeClassName: string; summaryClassName: string }
@@ -187,6 +584,267 @@ function isStringArray(value: unknown): value is string[] {
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderPdfMarkdown(markdown: string) {
+  // Pre-process: extract LaTeX math before marked mangles underscores etc.
+  const mathBlocks: string[] = [];
+  let processed = markdown;
+
+  // $$ ... $$ (display math) — must come before single $
+  processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (_match, tex: string) => {
+    const idx = mathBlocks.length;
+    try {
+      mathBlocks.push(
+        katex.renderToString(tex.trim(), { throwOnError: false, displayMode: true, strict: "ignore" })
+      );
+    } catch {
+      mathBlocks.push(`<code>$$${escapeHtml(tex.trim())}$$</code>`);
+    }
+    return `%%MATH_BLOCK_${idx}%%`;
+  });
+
+  // $ ... $ (inline math)
+  processed = processed.replace(/\$([^\$\n]+?)\$/g, (_match, tex: string) => {
+    const idx = mathBlocks.length;
+    try {
+      mathBlocks.push(
+        katex.renderToString(tex.trim(), { throwOnError: false, displayMode: false, strict: "ignore" })
+      );
+    } catch {
+      mathBlocks.push(`<code>$${escapeHtml(tex.trim())}$</code>`);
+    }
+    return `%%MATH_BLOCK_${idx}%%`;
+  });
+
+  let html = marked.parse(processed, {
+    async: false,
+    breaks: true,
+    gfm: true,
+  }) as string;
+
+  // Post-process: restore KaTeX HTML
+  mathBlocks.forEach((katexHtml, idx) => {
+    html = html.replace(new RegExp(`%%MATH_BLOCK_${idx}%%`, "g"), katexHtml);
+  });
+
+  // Replace remaining sequences of 2+ underscores with a continuous CSS underline
+  html = html.replace(/_{2,}/g, '<span class="practice-pdf-blank-inline"></span>');
+
+  return html;
+}
+
+function formatDifficultyLabel(difficulty?: number | null) {
+  if (typeof difficulty !== "number") {
+    return "";
+  }
+  return `难度 ${difficulty}`;
+}
+
+function sanitizePdfFileName(value: string) {
+  const normalized = value.trim().replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "-");
+  return normalized ? normalized.slice(0, 48) : "practice-questions";
+}
+
+function formatExportDateTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(
+    date.getHours()
+  )}${pad(date.getMinutes())}`;
+}
+
+function renderPdfAnswerLines(lineCount: number) {
+  return Array.from({ length: lineCount }, () => '<div class="practice-pdf-line"></div>').join("");
+}
+
+function renderPdfOptions(question: PracticeQuestionRecord) {
+  if (question.question_type !== "MultipleChoice") {
+    return "";
+  }
+
+  // Estimate plain-text width of each option to decide column layout
+  const plainLens = question.options.map((opt) =>
+    opt.replace(/[*_~`#>\[\]()!]/g, "").replace(/\$\$[\s\S]+?\$\$/g, "MMM").replace(/\$[^$\n]+?\$/g, "MM").trim().length
+  );
+  const maxLen = Math.max(...plainLens, 0);
+  const totalLen = plainLens.reduce((a, b) => a + b, 0);
+
+  let layoutClass = "";
+  if (question.options.length <= 4 && maxLen <= 10 && totalLen <= 40) {
+    layoutClass = "practice-pdf-options--4col";
+  } else if (question.options.length <= 4 && maxLen <= 20 && totalLen <= 70) {
+    layoutClass = "practice-pdf-options--2col";
+  }
+
+  return `
+    <div class="practice-pdf-options ${layoutClass}">
+      ${question.options
+        .map((option, index) => {
+          const label = String.fromCharCode(65 + index);
+          return `
+            <div class="practice-pdf-option">
+              <span class="practice-pdf-option-label">${label}.</span>
+              <div class="practice-pdf-markdown">${renderPdfMarkdown(option)}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderPdfFillInBlankBody(question: PracticeQuestionRecord, mode: "compact" | "loose") {
+  if (question.question_type !== "FillInTheBlank" || mode === "compact") {
+    return "";
+  }
+  // Count blanks from raw markdown (before CSS replacement)
+  const blankCount = (question.question.match(/_{2,}/g) || []).length || 1;
+  const underlines = Array.from({ length: blankCount }, (_, i) =>
+    `<span class="practice-pdf-blank-line"><span class="practice-pdf-blank-label">${i + 1}.</span></span>`
+  ).join("\n");
+  return `
+    <div class="practice-pdf-blank-list">${underlines}</div>
+  `;
+}
+
+function renderPdfAnswerArea(question: PracticeQuestionRecord, mode: "compact" | "loose") {
+  if (mode === "compact") {
+    return "";
+  }
+
+  if (question.question_type === "FillInTheBlank") {
+    return "";
+  }
+
+  if (question.question_type === "MultipleChoice") {
+    return `
+      <div class="practice-pdf-answer">
+        <div class="practice-pdf-answer-title">答案：<span class="practice-pdf-answer-underline"></span></div>
+      </div>
+    `;
+  }
+
+  if (question.question_type === "Coding") {
+    const codeLineCount = PDF_ANSWER_LINES["Coding"] || 14;
+    const codeLines = Array.from({ length: codeLineCount }, () =>
+      '<div class="practice-pdf-code-line"></div>'
+    ).join("");
+    return `
+      <div class="practice-pdf-answer">
+        <div class="practice-pdf-answer-title">作答区</div>
+        <div class="practice-pdf-code-lines">${codeLines}</div>
+      </div>
+    `;
+  }
+
+  if (question.question_type === "Drawing") {
+    return `
+      <div class="practice-pdf-answer">
+        <div class="practice-pdf-answer-title">作图区</div>
+        <div class="practice-pdf-drawing-box"></div>
+      </div>
+    `;
+  }
+
+  const lineCount = PDF_ANSWER_LINES[question.question_type];
+  return `
+    <div class="practice-pdf-answer">
+      <div class="practice-pdf-answer-title">作答区</div>
+      <div class="practice-pdf-lines">${renderPdfAnswerLines(lineCount)}</div>
+    </div>
+  `;
+}
+
+function renderPdfQuestion(question: PracticeQuestionRecord, globalIndex: number, mode: "compact" | "loose") {
+  const accent = PDF_TYPE_ACCENT[question.question_type];
+  const difficultyLabel = formatDifficultyLabel(question.difficulty);
+  const isFillBlank = question.question_type === "FillInTheBlank";
+
+  return `
+    <div class="practice-pdf-question">
+      <div class="practice-pdf-question-title">
+        ${globalIndex}.
+        <span class="q-badge" style="background:${accent};">${PDF_SECTION_LABELS[question.question_type]}</span>
+        ${difficultyLabel ? `<span class="q-diff">${escapeHtml(difficultyLabel)}</span>` : ""}
+      </div>
+      <div class="practice-pdf-question-body">
+        ${question.question_type === "Listening" ? '<p class="practice-pdf-note">听力题请配合课堂或设备播放音频完成。</p>' : ""}
+        <div class="practice-pdf-markdown">${renderPdfMarkdown(question.question)}</div>
+        ${isFillBlank ? renderPdfFillInBlankBody(question, mode) : ""}
+        ${renderPdfOptions(question)}
+        ${renderPdfAnswerArea(question, mode)}
+      </div>
+    </div>
+  `;
+}
+
+function buildPracticeQuestionsPdfHtml(
+  learningGoal: string,
+  questions: PracticeQuestionRecord[],
+  generatedAt: Date,
+  mode: "compact" | "loose" = "loose",
+) {
+  const printableLearningGoal = learningGoal.trim() || "练习题";
+
+  const grouped = new Map<PracticeQuestionType, PracticeQuestionRecord[]>();
+  for (const q of questions) {
+    const list = grouped.get(q.question_type) ?? [];
+    list.push(q);
+    grouped.set(q.question_type, list);
+  }
+
+  let globalIndex = 0;
+  const sections = PDF_SECTION_ORDER
+    .filter((type) => grouped.has(type))
+    .map((type, sectionIdx) => {
+      const typeQuestions = grouped.get(type)!;
+      const items = typeQuestions
+        .map((q) => {
+          globalIndex += 1;
+          return renderPdfQuestion(q, globalIndex, mode);
+        })
+        .join("");
+      return `
+        <section class="practice-pdf-section">
+          <h2 class="practice-pdf-section-title">${PDF_SECTION_NUMBERS[sectionIdx]}、${PDF_SECTION_LABELS[type]}</h2>
+          ${items}
+        </section>
+      `;
+    })
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>${PDF_PAGE_STYLE}</style>
+</head>
+<body>
+  <div class="practice-pdf-sheet">
+    <header class="practice-pdf-cover">
+      <p class="practice-pdf-kicker">Practice Sheet</p>
+      <h1 class="practice-pdf-title">${escapeHtml(printableLearningGoal)}</h1>
+      <p class="practice-pdf-subtitle">共 ${questions.length} 题 · ${generatedAt.toLocaleDateString()}</p>
+      <div class="practice-pdf-info-grid">
+        <div class="practice-pdf-info-row"><span class="practice-pdf-info-label">姓名</span><span class="practice-pdf-info-value">&nbsp;</span></div>
+        <div class="practice-pdf-info-row"><span class="practice-pdf-info-label">学号</span><span class="practice-pdf-info-value">&nbsp;</span></div>
+        <div class="practice-pdf-info-row"><span class="practice-pdf-info-label">班级</span><span class="practice-pdf-info-value">&nbsp;</span></div>
+        <div class="practice-pdf-info-row"><span class="practice-pdf-info-label">日期</span><span class="practice-pdf-info-value">&nbsp;</span></div>
+      </div>
+    </header>
+    ${sections}
+  </div>
+</body>
+</html>`;
 }
 
 function formatAnswerPreview(value: unknown): string {
@@ -953,6 +1611,9 @@ export function PracticeQuestionWorkspace({
   const [reviewStates, setReviewStates] = useState<Record<string, QuestionReviewState>>({});
   const [reviewCapabilities, setReviewCapabilities] =
     useState<PracticeReviewCapabilitiesResponse | null>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [exportPdfError, setExportPdfError] = useState<string | null>(null);
+  const [pdfLayoutMode, setPdfLayoutMode] = useState<"compact" | "loose">("loose");
 
   const typeCounts = useMemo(() => {
     return questions.reduce<Record<PracticeQuestionType, number>>(
@@ -1160,6 +1821,83 @@ export function PracticeQuestionWorkspace({
     }
   };
 
+  const handleExportPdf = async () => {
+    if (questions.length === 0 || isExportingPdf) {
+      return;
+    }
+
+    setIsExportingPdf(true);
+    setExportPdfError(null);
+
+    const generatedAt = new Date();
+    const fileName = `${sanitizePdfFileName(learningGoal || "practice-questions")}-${formatExportDateTime(generatedAt)}.pdf`;
+
+    // Inject PDF styles into <head> so html2canvas can pick them up
+    const styleEl = document.createElement("style");
+    styleEl.setAttribute("data-pdf-export", "true");
+    styleEl.textContent = PDF_PAGE_STYLE;
+    document.head.appendChild(styleEl);
+
+    // Inject KaTeX CSS so math renders correctly in html2canvas
+    const katexLink = document.createElement("link");
+    katexLink.rel = "stylesheet";
+    katexLink.href = katexCssUrl;
+    katexLink.setAttribute("data-pdf-export", "true");
+    document.head.appendChild(katexLink);
+
+    // Create a hidden container with just the sheet content (no <html>/<body> wrapper)
+    const container = document.createElement("div");
+    container.style.cssText =
+      "position:fixed;left:-9999px;top:0;width:794px;z-index:-9999;pointer-events:none;";
+    container.innerHTML = buildPracticeQuestionsPdfHtml(learningGoal, questions, generatedAt, pdfLayoutMode)
+      .replace(/<!DOCTYPE[^>]*>/i, "")
+      .replace(/<\/?html[^>]*>/gi, "")
+      .replace(/<\/?head[^>]*>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<\/?body[^>]*>/gi, "")
+      .replace(/<meta[^>]*>/gi, "");
+
+    document.body.appendChild(container);
+
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
+      const target = container.querySelector(".practice-pdf-sheet") ?? container;
+
+      const html2pdf = (await import("html2pdf.js")).default;
+      await html2pdf()
+        .set({
+          filename: fileName,
+          margin: [10, 10, 10, 10],
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: {
+            backgroundColor: "#ffffff",
+            scale: 2,
+            useCORS: true,
+            logging: false,
+          },
+          jsPDF: {
+            format: "a4",
+            orientation: "portrait",
+            unit: "mm",
+          },
+          pagebreak: {
+            mode: ["css", "legacy"],
+            avoid: [".practice-pdf-question"],
+          },
+        })
+        .from(target)
+        .save();
+    } catch (error) {
+      setExportPdfError(error instanceof Error ? error.message : "PDF 导出失败，请稍后重试。");
+    } finally {
+      container.remove();
+      styleEl.remove();
+      katexLink.remove();
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <div className="custom-scrollbar w-full h-full flex flex-col gap-8 overflow-y-auto pr-4">
       <div className="rounded-3xl border bg-card text-card-foreground px-5 py-5 shadow-sm">
@@ -1170,16 +1908,55 @@ export function PracticeQuestionWorkspace({
               {learningGoal.trim() || "当前未提供学习目标，系统将按题目内容进行批阅。"}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {summaryBadges.map(([type, count]) => (
-              <Badge
-                key={type}
+          <div className="flex max-w-full flex-col items-start gap-3 sm:items-end">
+            <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
+              {summaryBadges.map(([type, count]) => (
+                <Badge
+                  key={type}
+                  variant="outline"
+                  className={`rounded-full px-3 py-1 ${QUESTION_TYPE_BADGE_CLASS[type]}`}
+                >
+                  {QUESTION_TYPE_LABELS[type]} x {count}
+                </Badge>
+              ))}
+            </div>
+            <div className="flex flex-col items-start gap-2 sm:items-end">
+              <div className="flex items-center gap-1 rounded-full border bg-muted/30 p-0.5">
+                <button
+                  type="button"
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    pdfLayoutMode === "loose"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setPdfLayoutMode("loose")}
+                >
+                  松散
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    pdfLayoutMode === "compact"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setPdfLayoutMode("compact")}
+                >
+                  紧凑
+                </button>
+              </div>
+              <Button
                 variant="outline"
-                className={`rounded-full px-3 py-1 ${QUESTION_TYPE_BADGE_CLASS[type]}`}
+                size="sm"
+                className="rounded-full"
+                disabled={isLoading || !!error || questions.length === 0 || isExportingPdf}
+                onClick={handleExportPdf}
               >
-                {QUESTION_TYPE_LABELS[type]} x {count}
-              </Badge>
-            ))}
+                {isExportingPdf ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                {isExportingPdf ? "正在导出" : "导出 PDF"}
+              </Button>
+              {exportPdfError ? <p className="max-w-xs text-xs text-destructive">{exportPdfError}</p> : null}
+            </div>
           </div>
         </div>
       </div>

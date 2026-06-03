@@ -27,6 +27,7 @@ import {
   useLessonPlayer,
   type LessonResult,
 } from "@/components/classroom/LessonPlayerProvider";
+import { Markdown } from "@/components/ui/markdown";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -742,9 +743,9 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                     <Sparkles className="w-5 h-5" /> 随堂互动
                   </div>
                   
-                  <div className="text-lg md:text-xl font-bold text-slate-900 mb-8 whitespace-pre-wrap leading-relaxed">
+                  <Markdown className="mb-8 text-slate-900 [&_.katex-display]:my-4 [&_p]:text-lg [&_p]:font-bold [&_p]:leading-relaxed md:[&_p]:text-xl">
                     {activeQuiz.payload.question}
-                  </div>
+                  </Markdown>
 
                   {activeQuiz.payload.type === "choice" && activeQuiz.payload.options && (
                     <div className="flex flex-col gap-3">
@@ -759,9 +760,9 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-500 group-hover/option:bg-indigo-500 group-hover/option:text-white transition-colors mr-4">
                               {String.fromCharCode(65 + idx)}
                             </div>
-                            <div className="flex-1 text-slate-700 font-medium text-[15px] self-center">
+                            <Markdown className="flex-1 self-center text-slate-700 [&_.katex-display]:my-3 [&_p]:m-0 [&_p]:text-[15px] [&_p]:font-medium [&_p]:leading-relaxed">
                               {option}
-                            </div>
+                            </Markdown>
                           </div>
                         </button>
                       ))}

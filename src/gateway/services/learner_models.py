@@ -4,13 +4,15 @@ import json
 import math
 import re
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime
+from difflib import SequenceMatcher
 from hashlib import sha1
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from edu_multi_agent.config import Settings
+from edu_multi_agent.config import PROJECT_ROOT, Settings
 from edu_multi_agent.file_io import now_iso
 from edu_multi_agent.models import GenerationRequest
 
@@ -37,10 +39,368 @@ INITIAL_FAILURE_PRIOR = 1.5
 RECENT_SCORE_WINDOW = 12
 RECENT_OBSERVATION_WINDOW = 10
 KNOWN_SESSION_WINDOW = 100
+GRAPH_MATCH_MIN_SCORE = 0.72
+GRAPH_SKILL_MATCH_MIN_SCORE = 0.68
+GRAPH_MATCH_TIE_MARGIN = 0.04
+GRAPH_SCORE_LINE_LIMIT = 4
+GRAPH_RELATED_TOPIC_LIMIT = 3
 DEFAULT_LEARNER_PROFILE = (
     "Mixed-ability class that needs clear guidance, visual explanation, "
     "and structured practice."
 )
+
+
+@dataclass(slots=True)
+class GraphNodeIndex:
+    node_id: str
+    title: str
+    parent_id: str | None = None
+    parent_title: str | None = None
+    child_ids: tuple[str, ...] = ()
+    path_titles: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class GraphDatasetIndex:
+    dataset_id: str
+    title: str
+    aliases: tuple[str, ...]
+    nodes: dict[str, GraphNodeIndex] = field(default_factory=dict)
+    leaf_node_ids: tuple[str, ...] = ()
+    adjacency: dict[str, set[str]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphNodeMatch:
+    node_id: str
+    score: float
+
+
+@dataclass(slots=True)
+class GraphRequestContext:
+    dataset: GraphDatasetIndex
+    focus_node_ids: tuple[str, ...]
+    focus_leaf_node_ids: tuple[str, ...]
+    related_leaf_node_ids: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class GraphEnrichmentSummary:
+    summary: str
+    recommended_focus: list[str]
+
+
+class KnowledgeGraphIndex:
+    """In-memory knowledge-graph index used for graph-scoped learner profiling."""
+
+    def __init__(self, graph_root: Path | None = None) -> None:
+        self.graph_root = (graph_root or (PROJECT_ROOT / "graph_data")).resolve()
+        self.datasets: dict[str, GraphDatasetIndex] = {}
+        self._load()
+
+    def _load(self) -> None:
+        index_path = self.graph_root / "index.json"
+        index_payload = self._load_json(index_path)
+        raw_datasets = index_payload.get("datasets", [])
+        if not isinstance(raw_datasets, list):
+            return
+
+        for raw_dataset in raw_datasets:
+            if not isinstance(raw_dataset, dict):
+                continue
+            dataset_id = str(raw_dataset.get("id", "")).strip()
+            title = str(raw_dataset.get("title", "")).strip()
+            filename = str(raw_dataset.get("file", "")).strip()
+            if not dataset_id or not title or not filename:
+                continue
+
+            payload = self._load_json(self.graph_root / filename)
+            aliases = [dataset_id, title]
+            meta = payload.get("meta")
+            if isinstance(meta, dict):
+                aliases.extend(
+                    str(meta.get(key, "")).strip()
+                    for key in ("subject", "scope")
+                    if str(meta.get(key, "")).strip()
+                )
+
+            dataset = GraphDatasetIndex(
+                dataset_id=dataset_id,
+                title=title,
+                aliases=tuple(_trim_recent_items(aliases, limit=6)),
+            )
+            for raw_node in payload.get("nodes", []):
+                if isinstance(raw_node, dict):
+                    self._register_node(dataset, raw_node, parent=None, path_titles=())
+
+            for raw_edge in payload.get("edges", []):
+                if not isinstance(raw_edge, dict):
+                    continue
+                source = str(raw_edge.get("source", "")).strip()
+                target = str(raw_edge.get("target", "")).strip()
+                self._connect(dataset, source, target)
+
+            dataset.leaf_node_ids = tuple(
+                node_id
+                for node_id, node in dataset.nodes.items()
+                if not node.child_ids
+            )
+            self.datasets[dataset_id] = dataset
+
+    def _load_json(self, path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {}
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
+    def _register_node(
+        self,
+        dataset: GraphDatasetIndex,
+        raw_node: dict[str, Any],
+        *,
+        parent: GraphNodeIndex | None,
+        path_titles: tuple[str, ...],
+    ) -> None:
+        node_id = str(raw_node.get("id") or raw_node.get("title") or "").strip()
+        title = str(raw_node.get("title") or node_id).strip()
+        if not node_id or not title:
+            return
+
+        raw_children = raw_node.get("sub_nodes", [])
+        child_ids = [
+            str(child.get("id") or child.get("title") or "").strip()
+            for child in raw_children
+            if isinstance(child, dict)
+        ]
+        node = GraphNodeIndex(
+            node_id=node_id,
+            title=title,
+            parent_id=parent.node_id if parent else None,
+            parent_title=parent.title if parent else None,
+            child_ids=tuple(child_id for child_id in child_ids if child_id),
+            path_titles=(*path_titles, title),
+        )
+        dataset.nodes[node_id] = node
+        dataset.adjacency.setdefault(node_id, set())
+
+        if parent is not None:
+            self._connect(dataset, parent.node_id, node_id)
+
+        for raw_link in raw_node.get("links", []):
+            link = str(raw_link).strip()
+            self._connect(dataset, node_id, link)
+
+        for raw_child in raw_children:
+            if isinstance(raw_child, dict):
+                self._register_node(
+                    dataset,
+                    raw_child,
+                    parent=node,
+                    path_titles=node.path_titles,
+                )
+
+    def _connect(self, dataset: GraphDatasetIndex, source: str, target: str) -> None:
+        source_id = str(source).strip()
+        target_id = str(target).strip()
+        if not source_id or not target_id:
+            return
+        dataset.adjacency.setdefault(source_id, set()).add(target_id)
+        dataset.adjacency.setdefault(target_id, set()).add(source_id)
+
+    def resolve_request_context(self, request: GenerationRequest) -> GraphRequestContext | None:
+        if not self.datasets:
+            return None
+
+        explicit_terms = _extract_focus_terms_from_request(request)
+        search_terms = explicit_terms or _trim_recent_items(
+            [request.learning_goal, request.notes],
+            limit=3,
+        )
+        if not search_terms:
+            search_terms = [request.learning_goal]
+
+        request_subject = request.subject.strip()
+        best_dataset: GraphDatasetIndex | None = None
+        best_matches: list[GraphNodeMatch] = []
+        best_score = 0.0
+
+        for dataset in self.datasets.values():
+            subject_score = self._dataset_subject_score(dataset, request_subject, request.notes)
+            candidate_matches = self._candidate_node_matches(dataset, search_terms)
+            if not candidate_matches:
+                continue
+            dataset_score = candidate_matches[0].score + min(0.12, subject_score * 0.12)
+            if dataset_score > best_score:
+                best_dataset = dataset
+                best_matches = candidate_matches
+                best_score = dataset_score
+
+        if best_dataset is None or not best_matches:
+            return None
+
+        top_score = best_matches[0].score
+        if top_score < GRAPH_MATCH_MIN_SCORE:
+            return None
+
+        focus_node_ids = tuple(
+            match.node_id
+            for match in best_matches
+            if match.score >= top_score - GRAPH_MATCH_TIE_MARGIN
+        )
+        focus_leaf_ids = self._unique_titles(
+            node_id
+            for focus_node_id in focus_node_ids
+            for node_id in self._expand_to_leaf_nodes(best_dataset, focus_node_id)
+        )
+        related_leaf_ids = self._build_related_leaf_scope(best_dataset, focus_node_ids, focus_leaf_ids)
+        return GraphRequestContext(
+            dataset=best_dataset,
+            focus_node_ids=focus_node_ids,
+            focus_leaf_node_ids=focus_leaf_ids,
+            related_leaf_node_ids=related_leaf_ids,
+        )
+
+    def match_skill_to_node(self, dataset: GraphDatasetIndex, state: SkillState) -> GraphNodeMatch | None:
+        candidate = self._best_node_match(
+            dataset,
+            [state.display_name, state.skill_id],
+            minimum_score=GRAPH_SKILL_MATCH_MIN_SCORE,
+        )
+        return candidate
+
+    def node_overlaps_leaf_scope(
+        self,
+        dataset: GraphDatasetIndex,
+        node_id: str,
+        leaf_scope: tuple[str, ...],
+    ) -> bool:
+        leaf_ids = set(self._expand_to_leaf_nodes(dataset, node_id))
+        return bool(leaf_ids.intersection(leaf_scope))
+
+    def node_overlaps_focus_scope(self, context: GraphRequestContext, node_id: str) -> bool:
+        return self.node_overlaps_leaf_scope(
+            context.dataset,
+            node_id,
+            context.focus_leaf_node_ids,
+        )
+
+    def _dataset_subject_score(
+        self,
+        dataset: GraphDatasetIndex,
+        request_subject: str,
+        request_notes: str,
+    ) -> float:
+        candidates = [request_subject.strip()]
+        note_course_match = re.search(r"课程[:：]\s*([^；;\n]+)", request_notes or "")
+        if note_course_match:
+            candidates.append(note_course_match.group(1).strip())
+
+        best_score = 0.0
+        for candidate in candidates:
+            if not candidate:
+                continue
+            for alias in dataset.aliases:
+                best_score = max(best_score, _text_similarity(candidate, alias))
+        return best_score
+
+    def _candidate_node_matches(
+        self,
+        dataset: GraphDatasetIndex,
+        search_terms: list[str],
+    ) -> list[GraphNodeMatch]:
+        best_by_node: dict[str, float] = {}
+        for term in search_terms:
+            match = self._best_node_match(dataset, [term], minimum_score=GRAPH_MATCH_MIN_SCORE)
+            if match is None:
+                continue
+            previous = best_by_node.get(match.node_id, 0.0)
+            best_by_node[match.node_id] = max(previous, match.score)
+
+        matches = [
+            GraphNodeMatch(node_id=node_id, score=score)
+            for node_id, score in best_by_node.items()
+        ]
+        matches.sort(
+            key=lambda item: (
+                -item.score,
+                0 if dataset.nodes.get(item.node_id, GraphNodeIndex("", "")).child_ids else -1,
+                dataset.nodes[item.node_id].title,
+            )
+        )
+        return matches
+
+    def _best_node_match(
+        self,
+        dataset: GraphDatasetIndex,
+        texts: list[str],
+        *,
+        minimum_score: float,
+    ) -> GraphNodeMatch | None:
+        best_node_id = ""
+        best_score = 0.0
+        for node_id, node in dataset.nodes.items():
+            node_score = 0.0
+            for raw_text in texts:
+                text = raw_text.strip()
+                if not text:
+                    continue
+                node_score = max(node_score, _text_similarity(text, node.title))
+            if node_score > best_score:
+                best_node_id = node_id
+                best_score = node_score
+
+        if not best_node_id or best_score < minimum_score:
+            return None
+        return GraphNodeMatch(node_id=best_node_id, score=round(best_score, 4))
+
+    def _expand_to_leaf_nodes(self, dataset: GraphDatasetIndex, node_id: str) -> tuple[str, ...]:
+        node = dataset.nodes.get(node_id)
+        if node is None:
+            return ()
+        if not node.child_ids:
+            return (node_id,)
+
+        collected: list[str] = []
+        queue = list(node.child_ids)
+        while queue:
+            current_id = queue.pop(0)
+            current_node = dataset.nodes.get(current_id)
+            if current_node is None:
+                continue
+            if not current_node.child_ids:
+                collected.append(current_id)
+                continue
+            queue.extend(current_node.child_ids)
+        return self._unique_titles(collected)
+
+    def _build_related_leaf_scope(
+        self,
+        dataset: GraphDatasetIndex,
+        focus_node_ids: tuple[str, ...],
+        focus_leaf_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        seed_ids = set(focus_node_ids) | set(focus_leaf_ids)
+        for node_id in list(seed_ids):
+            seed_ids.update(dataset.adjacency.get(node_id, set()))
+
+        related_leaf_ids: list[str] = []
+        for node_id in seed_ids:
+            related_leaf_ids.extend(self._expand_to_leaf_nodes(dataset, node_id))
+        return self._unique_titles(related_leaf_ids)
+
+    def _unique_titles(self, node_ids: Any) -> tuple[str, ...]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for node_id in node_ids:
+            cleaned = str(node_id).strip()
+            if not cleaned or cleaned in seen:
+                continue
+            ordered.append(cleaned)
+            seen.add(cleaned)
+        return tuple(ordered)
 
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
@@ -59,6 +419,53 @@ def _safe_model_dir(root: Path, learner_id: str) -> Path:
     safe_fragment = safe_fragment[:32] or "learner"
     digest = sha1(learner_id.encode("utf-8")).hexdigest()[:10]
     return root / f"{safe_fragment}_{digest}"
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(
+        r"[\s\-_—–:：;；,，。.!！？?、/\\|()\[\]{}<>《》“”\"'`]+",
+        "",
+        (value or "").strip().lower(),
+    )
+
+
+def _text_similarity(left: str, right: str) -> float:
+    normalized_left = _normalize_text(left)
+    normalized_right = _normalize_text(right)
+    if not normalized_left or not normalized_right:
+        return 0.0
+    if normalized_left == normalized_right:
+        return 1.0
+
+    shorter, longer = sorted(
+        (normalized_left, normalized_right),
+        key=len,
+    )
+    if len(shorter) >= 2 and shorter in longer:
+        return round(min(0.98, 0.84 + 0.14 * (len(shorter) / len(longer))), 4)
+
+    ratio = SequenceMatcher(None, normalized_left, normalized_right).ratio()
+    shared_chars = set(normalized_left) & set(normalized_right)
+    shared_ratio = len(shared_chars) / max(1, len(set(shorter)))
+    return round(max(ratio, 0.55 * ratio + 0.45 * shared_ratio), 4)
+
+
+def _extract_focus_terms_from_request(request: GenerationRequest) -> list[str]:
+    extracted: list[str] = []
+    patterns = (
+        r"知识点[:：]\s*([^；;，,\n]+)",
+        r"中的[:：]\s*([^；;，,\n]+)",
+    )
+    for source in (request.notes, request.learning_goal):
+        text = (source or "").strip()
+        if not text:
+            continue
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                term = match.group(1).strip()
+                if term:
+                    extracted.append(term)
+    return _trim_recent_items(extracted, limit=4)
 
 
 def _normalize_skill_id(raw_value: str) -> str:
@@ -414,8 +821,14 @@ class LearnerModelRepository:
 class LearnerModelService:
     """Learner-model update loop built on top of practice-review data."""
 
-    def __init__(self, repository: LearnerModelRepository) -> None:
+    def __init__(
+        self,
+        repository: LearnerModelRepository,
+        *,
+        graph_root: Path | None = None,
+    ) -> None:
         self.repository = repository
+        self.graph_index = KnowledgeGraphIndex(graph_root=graph_root)
         self._lock = threading.Lock()
 
     def get_model_response(self, learner_id: str, *, event_limit: int = 20) -> LearnerModelResponse:
@@ -450,35 +863,116 @@ class LearnerModelService:
         if record is None or not record.total_events:
             return request
 
-        refreshed = _refresh_record_freshness(record, current_timestamp=now_iso())
-        summary = refreshed.overall.prompt_profile.strip()
-        if not summary:
+        current_timestamp = now_iso()
+        refreshed = _refresh_record_freshness(record, current_timestamp=current_timestamp)
+        enrichment = self._build_graph_enrichment_summary(
+            refreshed,
+            request,
+            current_timestamp=current_timestamp,
+        )
+        if enrichment is None or not enrichment.summary:
             return request
 
         learner_profile = request.learner_profile.strip() or DEFAULT_LEARNER_PROFILE
-        if summary in learner_profile:
+        if enrichment.summary in learner_profile:
             return request
 
-        if learner_profile == DEFAULT_LEARNER_PROFILE:
-            enriched_profile = f"{learner_profile}\n\n[历史学情摘要]\n{summary}"
-        else:
-            enriched_profile = f"{learner_profile}\n\n[历史学情摘要]\n{summary}"
+        enriched_profile = f"{learner_profile}\n\n[图谱关联学情]\n{enrichment.summary}"
 
         notes = request.notes.strip() or "None"
         focus_line = ""
-        if refreshed.overall.recommended_focus:
-            focus_line = "；".join(refreshed.overall.recommended_focus[:2])
+        if enrichment.recommended_focus:
+            focus_line = "；".join(enrichment.recommended_focus[:2])
         if focus_line and focus_line not in notes:
             if notes == "None":
-                notes = f"结合历史学情优先处理：{focus_line}"
+                notes = f"结合图谱关联学情优先处理：{focus_line}"
             else:
-                notes = f"{notes}；结合历史学情优先处理：{focus_line}"
+                notes = f"{notes}；结合图谱关联学情优先处理：{focus_line}"
 
         return request.model_copy(
             update={
                 "learner_profile": enriched_profile,
                 "notes": notes,
             }
+        )
+
+    def _build_graph_enrichment_summary(
+        self,
+        record: LearnerModelRecord,
+        request: GenerationRequest,
+        *,
+        current_timestamp: str,
+    ) -> GraphEnrichmentSummary | None:
+        context = self.graph_index.resolve_request_context(request)
+        if context is None:
+            return None
+
+        relevant_pairs: list[tuple[SkillState, GraphNodeIndex]] = []
+        for state in record.skills.values():
+            match = self.graph_index.match_skill_to_node(context.dataset, state)
+            if match is None:
+                continue
+            if not self.graph_index.node_overlaps_leaf_scope(
+                context.dataset,
+                match.node_id,
+                context.related_leaf_node_ids,
+            ):
+                continue
+            node = context.dataset.nodes.get(match.node_id)
+            if node is None:
+                continue
+            relevant_pairs.append((state, node))
+
+        if not relevant_pairs:
+            return None
+
+        scoped_record = record.model_copy(
+            update={
+                "skills": {
+                    state.skill_id: state
+                    for state, _node in relevant_pairs
+                }
+            }
+        )
+        scoped_assessment = _recompute_overall(
+            scoped_record,
+            current_timestamp=current_timestamp,
+        )
+
+        def sort_key(item: tuple[SkillState, GraphNodeIndex]) -> tuple[int, float, str]:
+            state, node = item
+            is_focus = self.graph_index.node_overlaps_focus_scope(context, node.node_id)
+            return (0 if is_focus else 1, state.mastery, state.display_name)
+
+        score_lines = [
+            f"{state.display_name} {state.mastery:.2f}"
+            for state, _node in sorted(relevant_pairs, key=sort_key)[:GRAPH_SCORE_LINE_LIMIT]
+        ]
+        focus_titles = [
+            context.dataset.nodes[node_id].title
+            for node_id in context.focus_node_ids
+            if node_id in context.dataset.nodes
+        ]
+        related_titles = [
+            context.dataset.nodes[node_id].title
+            for node_id in context.related_leaf_node_ids
+            if node_id in context.dataset.nodes
+            and node_id not in context.focus_leaf_node_ids
+        ]
+        related_titles = _trim_recent_items(related_titles, limit=GRAPH_RELATED_TOPIC_LIMIT)
+
+        lines = [
+            f"图谱课程：{context.dataset.title}。",
+            "当前目标知识点：" + "、".join(focus_titles) + "。",
+        ]
+        if related_titles:
+            lines.append("图谱关联知识点：" + "、".join(related_titles) + "。")
+        if score_lines:
+            lines.append("相关知识点得分：" + "；".join(score_lines) + "。")
+        lines.append("相关学情：" + scoped_assessment.prompt_profile)
+        return GraphEnrichmentSummary(
+            summary="\n".join(lines).strip(),
+            recommended_focus=scoped_assessment.recommended_focus,
         )
 
     def ingest_review(
