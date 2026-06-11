@@ -115,5 +115,13 @@ jobs:
           python -m pip install -e . -i "$PIP_INDEX_URL"
           python -m compileall src run_edu_multi_agent.py
           sudo systemctl restart "$BACKEND_SERVICE_NAME"
-          curl -fsS "$BACKEND_HEALTH_URL"
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$BACKEND_HEALTH_URL"; then
+              exit 0
+            fi
+            echo "Waiting for backend health check... ($attempt/30)"
+            sleep 1
+          done
+          sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager -l
+          exit 1
           REMOTE
