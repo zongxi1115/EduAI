@@ -35,6 +35,8 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     permissions:
       contents: read
+      issues: write
+      pull-requests: read
     defaults:
       run:
         working-directory: edu-ai-frontend
@@ -70,14 +72,63 @@ jobs:
           done
 
       - name: Deploy preview
+        id: deploy-preview
         if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'preview') }}
         shell: bash
         run: |
           set -euo pipefail
 
           pnpm dlx vercel@latest pull --yes --environment=preview --token="$VERCEL_TOKEN"
-          preview_url="$(pnpm dlx vercel@latest deploy --yes --token="$VERCEL_TOKEN")"
+          deploy_output="$(pnpm dlx vercel@latest deploy --yes --token="$VERCEL_TOKEN")"
+          printf '%s\n' "$deploy_output"
+          preview_url="$(printf '%s\n' "$deploy_output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app[^[:space:]]*' | tail -n 1 || true)"
+          if [ -z "$preview_url" ]; then
+            echo "::error title=Missing Vercel preview URL::Vercel deploy output did not include a preview URL."
+            exit 1
+          fi
+          echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
           echo "Preview deployment: $preview_url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment preview URL
+        if: ${{ github.event_name == 'pull_request' && steps.deploy-preview.outputs.preview_url != '' }}
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.deploy-preview.outputs.preview_url }}
+        with:
+          script: |
+            const marker = '<!-- vercel-preview-url -->';
+            const previewUrl = process.env.PREVIEW_URL;
+            const body = [
+              marker,
+              'Vercel Preview 已就绪：',
+              '',
+              previewUrl,
+            ].join('\n');
+
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }
 
       - name: Deploy production
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production') }}
