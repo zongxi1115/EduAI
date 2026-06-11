@@ -154,7 +154,11 @@ def test_generate_classroom_bundle_builds_response(monkeypatch: pytest.MonkeyPat
     )
 
     assert captured["outline_result"] == {"outline": {"title": "牛顿第二定律"}}
-    assert captured["invoke_state"] == {"topic": "牛顿第二定律", "materials": ["教材"]}
+    assert captured["invoke_state"] == {
+        "topic": "牛顿第二定律",
+        "materials": ["教材"],
+        "media_resources": [],
+    }
     assert captured["slide_prompt_file"] == "slide.creative.md"
     assert captured["has_event_callback"] is False
     assert response.outline_source == "request"
