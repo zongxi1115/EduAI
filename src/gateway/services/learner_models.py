@@ -14,10 +14,11 @@ from uuid import uuid4
 
 from edu_multi_agent.config import PROJECT_ROOT, Settings
 from edu_multi_agent.file_io import now_iso
-from edu_multi_agent.models import GenerationRequest
+from edu_multi_agent.models import GenerationRequest, LearningGraphContext
 
 from ..schemas.learner_models import (
     LearningEvidenceEvent,
+    LearningRecommendation,
     LearnerEventListResponse,
     LearnerModelRecord,
     LearnerModelResponse,
@@ -44,6 +45,19 @@ GRAPH_SKILL_MATCH_MIN_SCORE = 0.68
 GRAPH_MATCH_TIE_MARGIN = 0.04
 GRAPH_SCORE_LINE_LIMIT = 4
 GRAPH_RELATED_TOPIC_LIMIT = 3
+PRIOR_RELATION_KEYWORDS = (
+    "prerequisite",
+    "precondition",
+    "requires",
+    "foundation",
+    "supports",
+    "depends",
+    "先修",
+    "前置",
+    "基础",
+    "支撑",
+    "支持",
+)
 DEFAULT_LEARNER_PROFILE = (
     "Mixed-ability class that needs clear guidance, visual explanation, "
     "and structured practice."
@@ -54,10 +68,13 @@ DEFAULT_LEARNER_PROFILE = (
 class GraphNodeIndex:
     node_id: str
     title: str
+    difficulty: float | None = None
+    summary: str = ""
     parent_id: str | None = None
     parent_title: str | None = None
     child_ids: tuple[str, ...] = ()
     path_titles: tuple[str, ...] = ()
+    prerequisite_titles: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -68,6 +85,15 @@ class GraphDatasetIndex:
     nodes: dict[str, GraphNodeIndex] = field(default_factory=dict)
     leaf_node_ids: tuple[str, ...] = ()
     adjacency: dict[str, set[str]] = field(default_factory=dict)
+    outgoing_edges: dict[str, list["GraphEdgeIndex"]] = field(default_factory=dict)
+    incoming_edges: dict[str, list["GraphEdgeIndex"]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphEdgeIndex:
+    source: str
+    target: str
+    relation: str
 
 
 @dataclass(slots=True)
@@ -81,13 +107,22 @@ class GraphRequestContext:
     dataset: GraphDatasetIndex
     focus_node_ids: tuple[str, ...]
     focus_leaf_node_ids: tuple[str, ...]
+    prerequisite_leaf_node_ids: tuple[str, ...]
     related_leaf_node_ids: tuple[str, ...]
+    graph_context: LearningGraphContext | None = None
 
 
 @dataclass(slots=True)
 class GraphEnrichmentSummary:
     summary: str
     recommended_focus: list[str]
+
+
+@dataclass(slots=True)
+class ScopedSkillEvidence:
+    judgment: SkillJudgment
+    context: GraphRequestContext | None = None
+    node: GraphNodeIndex | None = None
 
 
 class KnowledgeGraphIndex:
@@ -138,7 +173,8 @@ class KnowledgeGraphIndex:
                     continue
                 source = str(raw_edge.get("source", "")).strip()
                 target = str(raw_edge.get("target", "")).strip()
-                self._connect(dataset, source, target)
+                relation = str(raw_edge.get("relation") or "related").strip()
+                self._connect(dataset, source, target, relation=relation)
 
             dataset.leaf_node_ids = tuple(
                 node_id
@@ -178,20 +214,27 @@ class KnowledgeGraphIndex:
         node = GraphNodeIndex(
             node_id=node_id,
             title=title,
+            difficulty=_normalize_graph_difficulty(raw_node.get("difficulty")),
+            summary=str(raw_node.get("summary") or "").strip(),
             parent_id=parent.node_id if parent else None,
             parent_title=parent.title if parent else None,
             child_ids=tuple(child_id for child_id in child_ids if child_id),
             path_titles=(*path_titles, title),
+            prerequisite_titles=tuple(
+                str(item).strip()
+                for item in raw_node.get("prerequisites", [])
+                if str(item).strip()
+            ),
         )
         dataset.nodes[node_id] = node
         dataset.adjacency.setdefault(node_id, set())
 
         if parent is not None:
-            self._connect(dataset, parent.node_id, node_id)
+            self._connect(dataset, parent.node_id, node_id, relation="contains")
 
         for raw_link in raw_node.get("links", []):
             link = str(raw_link).strip()
-            self._connect(dataset, node_id, link)
+            self._connect(dataset, node_id, link, relation="links")
 
         for raw_child in raw_children:
             if isinstance(raw_child, dict):
@@ -202,17 +245,35 @@ class KnowledgeGraphIndex:
                     path_titles=node.path_titles,
                 )
 
-    def _connect(self, dataset: GraphDatasetIndex, source: str, target: str) -> None:
+    def _connect(
+        self,
+        dataset: GraphDatasetIndex,
+        source: str,
+        target: str,
+        *,
+        relation: str = "related",
+    ) -> None:
         source_id = str(source).strip()
         target_id = str(target).strip()
         if not source_id or not target_id:
             return
         dataset.adjacency.setdefault(source_id, set()).add(target_id)
         dataset.adjacency.setdefault(target_id, set()).add(source_id)
+        edge = GraphEdgeIndex(
+            source=source_id,
+            target=target_id,
+            relation=(relation or "related").strip(),
+        )
+        dataset.outgoing_edges.setdefault(source_id, []).append(edge)
+        dataset.incoming_edges.setdefault(target_id, []).append(edge)
 
     def resolve_request_context(self, request: GenerationRequest) -> GraphRequestContext | None:
         if not self.datasets:
             return None
+
+        explicit_context = self._resolve_explicit_request_context(request)
+        if explicit_context is not None:
+            return explicit_context
 
         explicit_terms = _extract_focus_terms_from_request(request)
         search_terms = explicit_terms or _trim_recent_items(
@@ -255,15 +316,84 @@ class KnowledgeGraphIndex:
             for focus_node_id in focus_node_ids
             for node_id in self._expand_to_leaf_nodes(best_dataset, focus_node_id)
         )
-        related_leaf_ids = self._build_related_leaf_scope(best_dataset, focus_node_ids, focus_leaf_ids)
+        prerequisite_leaf_ids = self._build_prerequisite_leaf_scope(
+            best_dataset,
+            focus_node_ids,
+            focus_leaf_ids,
+        )
+        related_leaf_ids = self._unique_titles([*focus_leaf_ids, *prerequisite_leaf_ids])
         return GraphRequestContext(
             dataset=best_dataset,
             focus_node_ids=focus_node_ids,
             focus_leaf_node_ids=focus_leaf_ids,
+            prerequisite_leaf_node_ids=prerequisite_leaf_ids,
             related_leaf_node_ids=related_leaf_ids,
+            graph_context=request.graph_context,
+        )
+
+    def _resolve_explicit_request_context(
+        self,
+        request: GenerationRequest,
+    ) -> GraphRequestContext | None:
+        graph_context = request.graph_context
+        if graph_context is None or not graph_context.dataset_id:
+            return None
+
+        dataset = self.datasets.get(graph_context.dataset_id)
+        if dataset is None:
+            return None
+
+        focus_node_ids: list[str] = []
+        for candidate in (
+            graph_context.focus_node_id,
+            graph_context.focus_node_title,
+        ):
+            node_id = self._resolve_node_reference(dataset, candidate or "")
+            if node_id:
+                focus_node_ids.append(node_id)
+
+        if not focus_node_ids:
+            search_terms = _extract_focus_terms_from_request(request) or _trim_recent_items(
+                [request.learning_goal, request.notes],
+                limit=3,
+            )
+            matches = self._candidate_node_matches(dataset, search_terms)
+            if matches:
+                top_score = matches[0].score
+                focus_node_ids.extend(
+                    match.node_id
+                    for match in matches
+                    if match.score >= top_score - GRAPH_MATCH_TIE_MARGIN
+                )
+
+        focus_node_ids_tuple = self._unique_titles(focus_node_ids)
+        if not focus_node_ids_tuple:
+            return None
+
+        focus_leaf_ids = self._unique_titles(
+            node_id
+            for focus_node_id in focus_node_ids_tuple
+            for node_id in self._expand_to_leaf_nodes(dataset, focus_node_id)
+        )
+        prerequisite_leaf_ids = self._build_prerequisite_leaf_scope(
+            dataset,
+            focus_node_ids_tuple,
+            focus_leaf_ids,
+        )
+        related_leaf_ids = self._unique_titles([*focus_leaf_ids, *prerequisite_leaf_ids])
+        return GraphRequestContext(
+            dataset=dataset,
+            focus_node_ids=focus_node_ids_tuple,
+            focus_leaf_node_ids=focus_leaf_ids,
+            prerequisite_leaf_node_ids=prerequisite_leaf_ids,
+            related_leaf_node_ids=related_leaf_ids,
+            graph_context=graph_context,
         )
 
     def match_skill_to_node(self, dataset: GraphDatasetIndex, state: SkillState) -> GraphNodeMatch | None:
+        if state.graph_dataset_id == dataset.dataset_id and state.graph_node_id in dataset.nodes:
+            return GraphNodeMatch(node_id=state.graph_node_id, score=1.0)
+
         candidate = self._best_node_match(
             dataset,
             [state.display_name, state.skill_id],
@@ -376,15 +506,43 @@ class KnowledgeGraphIndex:
             queue.extend(current_node.child_ids)
         return self._unique_titles(collected)
 
-    def _build_related_leaf_scope(
+    def _resolve_node_reference(self, dataset: GraphDatasetIndex, reference: str) -> str | None:
+        cleaned = str(reference or "").strip()
+        if not cleaned:
+            return None
+        if cleaned in dataset.nodes:
+            return cleaned
+
+        normalized = _normalize_text(cleaned)
+        for node_id, node in dataset.nodes.items():
+            if normalized in {_normalize_text(node_id), _normalize_text(node.title)}:
+                return node_id
+        return None
+
+    def _relation_is_prior(self, relation: str) -> bool:
+        normalized = _normalize_text(relation)
+        return any(keyword in normalized for keyword in PRIOR_RELATION_KEYWORDS)
+
+    def _build_prerequisite_leaf_scope(
         self,
         dataset: GraphDatasetIndex,
         focus_node_ids: tuple[str, ...],
         focus_leaf_ids: tuple[str, ...],
     ) -> tuple[str, ...]:
-        seed_ids = set(focus_node_ids) | set(focus_leaf_ids)
-        for node_id in list(seed_ids):
-            seed_ids.update(dataset.adjacency.get(node_id, set()))
+        seed_ids: set[str] = set()
+        for node_id in (*focus_node_ids, *focus_leaf_ids):
+            node = dataset.nodes.get(node_id)
+            if node is None:
+                continue
+
+            for prerequisite in node.prerequisite_titles:
+                prerequisite_id = self._resolve_node_reference(dataset, prerequisite)
+                if prerequisite_id:
+                    seed_ids.add(prerequisite_id)
+
+            for edge in dataset.incoming_edges.get(node_id, []):
+                if self._relation_is_prior(edge.relation):
+                    seed_ids.add(edge.source)
 
         related_leaf_ids: list[str] = []
         for node_id in seed_ids:
@@ -405,6 +563,16 @@ class KnowledgeGraphIndex:
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
     return max(lower, min(upper, value))
+
+
+def _normalize_graph_difficulty(value: Any) -> float | None:
+    try:
+        raw_difficulty = float(value)
+    except (TypeError, ValueError):
+        return None
+    if raw_difficulty > 1.0:
+        return round(_clamp(raw_difficulty / 5.0), 4)
+    return round(_clamp(raw_difficulty), 4)
 
 
 def _parse_iso_timestamp(value: str) -> datetime:
@@ -657,6 +825,176 @@ def _build_recommendations(
     return _trim_recent_items(recommendations, limit=4)
 
 
+def _recommendation_signal_score(state: SkillState) -> float:
+    mastery_gap = _clamp((0.72 - state.mastery) / 0.72)
+    uncertainty = 1.0 - state.confidence
+    recent_gap = _clamp((0.72 - state.rolling_score) / 0.72)
+    stale_signal = 1.0 - state.freshness
+    misconception_signal = min(0.16, 0.04 * sum(state.misconception_counts.values()))
+    if state.mastery >= 0.82 and state.confidence >= 0.45:
+        return round(_clamp(0.44 + 0.3 * state.mastery + 0.16 * state.confidence), 4)
+    return round(
+        _clamp(
+            0.38 * mastery_gap
+            + 0.22 * uncertainty
+            + 0.18 * recent_gap
+            + 0.06 * stale_signal
+            + misconception_signal
+        ),
+        4,
+    )
+
+
+def _skill_recommendation_type(state: SkillState) -> str:
+    if state.confidence < 0.22:
+        return "diagnose"
+    if state.mastery < 0.5:
+        return "remediate"
+    if state.mastery < 0.72:
+        return "consolidate"
+    if state.mastery >= 0.82 and state.confidence >= 0.45:
+        return "challenge"
+    return "advance"
+
+
+def _skill_recommendation_action(state: SkillState, recommendation_type: str) -> str:
+    if recommendation_type == "diagnose":
+        return f"先给“{state.display_name}”安排1组低门槛诊断题，补足判断证据。"
+    if recommendation_type == "remediate":
+        return f"用例题拆解和即时反馈重讲“{state.display_name}”，每步只引入一个变化。"
+    if recommendation_type == "consolidate":
+        return f"围绕“{state.display_name}”做2到3题同型变式，确认能稳定迁移。"
+    if recommendation_type == "challenge":
+        return f"给“{state.display_name}”增加综合题或开放题，验证高阶应用能力。"
+    return f"把“{state.display_name}”接到下一知识点，边学边穿插快速复盘。"
+
+
+def _build_skill_recommendation(state: SkillState) -> LearningRecommendation | None:
+    score = _recommendation_signal_score(state)
+    recommendation_type = _skill_recommendation_type(state)
+    if score < 0.28 and recommendation_type != "challenge":
+        return None
+    reason = (
+        f"掌握度 {state.mastery:.0%}，可信度 {state.confidence:.0%}，"
+        f"近期表现 {state.rolling_score:.0%}。"
+    )
+    if state.misconception_counts:
+        top_misconception = max(
+            state.misconception_counts.items(),
+            key=lambda item: (item[1], item[0]),
+        )[0]
+        reason += f" 高频误区：{top_misconception}。"
+    return LearningRecommendation(
+        target_id=f"skill:{state.skill_id}",
+        title=state.display_name,
+        recommendation_type=recommendation_type,
+        priority=5,
+        score=score,
+        reason=reason,
+        suggested_action=_skill_recommendation_action(state, recommendation_type),
+    )
+
+
+def _build_graph_learning_recommendations(
+    skill_states: list[SkillState],
+    graph_index: KnowledgeGraphIndex,
+) -> list[LearningRecommendation]:
+    matched_items: list[tuple[SkillState, GraphDatasetIndex, GraphNodeIndex]] = []
+    for state in skill_states:
+        best_match: tuple[GraphDatasetIndex, GraphNodeMatch] | None = None
+        candidate_datasets = (
+            [graph_index.datasets[state.graph_dataset_id]]
+            if state.graph_dataset_id in graph_index.datasets
+            else list(graph_index.datasets.values())
+        )
+        for dataset in candidate_datasets:
+            match = graph_index.match_skill_to_node(dataset, state)
+            if match is None:
+                continue
+            if best_match is None or match.score > best_match[1].score:
+                best_match = (dataset, match)
+        if best_match is None:
+            continue
+        dataset, match = best_match
+        node = dataset.nodes.get(match.node_id)
+        if node is not None:
+            matched_items.append((state, dataset, node))
+
+    tracked_leaf_ids = {
+        leaf_id
+        for _state, dataset, node in matched_items
+        for leaf_id in graph_index._expand_to_leaf_nodes(dataset, node.node_id)
+    }
+    recommendations: list[LearningRecommendation] = []
+    for state, dataset, node in matched_items:
+        if state.mastery < 0.66 or state.confidence < 0.3:
+            continue
+        for neighbor_id in sorted(dataset.adjacency.get(node.node_id, set())):
+            for leaf_id in graph_index._expand_to_leaf_nodes(dataset, neighbor_id):
+                if leaf_id in tracked_leaf_ids:
+                    continue
+                leaf = dataset.nodes.get(leaf_id)
+                if leaf is None:
+                    continue
+                target_difficulty = _clamp(state.mastery + 0.12)
+                difficulty_fit = 0.04
+                if leaf.difficulty is not None:
+                    difficulty_fit = 0.12 * (1.0 - abs(leaf.difficulty - target_difficulty))
+                score = round(
+                    _clamp(0.46 + 0.2 * state.mastery + 0.12 * state.confidence + difficulty_fit),
+                    4,
+                )
+                recommendations.append(
+                    LearningRecommendation(
+                        target_id=f"graph:{dataset.dataset_id}:{leaf.node_id}",
+                        title=leaf.title,
+                        recommendation_type="advance",
+                        priority=5,
+                        score=score,
+                        reason=(
+                            f"已在“{state.display_name}”形成 {state.mastery:.0%} 掌握度，"
+                            f"“{leaf.title}”是图谱中的相邻知识点。"
+                        ),
+                        suggested_action=f"下一轮可以学习“{leaf.title}”，开头先用“{state.display_name}”做2分钟连接复盘。",
+                    )
+                )
+    return recommendations
+
+
+def _build_learning_recommendations(
+    record: LearnerModelRecord,
+    graph_index: KnowledgeGraphIndex,
+    *,
+    limit: int = 5,
+) -> list[LearningRecommendation]:
+    skill_states = list(record.skills.values())
+    candidates = [
+        recommendation
+        for state in skill_states
+        if (recommendation := _build_skill_recommendation(state)) is not None
+    ]
+    candidates.extend(_build_graph_learning_recommendations(skill_states, graph_index))
+
+    best_by_target: dict[str, LearningRecommendation] = {}
+    for candidate in candidates:
+        previous = best_by_target.get(candidate.target_id)
+        if previous is None or candidate.score > previous.score:
+            best_by_target[candidate.target_id] = candidate
+
+    ranked = sorted(
+        best_by_target.values(),
+        key=lambda item: (
+            -item.score,
+            item.recommendation_type != "remediate",
+            item.title,
+        ),
+    )[:limit]
+    return [
+        item.model_copy(update={"priority": index + 1})
+        for index, item in enumerate(ranked)
+    ]
+
+
 def _recompute_overall(record: LearnerModelRecord, *, current_timestamp: str) -> LearnerOverallAssessment:
     skill_states = list(record.skills.values())
     if not skill_states:
@@ -745,6 +1083,7 @@ def _recompute_overall(record: LearnerModelRecord, *, current_timestamp: str) ->
         weak_skills=weak_skill_names,
         key_misconceptions=key_misconceptions,
         recommended_focus=recommendations,
+        learning_recommendations=record.overall.learning_recommendations,
         evaluation_summary=evaluation_summary,
         prompt_profile="".join(prompt_lines).strip(),
         updated_at=current_timestamp,
@@ -763,6 +1102,7 @@ def _build_snapshot(record: LearnerModelRecord) -> LearnerModelSnapshot:
         weak_skills=record.overall.weak_skills,
         key_misconceptions=record.overall.key_misconceptions,
         recommended_focus=record.overall.recommended_focus,
+        learning_recommendations=record.overall.learning_recommendations,
         prompt_profile=record.overall.prompt_profile,
         evaluation_summary=record.overall.evaluation_summary,
         updated_at=record.updated_at,
@@ -836,6 +1176,7 @@ class LearnerModelService:
         if record is None:
             raise FileNotFoundError(learner_id)
         refreshed = _refresh_record_freshness(record, current_timestamp=now_iso())
+        refreshed = self._attach_learning_recommendations(refreshed)
         snapshot = _build_snapshot(refreshed)
         recent_events = self.repository.list_events(learner_id, limit=event_limit)
         return LearnerModelResponse(
@@ -853,6 +1194,25 @@ class LearnerModelService:
             total=len(items),
             items=items,
         )
+
+    def _attach_learning_recommendations(self, record: LearnerModelRecord) -> LearnerModelRecord:
+        recommendations = _build_learning_recommendations(record, self.graph_index)
+        prompt_profile = record.overall.prompt_profile
+        if recommendations:
+            recommendation_line = "智能推荐：" + "；".join(
+                f"{item.title}（{item.suggested_action}）"
+                for item in recommendations[:2]
+            )
+            if recommendation_line not in prompt_profile:
+                separator = "\n" if prompt_profile else ""
+                prompt_profile = f"{prompt_profile}{separator}{recommendation_line}"
+        overall = record.overall.model_copy(
+            update={
+                "learning_recommendations": recommendations,
+                "prompt_profile": prompt_profile,
+            }
+        )
+        return record.model_copy(update={"overall": overall})
 
     def enrich_generation_request(self, request: GenerationRequest) -> GenerationRequest:
         learner_id = (request.learner_id or "").strip()
@@ -908,7 +1268,21 @@ class LearnerModelService:
             return None
 
         relevant_pairs: list[tuple[SkillState, GraphNodeIndex]] = []
+        requested_course_group = (
+            context.graph_context.course_group_id
+            if context.graph_context is not None
+            else None
+        )
         for state in record.skills.values():
+            if state.graph_dataset_id and state.graph_dataset_id != context.dataset.dataset_id:
+                continue
+            if (
+                requested_course_group
+                and state.course_group_id
+                and state.course_group_id != requested_course_group
+                and not state.graph_node_id
+            ):
+                continue
             match = self.graph_index.match_skill_to_node(context.dataset, state)
             if match is None:
                 continue
@@ -955,7 +1329,7 @@ class LearnerModelService:
         ]
         related_titles = [
             context.dataset.nodes[node_id].title
-            for node_id in context.related_leaf_node_ids
+            for node_id in context.prerequisite_leaf_node_ids
             if node_id in context.dataset.nodes
             and node_id not in context.focus_leaf_node_ids
         ]
@@ -966,7 +1340,7 @@ class LearnerModelService:
             "当前目标知识点：" + "、".join(focus_titles) + "。",
         ]
         if related_titles:
-            lines.append("图谱关联知识点：" + "、".join(related_titles) + "。")
+            lines.append("前置/支撑知识点：" + "、".join(related_titles) + "。")
         if score_lines:
             lines.append("相关知识点得分：" + "；".join(score_lines) + "。")
         lines.append("相关学情：" + scoped_assessment.prompt_profile)
@@ -974,6 +1348,97 @@ class LearnerModelService:
             summary="\n".join(lines).strip(),
             recommended_focus=scoped_assessment.recommended_focus,
         )
+
+    def _resolve_review_graph_context(
+        self,
+        request: PracticeReviewRequest,
+    ) -> GraphRequestContext | None:
+        graph_context = request.graph_context
+        if graph_context is None:
+            return None
+
+        learning_goal = (
+            request.learning_goal
+            or graph_context.focus_node_title
+            or request.question.analysis
+            or request.question.question
+            or "学习任务"
+        )
+        notes = ""
+        if graph_context.focus_node_title:
+            notes = f"知识点：{graph_context.focus_node_title}"
+
+        generation_request = GenerationRequest(
+            learning_goal=learning_goal,
+            subject=graph_context.course_group_id or graph_context.course_id or "General",
+            grade_level="Unspecified",
+            learner_id=request.learner_id,
+            learner_profile=DEFAULT_LEARNER_PROFILE,
+            notes=notes or "None",
+            graph_context=graph_context,
+        )
+        return self.graph_index.resolve_request_context(generation_request)
+
+    def _scope_skill_evidence(
+        self,
+        request: PracticeReviewRequest,
+        skill_judgments: list[SkillJudgment],
+    ) -> list[ScopedSkillEvidence]:
+        context = self._resolve_review_graph_context(request)
+        if context is None:
+            return [
+                ScopedSkillEvidence(judgment=judgment)
+                for judgment in skill_judgments
+            ]
+
+        scoped_items: list[ScopedSkillEvidence] = []
+        for judgment in skill_judgments:
+            match = self.graph_index._best_node_match(
+                context.dataset,
+                [judgment.display_name, judgment.skill_id],
+                minimum_score=GRAPH_SKILL_MATCH_MIN_SCORE,
+            )
+            node_id = match.node_id if match is not None else ""
+            if node_id and not self.graph_index.node_overlaps_leaf_scope(
+                context.dataset,
+                node_id,
+                context.related_leaf_node_ids,
+            ):
+                node_id = ""
+
+            if not node_id and len(context.focus_leaf_node_ids) == 1:
+                node_id = context.focus_leaf_node_ids[0]
+
+            node = context.dataset.nodes.get(node_id)
+            if node is None:
+                scoped_items.append(ScopedSkillEvidence(judgment=judgment, context=context))
+                continue
+
+            scoped_skill_id = f"graph:{context.dataset.dataset_id}:{node.node_id}"
+            scoped_items.append(
+                ScopedSkillEvidence(
+                    judgment=judgment.model_copy(update={"skill_id": scoped_skill_id}),
+                    context=context,
+                    node=node,
+                )
+            )
+        return scoped_items
+
+    def _skill_state_graph_metadata(self, item: ScopedSkillEvidence) -> dict[str, str | None]:
+        graph_context = item.context.graph_context if item.context is not None else None
+        dataset_id = (
+            item.context.dataset.dataset_id
+            if item.context is not None and item.node is not None
+            else None
+        )
+        return {
+            "graph_dataset_id": dataset_id,
+            "graph_node_id": item.node.node_id if item.node is not None else None,
+            "graph_node_title": item.node.title if item.node is not None else None,
+            "course_group_id": graph_context.course_group_id if graph_context is not None else None,
+            "course_id": graph_context.course_id if graph_context is not None else None,
+            "source_graph_id": graph_context.source_graph_id if graph_context is not None else None,
+        }
 
     def ingest_review(
         self,
@@ -988,6 +1453,8 @@ class LearnerModelService:
 
         timestamp = now_iso()
         skill_judgments = _sanitize_skill_judgments(request, review)
+        scoped_skill_evidence = self._scope_skill_evidence(request, skill_judgments)
+        skill_judgments = [item.judgment for item in scoped_skill_evidence]
         observations = _trim_recent_items(
             [
                 *[item for item in review.learner_observations if item.strip()],
@@ -1002,6 +1469,7 @@ class LearnerModelService:
             session_id=(request.session_id or "").strip() or None,
             source=source,
             learning_goal=(request.learning_goal or "").strip() or None,
+            graph_context=request.graph_context,
             question_id=request.question.id,
             question_type=request.question.question_type,
             answer_preview=_truncate_answer_preview(request.student_answer),
@@ -1040,12 +1508,15 @@ class LearnerModelService:
             )
             correctness_score = _correctness_score(review)
 
-            for judgment in skill_judgments:
+            for item in scoped_skill_evidence:
+                judgment = item.judgment
+                graph_metadata = self._skill_state_graph_metadata(item)
                 previous = updated_skills.get(judgment.skill_id)
                 if previous is None:
                     previous = SkillState(
                         skill_id=judgment.skill_id,
                         display_name=judgment.display_name,
+                        **graph_metadata,
                         mastery=0.5,
                         confidence=0.0,
                         freshness=1.0,
@@ -1093,6 +1564,10 @@ class LearnerModelService:
                 updated_skills[judgment.skill_id] = previous.model_copy(
                     update={
                         "display_name": judgment.display_name,
+                        **{
+                            key: value if value is not None else getattr(previous, key)
+                            for key, value in graph_metadata.items()
+                        },
                         "mastery": round(_clamp(mastery), 4),
                         "confidence": round(_clamp(confidence), 4),
                         "freshness": 1.0,
@@ -1132,6 +1607,7 @@ class LearnerModelService:
             updated_record = updated_record.model_copy(
                 update={"overall": _recompute_overall(updated_record, current_timestamp=timestamp)}
             )
+            updated_record = self._attach_learning_recommendations(updated_record)
 
             self.repository.save_model(updated_record)
             self.repository.append_event(event)

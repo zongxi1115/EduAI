@@ -238,8 +238,8 @@ def build_practice_prompts(
     question_type_reference = _load_question_type_reference()
     system_prompt = """
 You are the practice-design agent in a teaching-preparation multi-agent system.
-You produce a JSON question bank file plus an answer key in Chinese.
-Return only the required tags and files.
+You produce a structured Chinese practice package.
+Return strict JSON only. Do not include Markdown fences.
 """.strip()
 
     user_prompt = f"""
@@ -258,24 +258,29 @@ Supervisor plan:
 Practice blueprint:
 {_practice_blueprint_json(blueprint)}
 
-Output format:
-<<<SUMMARY>>>
-One short Chinese paragraph describing what was produced.
-<<<END SUMMARY>>>
-<<<FILE:practice_questions.json>>>
-JSON array only.
-<<<END FILE>>>
-<<<FILE:answer_key.md>>>
-Markdown content in Chinese.
-<<<END FILE>>>
+Return one JSON object with exactly this shape:
+{{
+  "summary": "一句中文摘要",
+  "questions": [
+    {{
+      "question_type": "FillInTheBlank | MultipleChoice | ShortAnswer | Listening | Coding | Drawing",
+      "question": "中文题干",
+      "analysis": "中文解析",
+      "need_ai_judge": false,
+      "skill_tags": ["中文技能标签"],
+      "difficulty": 0.4
+    }}
+  ],
+  "answer_key_markdown": "Markdown content in Chinese"
+}}
 
 File requirements:
 - Follow the exact field names and question classes used in this reference file:
 ```python
 {question_type_reference}
 ```
-- practice_questions.json must be a top-level JSON array.
-- Each item in the array must represent one question object built from one of these classes:
+- `questions` must be a top-level array under the returned object.
+- Each item in `questions` must represent one question object built from one of these classes:
   FillInTheBlank, MultipleChoice, ShortAnswer, Listening, Coding, Drawing.
 - Each item must include a `question_type` field whose value is exactly one of:
   `FillInTheBlank`, `MultipleChoice`, `ShortAnswer`, `Listening`, `Coding`, `Drawing`.
@@ -283,6 +288,8 @@ File requirements:
   after generation is complete.
 - Besides `question_type`, each item must use the exact field names from the dataclass
   definition of that question type.
+- For MultipleChoice questions, `correct_answer` must be the exact full option content
+  from the `options` array, not the option label such as A, B, C, D, `A.`, or `选项A`.
 - Use `need_ai_judge` to mark whether the frontend should hand the submission to AI review.
   Set it to `true` for subjective/open-ended responses such as most ShortAnswer, Coding,
   and Drawing items, and set it to `false` for questions that can be judged directly.
@@ -299,15 +306,24 @@ File requirements:
 - The question bank must include warm-up items, core practice, one challenge task,
   and one applied, transfer, or discussion-style prompt.
 - Every question must have clear Chinese question text and Chinese analysis.
-- The generated JSON must be directly parseable by `json.loads`.
-- Do not wrap the array in an object.
-- answer_key.md must provide concise answers, solution ideas, and common mistakes.
-- answer_key.md must follow the same order as `practice_questions.json`, and reference each item
+- The generated JSON object must be directly parseable by `json.loads`.
+- In JSON strings, every literal backslash must be escaped as `\\\\`.
+  For LaTeX commands, write `\\\\theta`, `\\\\frac`, `\\\\Delta`,
+  not `\\theta`, `\\frac`, or `\\Delta`.
+- Any mathematical formula in `question`, `options`, answers, `analysis`, or
+  `answer_key_markdown` must use Markdown math delimiters:
+  use `$...$` for inline formulas and `$$...$$` for standalone display formulas.
+- Do not write bare LaTeX commands such as `\\Delta`, `\\theta`, `\\frac`, `\\sin`,
+  or `\\sqrt` outside `$...$` or `$$...$$`.
+- Do not use `\\(...\\)` or `\\[...\\]`; the practice frontend and PDF export expect
+  dollar-delimited Markdown math.
+- `answer_key_markdown` must provide concise answers, solution ideas, and common mistakes.
+- `answer_key_markdown` must follow the same order as `questions`, and reference each item
   as `第1题`、`第2题`、`第3题` ... instead of inventing ids.
 - The difficulty should match the learner profile and stay aligned with the learning goal.
 - For Coding questions, `reference_code` must be a complete reference implementation,
   and `test_cases` must be JSON-serializable.
-- Do not output anything outside the tags.
+- Do not output anything outside the JSON object.
 """.strip()
 
     return system_prompt, user_prompt
@@ -316,7 +332,6 @@ File requirements:
 def build_manim_prompts(
     request: GenerationRequest,
     plan: PreparationPlan,
-    repair_memory: str | None = None,
 ) -> tuple[str, str]:
     system_prompt = """
 You are the Manim animation agent in a teaching-preparation multi-agent system.
@@ -362,9 +377,6 @@ Context:
 
 Supervisor plan:
 {_plan_json(plan)}
-
-Project runtime lessons:
-{repair_memory or "(No previous Manim runtime lessons recorded yet.)"}
 
 Output format:
 <<<SUMMARY>>>

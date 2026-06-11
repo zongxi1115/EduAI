@@ -234,6 +234,11 @@ def load_run_view(registry: RunRegistry, settings: Settings, run_id: str) -> dic
     return run_view_from_disk(settings, run_id)
 
 
+def is_persisted_prep_run_dir(path: Path) -> bool:
+    """Return whether a directory has the persisted prep-run supervisor marker."""
+    return path.is_dir() and (path / "00_supervisor").is_dir()
+
+
 def list_run_views(
     registry: RunRegistry,
     settings: Settings,
@@ -243,7 +248,11 @@ def list_run_views(
     """List all known runs from memory and disk, optionally filtered by status."""
     run_ids = set(registry.list_session_ids())
     if settings.output_root.is_dir():
-        run_ids.update(path.name for path in settings.output_root.iterdir() if path.is_dir())
+        run_ids.update(
+            path.name
+            for path in settings.output_root.iterdir()
+            if is_persisted_prep_run_dir(path)
+        )
 
     views: list[dict[str, Any]] = []
     for run_id in run_ids:

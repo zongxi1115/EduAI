@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from edu_multi_agent.models import LearningGraphContext
+
 
 AbilityBand = Literal[
     "evidence_needed",
@@ -12,6 +14,26 @@ AbilityBand = Literal[
     "proficient",
     "advanced",
 ]
+
+RecommendationType = Literal[
+    "diagnose",
+    "remediate",
+    "consolidate",
+    "advance",
+    "challenge",
+]
+
+
+class LearningRecommendation(BaseModel):
+    """One model-ranked recommendation for the learner's next step."""
+
+    target_id: str = Field(description="推荐目标的稳定标识。")
+    title: str = Field(description="推荐目标的展示名称。")
+    recommendation_type: RecommendationType = Field(description="推荐动作类型。")
+    priority: int = Field(ge=1, le=5, description="优先级，1 表示最优先。")
+    score: float = Field(ge=0.0, le=1.0, description="排序模型给出的推荐分。")
+    reason: str = Field(description="推荐理由。")
+    suggested_action: str = Field(description="下一步可执行教学动作。")
 
 
 class SkillJudgment(BaseModel):
@@ -57,6 +79,30 @@ class SkillState(BaseModel):
 
     skill_id: str = Field(description="技能标识符。")
     display_name: str = Field(description="技能显示名称。")
+    graph_dataset_id: str | None = Field(
+        default=None,
+        description="技能绑定的知识图谱数据集标识。",
+    )
+    graph_node_id: str | None = Field(
+        default=None,
+        description="技能绑定的知识图谱节点标识。",
+    )
+    graph_node_title: str | None = Field(
+        default=None,
+        description="技能绑定的知识图谱节点名称。",
+    )
+    course_group_id: str | None = Field(
+        default=None,
+        description="技能所属课程群标识。",
+    )
+    course_id: str | None = Field(
+        default=None,
+        description="技能所属课程标识。",
+    )
+    source_graph_id: str | None = Field(
+        default=None,
+        description="课程群节点关联的细分课程图谱标识。",
+    )
     mastery: float = Field(ge=0.0, le=1.0, description="当前掌握度估计。")
     confidence: float = Field(ge=0.0, le=1.0, description="当前判断可信度。")
     freshness: float = Field(ge=0.0, le=1.0, description="证据新鲜度估计。")
@@ -98,6 +144,10 @@ class LearnerModelSnapshot(BaseModel):
         default_factory=list,
         description="建议下一轮优先处理的方向。",
     )
+    learning_recommendations: list[LearningRecommendation] = Field(
+        default_factory=list,
+        description="由学情推荐排序模型生成的下一步学习建议。",
+    )
     prompt_profile: str = Field(
         default="",
         description="面向后续教学生成链路的学情摘要。",
@@ -125,6 +175,10 @@ class LearnerOverallAssessment(BaseModel):
         default_factory=list,
         description="建议下一轮优先处理的方向。",
     )
+    learning_recommendations: list[LearningRecommendation] = Field(
+        default_factory=list,
+        description="由学情推荐排序模型生成的下一步学习建议。",
+    )
     evaluation_summary: str = Field(
         default="",
         description="面向教师阅读的一句话整体评价。",
@@ -146,6 +200,10 @@ class LearningEvidenceEvent(BaseModel):
         description="事件来源。"
     )
     learning_goal: str | None = Field(default=None, description="本次任务对应的学习目标。")
+    graph_context: LearningGraphContext | None = Field(
+        default=None,
+        description="本次学习事件对应的图谱上下文。",
+    )
     question_id: str = Field(description="题目唯一标识。")
     question_type: str = Field(description="题型。")
     answer_preview: str = Field(default="", description="截断后的学生答案预览。")
@@ -184,6 +242,7 @@ def build_empty_assessment(timestamp: str) -> LearnerOverallAssessment:
         weak_skills=[],
         key_misconceptions=[],
         recommended_focus=["先补充更多带技能标签的学习证据。"],
+        learning_recommendations=[],
         evaluation_summary="当前学习证据还不足，暂时无法形成稳定学情判断。",
         prompt_profile="历史学习证据不足，建议先安排1到2个低门槛诊断任务，再决定难度节奏。",
         updated_at=timestamp,
@@ -242,6 +301,10 @@ class LearnerReviewIngestRequest(BaseModel):
         description="本次写入的事件来源。",
     )
     learning_goal: str | None = Field(default=None, description="当前学习目标。")
+    graph_context: LearningGraphContext | None = Field(
+        default=None,
+        description="当前练习题继承的知识图谱上下文。",
+    )
     question: dict[str, Any] = Field(description="题目快照。")
     student_answer: Any = Field(default=None, description="学生提交内容。")
     submission_context: dict[str, Any] = Field(

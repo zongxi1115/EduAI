@@ -266,7 +266,7 @@ class ClassroomTaskRegistry:
         elif event_name == "workflow_failed":
             session.status = RunStatus.failed
             session.finished_at = str(event.get("timestamp") or now_iso())
-            session.error = str(data.get("error") or event.get("summary") or "Workflow failed.")
+            session.error = str(data.get("error") or event.get("summary") or "AI 课堂生成任务失败。")
 
 
 def load_json_file(path: Path) -> dict[str, Any] | None:
@@ -406,12 +406,46 @@ def write_classroom_preview_files(output_dir: Path, result_payload: dict[str, An
     if not isinstance(pages, list) or not pages:
         return
 
+    preview_pages = _build_preview_page_documents(result_payload)
+    for page in preview_pages:
+        idx = int(page["idx"])
+        filename = f"page_{idx + 1:02d}.html"
+        write_text_file(
+            output_dir,
+            f"{HTML_PREVIEW_DIRNAME}/{filename}",
+            str(page["html"]),
+        )
+
+    if preview_pages:
+        write_text_file(
+            output_dir,
+            f"{HTML_PREVIEW_DIRNAME}/index.html",
+            _render_preview_index(result_payload.get("topic"), preview_pages),
+        )
+
+
+def render_classroom_preview_document(result_payload: dict[str, Any]) -> str | None:
+    preview_pages = _build_preview_page_documents(result_payload)
+    if not preview_pages:
+        return None
+    return _render_preview_index(result_payload.get("topic"), preview_pages)
+
+
+def _build_preview_page_documents(result_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    bundle = result_payload.get("bundle")
+    if not isinstance(bundle, dict):
+        return []
+
+    pages = bundle.get("pages")
+    if not isinstance(pages, list) or not pages:
+        return []
+
     blueprint_by_idx: dict[int, dict[str, Any]] = {}
     for item in result_payload.get("page_blueprints") or []:
         if isinstance(item, dict) and isinstance(item.get("idx"), int):
             blueprint_by_idx[int(item["idx"])] = item
 
-    links: list[str] = []
+    preview_pages: list[dict[str, Any]] = []
     for page in pages:
         if not isinstance(page, dict):
             continue
@@ -421,27 +455,20 @@ def write_classroom_preview_files(output_dir: Path, result_payload: dict[str, An
             continue
 
         page_title = _resolve_page_title(idx, blueprint_by_idx)
-        filename = f"page_{idx + 1:02d}.html"
-        relative_path = f"{HTML_PREVIEW_DIRNAME}/{filename}"
-        write_text_file(
-            output_dir,
-            relative_path,
-            _render_preview_html(
-                idx=idx,
-                page_title=page_title,
-                section_html=html,
-            ),
-        )
-        links.append(
-            f'<li><a href="./{escape(filename)}">第 {idx + 1} 页：{escape(page_title)}</a></li>'
+        preview_pages.append(
+            {
+                "idx": idx,
+                "title": page_title,
+                "html": _render_preview_html(
+                    idx=idx,
+                    page_title=page_title,
+                    section_html=html,
+                ),
+            }
         )
 
-    if links:
-        write_text_file(
-            output_dir,
-            f"{HTML_PREVIEW_DIRNAME}/index.html",
-            _render_preview_index(result_payload.get("topic"), links),
-        )
+    preview_pages.sort(key=lambda page: int(page["idx"]))
+    return preview_pages
 
 
 def _write_incremental_preview_files(output_dir: Path, event: dict[str, Any]) -> None:
@@ -594,14 +621,26 @@ def _render_preview_html(*, idx: int, page_title: str, section_html: str) -> str
 {section_html}
     </div>
     <script>
-      document.addEventListener("keydown", function (event) {{
-        if (event.key !== "ArrowRight") return;
+      function previewAdvance() {{
         if (typeof window.to_next !== "function") return;
-        event.preventDefault();
         const advanced = window.to_next();
         if (advanced && window.MathJax && typeof window.MathJax.typesetPromise === "function") {{
           window.MathJax.typesetPromise().catch(function () {{}});
         }}
+      }}
+
+      document.addEventListener("keydown", function (event) {{
+        if (event.key !== "ArrowRight") return;
+        event.preventDefault();
+        previewAdvance();
+      }});
+
+      document.addEventListener("click", function (event) {{
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (window.getSelection && window.getSelection().toString().trim()) return;
+        if (target.closest("a,button,input,select,textarea,[role='button']")) return;
+        previewAdvance();
       }});
     </script>
   </body>
@@ -609,9 +648,9 @@ def _render_preview_html(*, idx: int, page_title: str, section_html: str) -> str
 """
 
 
-def _render_preview_index(topic: Any, links: list[str]) -> str:
+def _render_preview_index(topic: Any, pages: list[dict[str, Any]]) -> str:
     safe_topic = escape(str(topic or "课堂预览"))
-    link_markup = "\n".join(links)
+    pages_json = json.dumps(pages, ensure_ascii=False).replace("<", "\\u003c")
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
@@ -621,59 +660,312 @@ def _render_preview_index(topic: Any, links: list[str]) -> str:
     <style>
       body {{
         margin: 0;
-        min-height: 100vh;
-        padding: 40px 24px;
-        background: #f4f7fb;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: #0f172a;
         color: #142032;
         font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       }}
 
-      .wrap {{
-        width: min(100%, 860px);
-        margin: 0 auto;
-        padding: 28px;
-        border-radius: 24px;
-        background: rgba(255, 255, 255, 0.92);
-        box-shadow: 0 18px 48px rgba(18, 40, 73, 0.08);
+      .deck {{
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        background:
+          radial-gradient(circle at 18% 8%, rgba(99, 102, 241, 0.24), transparent 32%),
+          linear-gradient(180deg, #172033 0%, #0f172a 100%);
       }}
 
-      h1 {{
-        margin: 0 0 8px;
-        font-size: 1.6rem;
+      .stage {{
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
       }}
 
-      p {{
-        margin: 0 0 20px;
-        color: rgba(20, 32, 50, 0.72);
+      iframe {{
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #ffffff;
       }}
 
-      ul {{
-        margin: 0;
-        padding-left: 20px;
+      .chrome {{
+        position: fixed;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(15, 23, 42, 0.72);
+        color: #f8fafc;
+        backdrop-filter: blur(18px);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(10px);
+        transition: opacity 180ms ease, transform 180ms ease;
       }}
 
-      li + li {{
-        margin-top: 10px;
+      .deck.chrome-visible .chrome,
+      .chrome:hover,
+      .chrome:focus-within {{
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
       }}
 
-      a {{
-        color: #1747b5;
-        text-decoration: none;
+      .meta {{
+        left: 18px;
+        bottom: 18px;
+        max-width: min(640px, calc(100vw - 180px));
+        border-radius: 18px;
+        padding: 12px 16px;
       }}
 
-      a:hover {{
-        text-decoration: underline;
+      .meta-title {{
+        min-width: 0;
+      }}
+
+      .meta-title strong,
+      .meta-title span {{
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }}
+
+      .meta-title strong {{
+        font-size: 0.92rem;
+      }}
+
+      .meta-title span {{
+        margin-top: 2px;
+        color: rgba(248, 250, 252, 0.68);
+        font-size: 0.78rem;
+      }}
+
+      .counter {{
+        flex: 0 0 auto;
+        border-right: 1px solid rgba(255, 255, 255, 0.18);
+        padding-right: 12px;
+        color: rgba(248, 250, 252, 0.78);
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+      }}
+
+      .controls {{
+        right: 18px;
+        bottom: 18px;
+        border-radius: 999px;
+        padding: 8px;
+      }}
+
+      .nav-button {{
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 42px;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+        cursor: pointer;
+        font-size: 1.25rem;
+        transition: background 160ms ease, transform 160ms ease, opacity 160ms ease;
+      }}
+
+      .nav-button:hover {{
+        background: rgba(255, 255, 255, 0.2);
+      }}
+
+      .nav-button:active {{
+        transform: scale(0.96);
+      }}
+
+      .nav-button:disabled {{
+        cursor: default;
+        opacity: 0.38;
+      }}
+
+      .hint {{
+        position: fixed;
+        z-index: 20;
+        top: 18px;
+        right: 18px;
+        border-radius: 999px;
+        padding: 9px 13px;
+        background: rgba(15, 23, 42, 0.64);
+        color: rgba(248, 250, 252, 0.74);
+        font-size: 0.78rem;
+        backdrop-filter: blur(16px);
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: opacity 180ms ease, transform 180ms ease;
+      }}
+
+      .deck.chrome-visible .hint {{
+        opacity: 1;
+        transform: translateY(0);
+      }}
+
+      .edge-zone {{
+        position: fixed;
+        z-index: 25;
+        pointer-events: auto;
+      }}
+
+      .edge-zone.top {{
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 46px;
+      }}
+
+      .edge-zone.bottom {{
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 76px;
+      }}
+
+      .edge-zone.left {{
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 34px;
+      }}
+
+      .edge-zone.right {{
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 34px;
       }}
     </style>
   </head>
   <body>
-    <main class="wrap">
-      <h1>{safe_topic}</h1>
-      <p>下面是本次 AI 课堂任务输出的可直接打开的 HTML 预览页面。</p>
-      <ul>
-{link_markup}
-      </ul>
+    <main class="deck" id="deck">
+      <div class="stage">
+        <iframe id="stage-frame" title="{safe_topic}"></iframe>
+      </div>
+      <div class="edge-zone top" data-edge-zone></div>
+      <div class="edge-zone bottom" data-edge-zone></div>
+      <div class="edge-zone left" data-edge-zone></div>
+      <div class="edge-zone right" data-edge-zone></div>
+      <div class="hint">点击页面空白处推进当前页</div>
+      <div class="chrome meta">
+        <span class="counter" id="counter"></span>
+        <span class="meta-title">
+          <strong>{safe_topic}</strong>
+          <span id="page-title"></span>
+        </span>
+      </div>
+      <div class="chrome controls" aria-label="课堂页面导航">
+        <button class="nav-button" id="prev-button" type="button" aria-label="上一页">‹</button>
+        <button class="nav-button" id="next-button" type="button" aria-label="下一步或下一页">›</button>
+      </div>
     </main>
+    <script>
+      const pages = {pages_json};
+      let currentIndex = 0;
+      let chromeHideTimer = 0;
+      const deck = document.getElementById("deck");
+      const frame = document.getElementById("stage-frame");
+      const counter = document.getElementById("counter");
+      const pageTitle = document.getElementById("page-title");
+      const prevButton = document.getElementById("prev-button");
+      const nextButton = document.getElementById("next-button");
+
+      function showChrome() {{
+        deck.classList.add("chrome-visible");
+        window.clearTimeout(chromeHideTimer);
+        chromeHideTimer = window.setTimeout(function () {{
+          deck.classList.remove("chrome-visible");
+        }}, 1600);
+      }}
+
+      document.querySelectorAll("[data-edge-zone]").forEach(function (zone) {{
+        zone.addEventListener("mouseenter", showChrome);
+        zone.addEventListener("mousemove", showChrome);
+      }});
+
+      document.querySelectorAll(".chrome").forEach(function (item) {{
+        item.addEventListener("mouseenter", showChrome);
+        item.addEventListener("focusin", showChrome);
+      }});
+
+      function currentPage() {{
+        return pages[currentIndex] || null;
+      }}
+
+      function render() {{
+        const page = currentPage();
+        if (!page) return;
+        frame.srcdoc = page.html;
+        counter.textContent = `${{currentIndex + 1}} / ${{pages.length}}`;
+        pageTitle.textContent = `第 ${{page.idx + 1}} 页：${{page.title}}`;
+        prevButton.disabled = currentIndex <= 0;
+        nextButton.disabled = pages.length === 0;
+      }}
+
+      function previousPage() {{
+        if (currentIndex <= 0) return;
+        currentIndex -= 1;
+        render();
+      }}
+
+      function nextPage() {{
+        if (currentIndex >= pages.length - 1) return;
+        currentIndex += 1;
+        render();
+      }}
+
+      function advanceCurrentPage() {{
+        try {{
+          const stageWindow = frame.contentWindow;
+          if (stageWindow && typeof stageWindow.to_next === "function") {{
+            const advanced = stageWindow.to_next();
+            if (advanced) {{
+              if (
+                stageWindow.MathJax &&
+                typeof stageWindow.MathJax.typesetPromise === "function"
+              ) {{
+                stageWindow.MathJax.typesetPromise().catch(function () {{}});
+              }}
+              return true;
+            }}
+          }}
+        }} catch (error) {{
+          return false;
+        }}
+        return false;
+      }}
+
+      prevButton.addEventListener("click", previousPage);
+      nextButton.addEventListener("click", function () {{
+        if (!advanceCurrentPage()) {{
+          nextPage();
+        }}
+      }});
+
+      document.addEventListener("keydown", function (event) {{
+        if (event.key === "ArrowLeft") {{
+          event.preventDefault();
+          previousPage();
+          return;
+        }}
+        if (event.key === "ArrowRight") {{
+          event.preventDefault();
+          if (!advanceCurrentPage()) {{
+            nextPage();
+          }}
+        }}
+      }});
+
+      render();
+    </script>
   </body>
 </html>
 """

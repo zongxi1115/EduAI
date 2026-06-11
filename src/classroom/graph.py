@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -12,7 +13,7 @@ from .nodes.assemble import assemble_node
 from .nodes.script import assemble_script_node
 from .nodes.split import split_node
 from .parser import parse_page
-from .state import ClassState, PageScriptTaskState, SlideTaskState
+from .state import ClassState, MediaResource, PageBlueprint, PageScriptTaskState, SlideTaskState
 
 StateNode = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 GraphEventCallback = Callable[[dict[str, Any]], None]
@@ -50,7 +51,7 @@ def fanout(state: ClassState) -> list[Send]:
                 "page": pages[idx],
                 "page_blueprint": page_blueprints[idx] if idx < len(page_blueprints) else None,
                 "window_context": _build_window_context(state, idx),
-                "media_resources": _assign_media_to_page(all_media, idx, total_pages),
+                "media_resources": _assign_media_to_page(all_media, page_blueprints, idx, total_pages),
             },
         )
         for idx in range(len(pages))
@@ -59,39 +60,122 @@ def fanout(state: ClassState) -> list[Send]:
 
 def _assign_media_to_page(
     media_resources: list[MediaResource],
+    page_blueprints: list[PageBlueprint],
     page_idx: int,
     total_pages: int,
 ) -> list[MediaResource]:
-    """Assign each media resource to at most one page so resources are not duplicated.
-
-    Strategy: distribute resources round-robin or by type to the most relevant page.
-    Videos go to early/middle pages (where visuals are most impactful).
-    Interactive HTML goes to middle/late pages (where engagement matters).
-    """
+    """Assign each media resource to the page whose storyboard best matches it."""
     if not media_resources or total_pages == 0:
         return []
 
     assigned: list[MediaResource] = []
     for resource in media_resources:
-        rtype = resource.get("resource_type", "")
-        # Determine the best page index for this resource type
-        if rtype == "video":
-            # Videos work best as visual anchors in early-to-mid pages
-            target_idx = min(page_idx, total_pages - 1)
-            # Assign video to the page whose index is closest to 1/3 of total
-            ideal = max(0, min(total_pages - 1, total_pages // 3))
-        elif rtype == "interactive_html":
-            # Interactive elements work best in mid-to-late pages
-            ideal = max(0, min(total_pages - 1, (2 * total_pages) // 3))
-        else:
-            # Images: assign to first page that doesn't already have one
-            ideal = 0
-
-        # Only include if this page is the designated target
+        ideal = _best_media_page_idx(resource, page_blueprints, total_pages)
         if page_idx == ideal:
             assigned.append(resource)
 
     return assigned
+
+
+def _best_media_page_idx(
+    resource: MediaResource,
+    page_blueprints: list[PageBlueprint],
+    total_pages: int,
+) -> int:
+    if not page_blueprints:
+        return _fallback_media_page_idx(resource, total_pages)
+
+    scored_pages = [
+        (
+            _score_media_page(resource, blueprint, total_pages),
+            -abs(blueprint["idx"] - _fallback_media_page_idx(resource, total_pages)),
+            -blueprint["idx"],
+            blueprint["idx"],
+        )
+        for blueprint in page_blueprints
+    ]
+    scored_pages.sort(reverse=True)
+    return scored_pages[0][3]
+
+
+def _score_media_page(
+    resource: MediaResource,
+    blueprint: PageBlueprint,
+    total_pages: int,
+) -> int:
+    rtype = resource.get("resource_type", "")
+    suggested_media_types = {
+        str(item).strip().lower()
+        for item in blueprint.get("suggested_media_types", [])
+        if str(item).strip()
+    }
+    layout_style = str(blueprint.get("layout_style") or "").lower()
+    page_text = " ".join(
+        [
+            blueprint.get("theme", ""),
+            blueprint.get("objective", ""),
+            " ".join(blueprint.get("key_points", [])),
+            " ".join(blueprint.get("material_focus", [])),
+            str(blueprint.get("visual_plan") or ""),
+            str(blueprint.get("interaction_plan") or ""),
+            layout_style,
+        ]
+    )
+    resource_text = " ".join(
+        [
+            resource.get("description", ""),
+            resource.get("source_agent", ""),
+            resource.get("resource_type", ""),
+            resource.get("relative_path", ""),
+        ]
+    )
+
+    score = _keyword_overlap_score(page_text, resource_text)
+    if rtype in suggested_media_types:
+        score += 80
+    if rtype == "interactive_html" and any(token in layout_style for token in ("interactive", "lab", "exploration", "互动", "实验", "探究")):
+        score += 35
+    if rtype == "video" and any(token in layout_style for token in ("media", "scene", "demo", "演示", "场景", "观察")):
+        score += 30
+    if rtype == "image" and any(token in layout_style for token in ("diagram", "map", "board", "图", "结构")):
+        score += 25
+
+    fallback_idx = _fallback_media_page_idx(resource, total_pages)
+    score -= abs(blueprint["idx"] - fallback_idx) * 2
+    return score
+
+
+def _keyword_overlap_score(left: str, right: str) -> int:
+    left_terms = _semantic_terms(left)
+    right_terms = _semantic_terms(right)
+    if not left_terms or not right_terms:
+        return 0
+    return len(left_terms & right_terms) * 8
+
+
+def _semantic_terms(text: str) -> set[str]:
+    normalized = text.lower()
+    terms = {
+        token
+        for token in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]{2,}", normalized)
+        if len(token) >= 2
+    }
+    cjk_chunks = re.findall(r"[\u4e00-\u9fff]{2,}", normalized)
+    for chunk in cjk_chunks:
+        terms.update(chunk[idx : idx + 2] for idx in range(0, max(0, len(chunk) - 1)))
+        terms.update(chunk[idx : idx + 3] for idx in range(0, max(0, len(chunk) - 2)))
+    return terms
+
+
+def _fallback_media_page_idx(resource: MediaResource, total_pages: int) -> int:
+    if total_pages <= 1:
+        return 0
+    rtype = resource.get("resource_type", "")
+    if rtype == "video":
+        return max(0, min(total_pages - 1, total_pages // 3))
+    if rtype == "interactive_html":
+        return max(0, min(total_pages - 1, (2 * total_pages) // 3))
+    return min(total_pages - 1, 1)
 
 
 def build_graph(
@@ -366,7 +450,7 @@ def _node_summary(node_name: str, status: str, context: Mapping[str, Any]) -> st
             "failed": "播放器数据包组装失败。",
         }[status]
     return {
-        "started": f"{node_name} started",
-        "completed": f"{node_name} completed",
-        "failed": f"{node_name} failed",
+        "started": f"{node_name} 节点开始执行。",
+        "completed": f"{node_name} 节点已完成。",
+        "failed": f"{node_name} 节点执行失败。",
     }[status]

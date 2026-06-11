@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, Link, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  Download,
   FastForward,
+  FileText,
   Pause,
   Play,
   Rewind,
@@ -27,9 +30,12 @@ import {
   useLessonPlayer,
   type LessonResult,
 } from "@/components/classroom/LessonPlayerProvider";
+import { AIChatDrawer } from "@/components/AIChatDrawer";
 import { Markdown } from "@/components/ui/markdown";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { MorphSurface } from "@/components/smoothui/ai-input";
 import { cn } from "@/lib/utils";
 
 interface ClassroomRunSnapshot {
@@ -84,6 +90,72 @@ function getString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+const CLASSROOM_MESSAGE_LABELS: Record<string, string> = {
+  "Task failed.": "课堂任务生成失败。",
+  "Task is not finished yet.": "课堂任务尚未完成。",
+  "Task result not found.": "未找到课堂任务结果。",
+  "HTML preview not found.": "未找到课堂 HTML 预览。",
+  "Workflow failed.": "AI 课堂生成任务失败。",
+};
+
+function localizeClassroomMessage(value?: string | null) {
+  const message = value?.trim();
+  if (!message) {
+    return "";
+  }
+
+  const direct = CLASSROOM_MESSAGE_LABELS[message];
+  if (direct) {
+    return direct;
+  }
+
+  let match = message.match(/^(.+) started\.$/);
+  if (match) {
+    return `${match[1]} 节点开始执行。`;
+  }
+
+  match = message.match(/^(.+) completed\.$/);
+  if (match) {
+    return `${match[1]} 节点已完成。`;
+  }
+
+  match = message.match(/^(.+) failed\.$/);
+  if (match) {
+    return `${match[1]} 节点执行失败。`;
+  }
+
+  match = message.match(/^Workflow failed at node (.+): (.*)$/);
+  if (match) {
+    return `工作流在 ${match[1]} 节点执行失败：${match[2]}`;
+  }
+
+  if (message.startsWith("Generated classroom script violated the parsing contract:")) {
+    return message.replace(
+      "Generated classroom script violated the parsing contract:",
+      "生成的课堂讲稿不符合解析规则："
+    );
+  }
+
+  if (message.startsWith("Unknown run_id:")) {
+    return message.replace("Unknown run_id:", "未知课堂任务 ID：");
+  }
+
+  if (message.startsWith("Missing outline.")) {
+    return "缺少课堂大纲，暂时无法生成课堂内容。";
+  }
+
+  if (message.startsWith("Workflow did not return")) {
+    return message
+      .replace("Workflow did not return a valid outline.", "工作流未返回有效课堂大纲。")
+      .replace("Workflow did not return a valid script.", "工作流未返回有效课堂讲稿。")
+      .replace("Workflow did not return page blueprints.", "工作流未返回页面规划。")
+      .replace("Workflow did not return parsed pages.", "工作流未返回解析后的页面。")
+      .replace("Workflow did not return a valid bundle.", "工作流未返回有效播放器数据包。");
+  }
+
+  return message;
+}
+
 function buildInitialProgress(): ClassroomRunProgress {
   return {
     topic: null,
@@ -102,9 +174,9 @@ async function readErrorMessage(response: Response, fallback: string) {
 
   try {
     const parsed = JSON.parse(rawText) as { detail?: unknown };
-    return getString(parsed.detail) ?? rawText;
+    return localizeClassroomMessage(getString(parsed.detail) ?? rawText);
   } catch {
-    return rawText;
+    return localizeClassroomMessage(rawText);
   }
 }
 
@@ -131,13 +203,15 @@ function parseClassroomEvent(rawData: string): ClassroomGenerationEvent | null {
       return null;
     }
 
+    const summary = getString(parsed.summary);
+
     return {
       index,
       timestamp,
       event,
       node: getString(parsed.node),
       phase: getString(parsed.phase),
-      summary: getString(parsed.summary),
+      summary: summary ? localizeClassroomMessage(summary) : null,
       run_id: runId,
       run_status: runStatus,
       current_node: getString(parsed.current_node),
@@ -171,11 +245,125 @@ interface LessonChapterEntry {
   title: string;
 }
 
+interface LessonChapterSummary {
+  idx: number;
+  title: string;
+  summary: string;
+}
+
+type LessonSidebarTab = "catalog" | "transcript" | "summary";
+
+type LessonSummaryState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; chapters: LessonChapterSummary[] }
+  | { status: "error"; message: string };
+
 const LESSON_PREVIEW_SCALE = 0.34;
 const LESSON_PREVIEW_COMPACT_SCALE = 0.28;
 const LESSON_PREVIEW_WIDTH = 208;
 const LESSON_PREVIEW_HORIZONTAL_PADDING = 10;
 const PAGE_SWITCH_DISTANCE_PX = 96;
+const LESSON_AI_INPUT_WIDTH = 360;
+const LESSON_AI_INPUT_MARGIN = 24;
+const LESSON_AI_INPUT_GAP = 12;
+const LESSON_SELECTION_CONTEXT_MAX_LENGTH = 900;
+const LESSON_SELECTION_BLOCK_TAGS = new Set([
+  "ARTICLE",
+  "BLOCKQUOTE",
+  "DIV",
+  "LI",
+  "MAIN",
+  "P",
+  "SECTION",
+  "TD",
+  "TH",
+]);
+
+interface LessonSelectionRect {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface LessonSelectionSnapshot {
+  selection: string;
+  context: string;
+}
+
+type LessonFloatingPlacement = "top" | "bottom";
+
+function clampViewportValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeLessonSelectionText(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function cleanLessonTranscriptText(text: string | null | undefined) {
+  if (!text) {
+    return "";
+  }
+
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/<\/?(?:on_slide|question|false_intro)>/gi, " ")
+    .replace(/<\s*(?:to_next|to_next_page|pause)\s*\/?\s*>/gi, " ")
+    .replace(/\[\s*(?:to_next|to_next_page|pause|to\s+next|next)\s*\]/gi, " ")
+    .replace(/\b(?:to_next|to_next_page|to\s+next)\b/gi, " ")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/[*_~]{1,3}/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function getLessonSelectionContext(node: Node | null, fallbackText: string) {
+  let element =
+    node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+
+  while (element) {
+    if (LESSON_SELECTION_BLOCK_TAGS.has(element.tagName)) {
+      const text = normalizeLessonSelectionText(element.textContent ?? "");
+      if (text) {
+        return text.slice(0, LESSON_SELECTION_CONTEXT_MAX_LENGTH);
+      }
+    }
+    element = element.parentElement;
+  }
+
+  return fallbackText;
+}
+
+function resolveLessonAIPosition(rect: LessonSelectionRect) {
+  const halfWidth = Math.min(
+    LESSON_AI_INPUT_WIDTH / 2,
+    Math.max(0, window.innerWidth / 2 - LESSON_AI_INPUT_MARGIN)
+  );
+  const spaceAbove = rect.top - LESSON_AI_INPUT_MARGIN;
+  const spaceBelow = window.innerHeight - rect.bottom - LESSON_AI_INPUT_MARGIN;
+  const placement: LessonFloatingPlacement = spaceAbove >= 220 || spaceAbove >= spaceBelow ? "top" : "bottom";
+
+  return {
+    placement,
+    top: placement === "top" ? rect.top - LESSON_AI_INPUT_GAP : rect.bottom + LESSON_AI_INPUT_GAP,
+    left: clampViewportValue(
+      rect.left + rect.width / 2,
+      LESSON_AI_INPUT_MARGIN + halfWidth,
+      window.innerWidth - LESSON_AI_INPUT_MARGIN - halfWidth
+    ),
+  };
+}
 
 function getPageTransitionVariants(shouldReduceMotion: boolean) {
   return {
@@ -351,12 +539,204 @@ function LessonCatalogList({
   );
 }
 
-function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null }) {
+function LessonSummarySkeleton() {
+  return (
+    <div className="space-y-3 p-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="rounded-xl border border-slate-100 bg-white p-4">
+          <div className="h-4 w-1/2 animate-pulse rounded bg-slate-200" />
+          <div className="mt-3 space-y-2">
+            <div className="h-3 w-full animate-pulse rounded bg-slate-100" />
+            <div className="h-3 w-5/6 animate-pulse rounded bg-slate-100" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-slate-100" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LessonContentTabs({
+  activeTab,
+  chapters,
+  currentPageIndex,
+  currentRevealIndex,
+  horizontal,
+  pages,
+  previewSrcDocs,
+  summaryState,
+  timelineSegments,
+  onSelectChapter,
+  onSeekToTime,
+  onTabChange,
+}: {
+  activeTab: LessonSidebarTab;
+  chapters: LessonChapterEntry[];
+  currentPageIndex: number;
+  currentRevealIndex: number;
+  horizontal: boolean;
+  pages: ReturnType<typeof useLessonPlayer>["pages"];
+  previewSrcDocs: string[];
+  summaryState: LessonSummaryState;
+  timelineSegments: ReturnType<typeof useLessonPlayer>["timelineSegments"];
+  onSelectChapter: (chapter: LessonChapterEntry) => void;
+  onSeekToTime: (timeMs: number) => void;
+  onTabChange: (tab: LessonSidebarTab) => void;
+}) {
+  return (
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => onTabChange(value as LessonSidebarTab)}
+      className="min-h-0 flex-1 gap-0"
+    >
+      <div className="px-4 pt-3">
+        <TabsList className="grid h-10 w-full grid-cols-3 rounded-xl bg-slate-100/80 p-1">
+          <TabsTrigger value="catalog" className="rounded-lg text-xs font-semibold">
+            <BookOpen className="h-3.5 w-3.5" />
+            目录
+          </TabsTrigger>
+          <TabsTrigger value="transcript" className="rounded-lg text-xs font-semibold">
+            <FileText className="h-3.5 w-3.5" />
+            文稿
+          </TabsTrigger>
+          <TabsTrigger value="summary" className="rounded-lg text-xs font-semibold">
+            <Sparkles className="h-3.5 w-3.5" />
+            总结
+          </TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent
+        value="catalog"
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto p-3 scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300",
+          horizontal ? "flex flex-row overflow-x-auto" : ""
+        )}
+      >
+        <LessonCatalogList
+          chapters={chapters}
+          currentPageIndex={currentPageIndex}
+          horizontal={horizontal}
+          previewSrcDocs={previewSrcDocs}
+          onSelectChapter={onSelectChapter}
+        />
+      </TabsContent>
+
+      <TabsContent
+        value="transcript"
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300",
+          horizontal ? "overflow-x-auto" : ""
+        )}
+      >
+        <div className={cn("space-y-5", horizontal && "grid min-w-[880px] grid-cols-2 gap-4 space-y-0")}>
+          {pages.map((page, pageIndex) => {
+            const chapter = chapters[pageIndex];
+            return (
+              <section
+                key={page.idx}
+                className={cn(
+                  "rounded-xl border bg-white p-4 transition-colors",
+                  pageIndex === currentPageIndex ? "border-indigo-100 bg-indigo-50/35" : "border-slate-100"
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => chapter && onSeekToTime(chapter.pageStartMs)}
+                  className="text-left text-[13px] font-bold leading-snug text-slate-900 hover:text-indigo-700"
+                >
+                  {pageIndex + 1}. {chapter?.title ?? page.theme}
+                </button>
+                <div className="mt-3 space-y-2">
+                  {page.reveals.map((reveal, revealIndex) => {
+                    const segment = timelineSegments.find(
+                      (item) => item.pageIndex === pageIndex && item.revealIndex === revealIndex
+                    );
+                    const transcriptText = cleanLessonTranscriptText(reveal.narration);
+                    const isActive =
+                      pageIndex === currentPageIndex && revealIndex === currentRevealIndex;
+                    return (
+                      <button
+                        key={`${page.idx}-${revealIndex}`}
+                        type="button"
+                        onClick={() => segment && onSeekToTime(segment.startMs)}
+                        className={cn(
+                          "w-full rounded-lg px-3 py-2.5 text-left text-[13px] leading-6 transition-colors",
+                          isActive
+                            ? "bg-indigo-600 text-white shadow-sm"
+                            : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        )}
+                      >
+                        <span className="mb-1 block text-[11px] font-semibold opacity-70">
+                          {formatPlaybackTime(segment?.startMs ?? chapter?.pageStartMs ?? 0)}
+                        </span>
+                        {transcriptText || "暂无文稿"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </TabsContent>
+
+      <TabsContent
+        value="summary"
+        className="min-h-0 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300"
+      >
+        {summaryState.status === "loading" ? <LessonSummarySkeleton /> : null}
+        {summaryState.status === "error" ? (
+          <div className="m-4 rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+            {summaryState.message}
+          </div>
+        ) : null}
+        {summaryState.status === "ready" ? (
+          <div className={cn("space-y-3 p-4", horizontal && "grid min-w-[880px] grid-cols-2 gap-4 space-y-0")}>
+            {summaryState.chapters.map((chapter) => {
+              const entry = chapters[chapter.idx];
+              const isActive = chapter.idx === currentPageIndex;
+              return (
+                <button
+                  key={chapter.idx}
+                  type="button"
+                  onClick={() => entry && onSeekToTime(entry.pageStartMs)}
+                  className={cn(
+                    "w-full rounded-xl border p-4 text-left transition-colors",
+                    isActive
+                      ? "border-indigo-100 bg-indigo-50/70"
+                      : "border-slate-100 bg-white hover:bg-slate-50"
+                  )}
+                >
+                  <div className="text-[13px] font-bold leading-snug text-slate-900">
+                    {chapter.idx + 1}. {chapter.title}
+                  </div>
+                  <p className="mt-2 text-[13px] leading-6 text-slate-600">
+                    {cleanLessonTranscriptText(chapter.summary) || "暂无总结"}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function LessonPlayerShell({
+  classroomRunId,
+  sourcePrepRunId,
+}: {
+  classroomRunId: string;
+  sourcePrepRunId: string | null;
+}) {
   const {
     lesson,
     currentPage,
     pages,
     currentPageIndex,
+    currentRevealIndex,
     currentReveal,
     currentTheme,
     hasStarted,
@@ -371,7 +751,6 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
     bindStageFrame,
     handleStageReady,
     restartLesson,
-    totalReveals,
     timelineSegments,
     timelineDurationMs,
     timelineElapsedMs,
@@ -388,6 +767,8 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTheater, setIsTheater] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [contentTab, setContentTab] = useState<LessonSidebarTab>("catalog");
+  const [summaryState, setSummaryState] = useState<LessonSummaryState>({ status: "idle" });
   const [isSpeedMenuOpen, setIsSpeedMenuOpen] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{
     leftPx: number;
@@ -396,8 +777,20 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
   } | null>(null);
   const [osdMessage, setOsdMessage] = useState<{ icon: React.ReactNode; text: string } | null>(null);
   const [showSectionBanner, setShowSectionBanner] = useState(false);
+  const [lessonSelectionSnapshot, setLessonSelectionSnapshot] = useState<LessonSelectionSnapshot | null>(null);
+  const [lessonAIPosition, setLessonAIPosition] = useState<{
+    top: number;
+    left: number;
+    placement: LessonFloatingPlacement;
+  } | null>(null);
+  const [lessonDrawerOpen, setLessonDrawerOpen] = useState(false);
+  const [lessonAIQuery, setLessonAIQuery] = useState("");
+  const [lessonAISelection, setLessonAISelection] = useState({ selection: "", context: "" });
 
   const playerContainerRef = useRef<HTMLDivElement>(null);
+  const stageFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const stageSelectionCleanupRef = useRef<(() => void) | null>(null);
+  const stageSelectionTimerRef = useRef<number | null>(null);
   const progressRailRef = useRef<HTMLDivElement>(null);
   const osdTimerRef = useRef<number | null>(null);
   const bannerTimerRef = useRef<number | null>(null);
@@ -415,6 +808,183 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
     }
     osdTimerRef.current = window.setTimeout(() => setOsdMessage(null), 800);
   };
+
+  const bindCurrentStageFrame = useCallback(
+    (node: HTMLIFrameElement | null) => {
+      if (!node) {
+        stageSelectionCleanupRef.current?.();
+        stageSelectionCleanupRef.current = null;
+        if (stageSelectionTimerRef.current !== null) {
+          window.clearTimeout(stageSelectionTimerRef.current);
+          stageSelectionTimerRef.current = null;
+        }
+      }
+      stageFrameRef.current = node;
+      bindStageFrame(node);
+    },
+    [bindStageFrame]
+  );
+
+  const clearLessonSelection = useCallback(() => {
+    setLessonSelectionSnapshot(null);
+    setLessonAIPosition(null);
+  }, []);
+
+  const readCurrentStageSelection = useCallback(() => {
+    if (lessonDrawerOpen) {
+      return;
+    }
+
+    const frame = stageFrameRef.current;
+    const frameWindow = frame?.contentWindow;
+    const frameRect = frame?.getBoundingClientRect();
+    const selection = frameWindow?.getSelection();
+    if (!frame || !frameWindow || !frameRect || !selection || selection.rangeCount === 0) {
+      clearLessonSelection();
+      return;
+    }
+
+    const selectedText = normalizeLessonSelectionText(selection.toString());
+    if (!selectedText) {
+      clearLessonSelection();
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect =
+      Array.from(range.getClientRects()).find((item) => item.width > 0 && item.height > 0) ??
+      range.getBoundingClientRect();
+    if (!rect || (rect.width <= 0 && rect.height <= 0)) {
+      clearLessonSelection();
+      return;
+    }
+
+    const viewportRect: LessonSelectionRect = {
+      top: frameRect.top + rect.top,
+      right: frameRect.left + rect.right,
+      bottom: frameRect.top + rect.bottom,
+      left: frameRect.left + rect.left,
+      width: rect.width,
+      height: rect.height,
+    };
+
+    setLessonSelectionSnapshot({
+      selection: selectedText,
+      context: getLessonSelectionContext(range.commonAncestorContainer, selectedText),
+    });
+    setLessonAIPosition(resolveLessonAIPosition(viewportRect));
+  }, [clearLessonSelection, lessonDrawerOpen]);
+
+  const scheduleStageSelectionRead = useCallback(() => {
+    if (stageSelectionTimerRef.current !== null) {
+      window.clearTimeout(stageSelectionTimerRef.current);
+    }
+
+    stageSelectionTimerRef.current = window.setTimeout(() => {
+      stageSelectionTimerRef.current = null;
+      readCurrentStageSelection();
+    }, 60);
+  }, [readCurrentStageSelection]);
+
+  const bindStageSelectionListeners = useCallback(() => {
+    stageSelectionCleanupRef.current?.();
+    stageSelectionCleanupRef.current = null;
+
+    const frameDocument = stageFrameRef.current?.contentDocument;
+    if (!frameDocument) {
+      return;
+    }
+
+    frameDocument.addEventListener("selectionchange", scheduleStageSelectionRead);
+    frameDocument.addEventListener("pointerup", scheduleStageSelectionRead, true);
+    frameDocument.addEventListener("keyup", scheduleStageSelectionRead, true);
+    stageSelectionCleanupRef.current = () => {
+      frameDocument.removeEventListener("selectionchange", scheduleStageSelectionRead);
+      frameDocument.removeEventListener("pointerup", scheduleStageSelectionRead, true);
+      frameDocument.removeEventListener("keyup", scheduleStageSelectionRead, true);
+    };
+  }, [scheduleStageSelectionRead]);
+
+  const handleLessonAIQuery = useCallback(
+    (query: string) => {
+      const question = query.trim();
+      const snapshot = lessonSelectionSnapshot;
+      if (!question || !snapshot?.selection.trim()) {
+        return;
+      }
+
+      if (isPlaying) {
+        togglePlayback();
+        triggerOsd(<Pause className="w-8 h-8" />, "已暂停");
+      }
+
+      try {
+        stageFrameRef.current?.contentWindow?.getSelection()?.removeAllRanges();
+      } catch {
+        // Selection cleanup can fail if the browser isolates the frame.
+      }
+
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => undefined);
+      }
+
+      setLessonAISelection({
+        selection: snapshot.selection,
+        context: snapshot.context || snapshot.selection,
+      });
+      setLessonAIQuery(question);
+      clearLessonSelection();
+      setLessonDrawerOpen(true);
+    },
+    [clearLessonSelection, isPlaying, lessonSelectionSnapshot, togglePlayback]
+  );
+
+  const handleCurrentStageLoad = useCallback(() => {
+    handleStageReady();
+    bindStageSelectionListeners();
+    scheduleStageSelectionRead();
+  }, [bindStageSelectionListeners, handleStageReady, scheduleStageSelectionRead]);
+
+  const loadChapterSummaries = useCallback(async () => {
+    if (!classroomRunId || summaryState.status === "loading" || summaryState.status === "ready") {
+      return;
+    }
+
+    setSummaryState({ status: "loading" });
+    try {
+      const response = await fetch(
+        `/api/v1/classroom/${encodeURIComponent(classroomRunId)}/chapter-summaries`
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "章节总结生成失败。"));
+      }
+      const payload = (await response.json()) as { chapters?: LessonChapterSummary[] };
+      setSummaryState({
+        status: "ready",
+        chapters: Array.isArray(payload.chapters) ? payload.chapters : [],
+      });
+    } catch (error) {
+      setSummaryState({
+        status: "error",
+        message: error instanceof Error ? error.message : "章节总结生成失败。",
+      });
+    }
+  }, [classroomRunId, summaryState.status]);
+
+  const handleContentTabChange = useCallback(
+    (tab: LessonSidebarTab) => {
+      setContentTab(tab);
+      if (tab === "summary") {
+        void loadChapterSummaries();
+      }
+    },
+    [loadChapterSummaries]
+  );
+
+  useEffect(() => {
+    setContentTab("catalog");
+    setSummaryState({ status: "idle" });
+  }, [classroomRunId]);
 
   // Section banner trigger
   useEffect(() => {
@@ -452,6 +1022,10 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
       if (hoverPreviewTimerRef.current !== null) {
         window.clearTimeout(hoverPreviewTimerRef.current);
       }
+      if (stageSelectionTimerRef.current !== null) {
+        window.clearTimeout(stageSelectionTimerRef.current);
+      }
+      stageSelectionCleanupRef.current?.();
     };
   }, []);
 
@@ -461,22 +1035,85 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
       if (
         !payload ||
         typeof payload !== "object" ||
-        payload.source !== "edu-lesson-stage" ||
-        payload.type !== "lesson-stage-dblclick"
+        payload.source !== "edu-lesson-stage"
       ) {
         return;
       }
 
-      togglePlayback();
-      triggerOsd(
-        isPlaying ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 ml-1" />,
-        isPlaying ? "暂停" : "播放"
-      );
+      if (payload.type === "lesson-stage-dblclick") {
+        togglePlayback();
+        triggerOsd(
+          isPlaying ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 ml-1" />,
+          isPlaying ? "暂停" : "播放"
+        );
+        return;
+      }
+
+      if (payload.type === "lesson-stage-selection-clear") {
+        clearLessonSelection();
+        return;
+      }
+
+      if (payload.type !== "lesson-stage-selection" || lessonDrawerOpen) {
+        return;
+      }
+
+      const rectPayload = isRecord(payload.rect) ? payload.rect : null;
+      const readNumber = (key: keyof LessonSelectionRect) => {
+        const value = rectPayload?.[key];
+        return typeof value === "number" && Number.isFinite(value) ? value : null;
+      };
+      const frameRect = stageFrameRef.current?.getBoundingClientRect();
+      const top = readNumber("top");
+      const right = readNumber("right");
+      const bottom = readNumber("bottom");
+      const left = readNumber("left");
+      const width = readNumber("width");
+      const height = readNumber("height");
+      const selection = typeof payload.selection === "string" ? payload.selection.trim() : "";
+
+      if (!frameRect || top === null || right === null || bottom === null || left === null || width === null || height === null || !selection) {
+        clearLessonSelection();
+        return;
+      }
+
+      const viewportRect: LessonSelectionRect = {
+        top: frameRect.top + top,
+        right: frameRect.left + right,
+        bottom: frameRect.top + bottom,
+        left: frameRect.left + left,
+        width,
+        height,
+      };
+
+      setLessonSelectionSnapshot({
+        selection,
+        context: typeof payload.context === "string" ? payload.context.trim() : selection,
+      });
+      setLessonAIPosition(resolveLessonAIPosition(viewportRect));
     };
 
     window.addEventListener("message", handleStageMessage);
     return () => window.removeEventListener("message", handleStageMessage);
-  }, [isPlaying, togglePlayback]);
+  }, [clearLessonSelection, isPlaying, lessonDrawerOpen, togglePlayback]);
+
+  useEffect(() => {
+    clearLessonSelection();
+  }, [clearLessonSelection, currentPageIndex]);
+
+  useEffect(() => {
+    const handleViewportChange = () => {
+      clearLessonSelection();
+    };
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [clearLessonSelection]);
 
   useEffect(() => {
     if (!isFullscreen) {
@@ -660,7 +1297,7 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
             <Link
               to={
                 sourcePrepRunId
-                  ? `/study/${encodeURIComponent(sourcePrepRunId)}?tab=prep-classroom`
+                  ? `/study/${encodeURIComponent(sourcePrepRunId)}`
                   : "/"
               }
               className="inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
@@ -678,16 +1315,34 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
             </div>
           </div>
 
-          {sourcePrepRunId ? (
-            <Button
-              asChild
-              className="rounded-full bg-slate-900 px-4 text-white shadow-[0_12px_24px_rgba(15,23,42,0.14)] hover:bg-slate-800"
-            >
-              <Link to={`/study/${encodeURIComponent(sourcePrepRunId)}`}>
-                前去练习
-              </Link>
-            </Button>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {classroomRunId ? (
+              <Button
+                asChild
+                variant="outline"
+                className="rounded-full border-slate-200 bg-white/70 px-4 text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                <a
+                  href={`/api/v1/classroom/${encodeURIComponent(classroomRunId)}/html-preview.html`}
+                  download
+                >
+                  <Download className="h-4 w-4" />
+                  下载 HTML
+                </a>
+              </Button>
+            ) : null}
+
+            {sourcePrepRunId ? (
+              <Button
+                asChild
+                className="rounded-full bg-slate-900 px-4 text-white shadow-[0_12px_24px_rgba(15,23,42,0.14)] hover:bg-slate-800"
+              >
+                <Link to={`/study/${encodeURIComponent(sourcePrepRunId)}`}>
+                  前去练习
+                </Link>
+              </Button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -832,15 +1487,18 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
             {/* 停顿点提示层 */}
             {!isPlaying && hasStarted && !isEnded && phase === "narrating" && currentReveal?.pause && (
               <div
-                className="absolute inset-0 z-[85] flex items-center justify-center pointer-events-auto cursor-pointer"
-                onClick={() => togglePlayback()}
+                className="pointer-events-none absolute inset-0 z-[85] flex items-center justify-center"
               >
-                <div className="rounded-2xl bg-black/50 backdrop-blur-md px-8 py-5 text-white shadow-2xl flex flex-col items-center gap-2 animate-in fade-in zoom-in-95 duration-300">
+                <button
+                  type="button"
+                  className="pointer-events-auto rounded-2xl bg-black/50 backdrop-blur-md px-8 py-5 text-white shadow-2xl flex flex-col items-center gap-2 animate-in fade-in zoom-in-95 duration-300 cursor-pointer"
+                  onClick={() => togglePlayback()}
+                >
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
                     <Play className="w-7 h-7 ml-1" />
                   </div>
                   <span className="text-sm font-medium tracking-wide">点击继续</span>
-                </div>
+                </button>
               </div>
             )}
 
@@ -873,10 +1531,10 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                   className="absolute inset-0 will-change-transform"
                 >
                   <iframe
-                    ref={bindStageFrame}
+                    ref={bindCurrentStageFrame}
                     title={`lesson-page-${currentPage.idx}`}
                     srcDoc={currentPage.srcDoc}
-                    onLoad={handleStageReady}
+                    onLoad={handleCurrentStageLoad}
                     className="absolute inset-0 h-full w-full border-0 bg-transparent"
                     sandbox="allow-scripts allow-same-origin"
                   />
@@ -1205,11 +1863,7 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
           {!isFullscreen && (
             <div className="rounded-2xl bg-white p-6 md:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-200/60 flex flex-col gap-2">
               <h1 className="text-2xl md:text-[1.75rem] font-bold text-slate-900 tracking-tight">{lesson.topic}</h1>
-              <div className="flex items-center text-[13px] text-slate-500 gap-3 font-medium mt-1.5 mb-2">
-                <span className="inline-flex items-center bg-slate-100 rounded-md px-2 py-0.5">{pages.length} 内容章节</span>
-                <span className="inline-flex items-center bg-slate-100 rounded-md px-2 py-0.5">{totalReveals} 讲解段落</span>
-              </div>
-              
+
               <div className="w-10 h-[3px] bg-indigo-500/20 rounded-full my-3" />
               
               <p className="text-[15px] leading-relaxed text-slate-600">
@@ -1220,32 +1874,77 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
           
         </div>
 
-        {/* 右侧：课程目录 (Playlist) (全屏时隐藏) */}
+        {/* 右侧：课程内容 (全屏时隐藏) */}
         {!isFullscreen && (
           <div className={cn("w-full flex-shrink-0", isTheater ? "lg:w-full mt-4" : "lg:w-[380px] xl:w-[420px]")}>
             <div className="rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-200/60 overflow-hidden flex flex-col max-h-none lg:max-h-[calc(100vh-8rem)] lg:sticky lg:top-24">
               
-              {/* 播放列表 Header */}
               <div className="px-5 py-5 border-b border-slate-100/80 bg-slate-50/50 flex flex-col gap-1.5">
                  <h2 className="text-lg font-bold text-slate-900 tracking-tight">课程内容</h2>
                  <p className="text-sm font-medium text-slate-500">共 {pages.length} 个学习模块</p>
               </div>
 
-              {/* 播放列表项 */}
-              <div className={cn("flex-1 overflow-y-auto p-3 scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300", isTheater ? "flex flex-row overflow-x-auto" : "")}>
-                <LessonCatalogList
-                  chapters={chapterEntries}
-                  currentPageIndex={currentPageIndex}
-                  horizontal={isTheater}
-                  previewSrcDocs={pages.map((page) => page.srcDoc)}
-                  onSelectChapter={(chapter) => seekToTime(chapter.pageStartMs)}
-                />
-              </div>
+              <LessonContentTabs
+                activeTab={contentTab}
+                chapters={chapterEntries}
+                currentPageIndex={currentPageIndex}
+                currentRevealIndex={currentRevealIndex}
+                horizontal={isTheater}
+                pages={pages}
+                previewSrcDocs={pages.map((page) => page.srcDoc)}
+                summaryState={summaryState}
+                timelineSegments={timelineSegments}
+                onSelectChapter={(chapter) => seekToTime(chapter.pageStartMs)}
+                onSeekToTime={seekToTime}
+                onTabChange={handleContentTabChange}
+              />
             </div>
           </div>
         )}
 
       </main>
+      <AIChatDrawer
+        isOpen={lessonDrawerOpen}
+        onClose={() => setLessonDrawerOpen(false)}
+        initialQuery={lessonAIQuery}
+        selectionContext={lessonAISelection.selection}
+        contextContent={lessonAISelection.context}
+        responseMode="html"
+        renderTarget="artifact"
+      />
+      {typeof document !== "undefined"
+        ? createPortal(
+            <AnimatePresence>
+              {lessonSelectionSnapshot && lessonAIPosition && !lessonDrawerOpen && (
+                <div
+                  className="pointer-events-none fixed z-[230]"
+                  style={{
+                    top: lessonAIPosition.top,
+                    left: lessonAIPosition.left,
+                    transform:
+                      lessonAIPosition.placement === "top"
+                        ? "translate(-50%, -100%)"
+                        : "translate(-50%, 0)",
+                  }}
+                >
+                  <motion.div
+                    initial={{ opacity: 0, y: 14, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 12, scale: 0.97 }}
+                    transition={{ type: "spring", stiffness: 380, damping: 28, mass: 0.85 }}
+                    className="pointer-events-auto"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <MorphSurface onSubmit={handleLessonAIQuery} />
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>,
+            document.fullscreenElement instanceof HTMLElement ? document.fullscreenElement : document.body
+          )
+        : null}
     </div>
   );
 }
@@ -1257,7 +1956,6 @@ export default function LessonPage() {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [progress, setProgress] = useState<ClassroomRunProgress>(() => buildInitialProgress());
   const [sourcePrepRunId, setSourcePrepRunId] = useState<string | null>(null);
-  const loadedResultRef = useRef(false);
   const progressRef = useRef(progress);
 
   useEffect(() => {
@@ -1274,9 +1972,11 @@ export default function LessonPage() {
 
     let disposed = false;
     let eventSource: EventSource | null = null;
+    let reconnectTimer: number | null = null;
+    let lastEventIndex = -1;
     const seenEventIndexes = new Set<number>();
+    let resultRequestStarted = false;
 
-    loadedResultRef.current = false;
     setState(
       launchState?.classroomLaunchMode === "new" ? { status: "pending" } : { status: "loading" }
     );
@@ -1295,10 +1995,23 @@ export default function LessonPage() {
       }));
     };
 
-    const failLesson = (message: string, errorText?: string | null) => {
+    const clearReconnectTimer = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
+
+    const closeEventStream = () => {
+      clearReconnectTimer();
       if (eventSource) {
         eventSource.close();
+        eventSource = null;
       }
+    };
+
+    const failLesson = (message: string, errorText?: string | null) => {
+      closeEventStream();
       updateProgress({
         status: "failed",
         summary: errorText?.trim() || message,
@@ -1310,15 +2023,19 @@ export default function LessonPage() {
     };
 
     const loadResult = async () => {
-      if (loadedResultRef.current) {
+      if (disposed || resultRequestStarted) {
         return;
       }
-      loadedResultRef.current = true;
+      resultRequestStarted = true;
 
       try {
         const resultResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}/result`);
+        if (disposed) {
+          return;
+        }
+
         if (!resultResponse.ok) {
-          loadedResultRef.current = false;
+          resultRequestStarted = false;
 
           if (resultResponse.status === 409) {
             updateProgress({
@@ -1335,14 +2052,14 @@ export default function LessonPage() {
         }
 
         const lesson = (await resultResponse.json()) as LessonResult;
-        if (eventSource) {
-          eventSource.close();
+        if (disposed) {
+          return;
         }
-        if (!disposed) {
-          setState({ status: "ready", lesson });
-        }
+
+        closeEventStream();
+        setState({ status: "ready", lesson });
       } catch (error) {
-        loadedResultRef.current = false;
+        resultRequestStarted = false;
         if (!disposed) {
           setState({
             status: "error",
@@ -1353,14 +2070,19 @@ export default function LessonPage() {
     };
 
     const handleProgressEvent = (event: ClassroomGenerationEvent) => {
+      if (disposed) {
+        return;
+      }
+
+      lastEventIndex = Math.max(lastEventIndex, event.index);
       if (seenEventIndexes.has(event.index)) {
         return;
       }
       seenEventIndexes.add(event.index);
 
-      const nextSummary = event.summary?.trim() || null;
+      const nextSummary = localizeClassroomMessage(event.summary).trim() || null;
       const topicFromEvent = getString(event.data?.topic);
-      const errorFromEvent = getString(event.data?.error);
+      const errorFromEvent = localizeClassroomMessage(getString(event.data?.error)).trim() || null;
 
       setProgress((current) => ({
         ...current,
@@ -1389,8 +2111,12 @@ export default function LessonPage() {
     };
 
     const connectEvents = () => {
+      if (disposed || eventSource) {
+        return;
+      }
+
       eventSource = new EventSource(
-        `/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=-1&heartbeat_seconds=5`,
+        `/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=${lastEventIndex}&heartbeat_seconds=5`,
       );
 
       const handleStreamMessage = (messageEvent: MessageEvent<string>) => {
@@ -1406,10 +2132,21 @@ export default function LessonPage() {
             return;
           }
 
+          const nextStatus =
+            (getString(payload.run_status) as ClassroomRunStatus | null) ?? progressRef.current.status;
           updateProgress({
-            status: (getString(payload.run_status) as ClassroomRunStatus | null) ?? progressRef.current.status,
+            status: nextStatus,
             summary: progressRef.current.summary,
           });
+
+          if (nextStatus === "failed") {
+            failLesson("课堂任务生成失败，请查看后端日志。");
+            return;
+          }
+
+          if (nextStatus === "succeeded") {
+            void loadResult();
+          }
         } catch {
           return;
         }
@@ -1424,11 +2161,19 @@ export default function LessonPage() {
           return;
         }
 
+        closeEventStream();
         setState((current) => (current.status === "ready" || current.status === "error" ? current : { status: "pending" }));
         setProgress((current) => ({
           ...current,
           summary: current.summary || "连接课堂进度流时发生波动，正在自动重连…",
         }));
+
+        if (reconnectTimer === null) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connectEvents();
+          }, 3000);
+        }
       };
     };
 
@@ -1440,21 +2185,42 @@ export default function LessonPage() {
         }
 
         const snapshot = (await statusResponse.json()) as ClassroomRunSnapshot;
+        if (disposed) {
+          return;
+        }
+
         setSourcePrepRunId(snapshot.request?.source_prep_run_id?.trim() || null);
         updateProgress({
           topic: snapshot.request?.topic?.trim() || null,
           status: snapshot.status,
-          summary: snapshot.latest_summary?.trim() || "课堂内容仍在生成中…",
-          error: snapshot.error?.trim() || null,
+          summary: localizeClassroomMessage(snapshot.latest_summary).trim() || "课堂内容仍在生成中…",
+          error: localizeClassroomMessage(snapshot.error).trim() || null,
         });
 
         if (snapshot.status === "failed") {
-          failLesson(snapshot.error?.trim() || "课堂任务生成失败，请查看后端日志。", snapshot.error);
+          const errorMessage = localizeClassroomMessage(snapshot.error).trim();
+          failLesson(errorMessage || "课堂任务生成失败，请查看后端日志。", errorMessage);
           return;
         }
 
         if (snapshot.status === "succeeded") {
           await loadResult();
+          return;
+        }
+
+        if (snapshot.status === "unknown") {
+          const stoppedAt = localizeClassroomMessage(snapshot.latest_summary).trim();
+          const message = stoppedAt
+            ? `课堂任务已中断，上次停在「${stoppedAt}」。后端没有活动生成进程，本地也没有完成结果，请回到课前准备重新生成课中内容。`
+            : "课堂任务已中断。后端没有活动生成进程，本地也没有完成结果，请回到课前准备重新生成课中内容。";
+          updateProgress({
+            status: "unknown",
+            summary: message,
+            error: message,
+          });
+          if (!disposed) {
+            setState({ status: "error", message });
+          }
           return;
         }
 
@@ -1476,9 +2242,7 @@ export default function LessonPage() {
 
     return () => {
       disposed = true;
-      if (eventSource) {
-        eventSource.close();
-      }
+      closeEventStream();
     };
   }, [id, launchState?.classroomLaunchMode]);
 
@@ -1534,7 +2298,7 @@ export default function LessonPage() {
                 <Link
                   to={
                     sourcePrepRunId
-                      ? `/study/${encodeURIComponent(sourcePrepRunId)}?tab=prep-classroom`
+                      ? `/study/${encodeURIComponent(sourcePrepRunId)}`
                       : "/"
                   }
                 >
@@ -1550,7 +2314,7 @@ export default function LessonPage() {
 
   return (
     <LessonPlayerProvider lesson={state.lesson} runId={id ?? ""}>
-      <LessonPlayerShell sourcePrepRunId={sourcePrepRunId} />
+      <LessonPlayerShell classroomRunId={id ?? ""} sourcePrepRunId={sourcePrepRunId} />
     </LessonPlayerProvider>
   );
 }

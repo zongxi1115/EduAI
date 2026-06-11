@@ -85,7 +85,7 @@ def run_generation(
         {
             "event": "workflow_started",
             "node": "input",
-            "summary": "LangGraph workflow started.",
+            "summary": "课前准备工作流开始执行。",
             "data": {"input": initial_state},
         }
     )
@@ -108,8 +108,8 @@ def run_generation(
                         "mode": mode,
                         "node": node_name,
                         "summary": (
-                            "Node finished with updates: "
-                            f"{', '.join(sorted(update_payload.keys())) or 'none'}"
+                            "节点已完成，更新字段："
+                            f"{', '.join(sorted(update_payload.keys())) or '无'}"
                         ),
                         "data": {
                             "updated_keys": sorted(update_payload.keys()),
@@ -141,8 +141,8 @@ def run_generation(
                         "mode": mode,
                         "node": last_node_name,
                         "summary": (
-                            f"State snapshot saved after {last_node_name}; "
-                            f"keys={', '.join(sorted(payload.keys()))}"
+                            f"{last_node_name} 节点后的状态快照已保存；"
+                            f"字段：{', '.join(sorted(payload.keys()))}"
                         ),
                         "data": {
                             "state_keys": sorted(payload.keys()),
@@ -157,7 +157,7 @@ def run_generation(
                         "event": "workflow_event",
                         "mode": mode,
                         "node": last_node_name,
-                        "summary": "Received unhandled stream mode event.",
+                        "summary": "收到暂未处理的工作流事件。",
                         "data": {"payload": payload},
                     }
                 )
@@ -167,7 +167,7 @@ def run_generation(
             {
                 "event": "workflow_failed",
                 "node": last_node_name,
-                "summary": f"Workflow failed at node {last_node_name}: {exc}",
+                "summary": f"工作流在 {last_node_name} 节点执行失败：{exc}",
                 "data": {"error": str(exc)},
             }
         )
@@ -183,7 +183,7 @@ def run_generation(
         {
             "event": "workflow_completed",
             "node": "END",
-            "summary": "LangGraph workflow completed successfully.",
+            "summary": "课前准备工作流已完成。",
         }
     )
 

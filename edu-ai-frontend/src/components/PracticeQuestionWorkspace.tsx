@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronDown, ChevronUp, FileDown, LoaderCircle, Sparkles } from "lucide-react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, ChevronDown, ChevronUp, ClipboardCheck, FileDown, LoaderCircle, Sparkles, Upload, CheckCircle2, XCircle, AlertTriangle, HelpCircle } from "lucide-react";
 import { marked } from "marked";
 import katex from "katex";
 import katexCssUrl from "katex/dist/katex.min.css?url";
@@ -7,12 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Markdown } from "@/components/ui/markdown";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { SingleChoiceQuestion } from "@/components/SingleChoiceQuestion";
 import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
 import { FillInTheBlanksQuestion } from "@/components/FillInTheBlanksQuestion";
 import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
 import { DrawingQuestion } from "@/components/DrawingQuestion";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 
 export type PracticeQuestionType =
   | "FillInTheBlank"
@@ -114,6 +116,30 @@ interface PracticeReviewResponse {
   judged_at?: string | null;
 }
 
+interface PaperQuestionReview {
+  question_id: string;
+  question_index: number;
+  correctness: ReviewCorrectness;
+  score: number;
+  summary: string;
+  issues: string[];
+  review_advice: string[];
+  reference_points: string[];
+}
+
+interface PaperPracticeReviewResponse {
+  correctness: ReviewCorrectness;
+  score: number;
+  summary: string;
+  strengths: string[];
+  issues: string[];
+  review_advice: string[];
+  question_reviews: PaperQuestionReview[];
+  limitations: string[];
+  answer_image_count: number;
+  judged_at?: string | null;
+}
+
 interface QuestionReviewState {
   status: "submitting" | "completed" | "error";
   mode: "ai" | "local";
@@ -126,14 +152,25 @@ interface PracticeReviewCapabilitiesResponse {
   support_vision: boolean;
 }
 
+interface LearningGraphContext {
+  dataset_id?: string | null;
+  course_group_id?: string | null;
+  course_id?: string | null;
+  focus_node_id?: string | null;
+  focus_node_title?: string | null;
+  source_graph_id?: string | null;
+}
+
 interface PracticeQuestionWorkspaceProps {
   learningGoal: string;
   questions: PracticeQuestionRecord[];
   learnerId?: string | null;
+  graphContext?: LearningGraphContext | null;
   sessionId?: string | null;
   isLoading?: boolean;
   error?: string | null;
   emptyHint?: string;
+  onReviewStatesChange?: (states: Record<string, QuestionReviewState>) => void;
 }
 
 const QUESTION_TYPE_LABELS: Record<PracticeQuestionType, string> = {
@@ -146,21 +183,21 @@ const QUESTION_TYPE_LABELS: Record<PracticeQuestionType, string> = {
 };
 
 const QUESTION_TYPE_BADGE_CLASS: Record<PracticeQuestionType, string> = {
-  FillInTheBlank: "border-amber-200 bg-amber-50 text-amber-700",
-  MultipleChoice: "border-sky-200 bg-sky-50 text-sky-700",
-  ShortAnswer: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  Listening: "border-indigo-200 bg-indigo-50 text-indigo-700",
-  Coding: "border-rose-200 bg-rose-50 text-rose-700",
-  Drawing: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700",
+  FillInTheBlank: "border-orange-400 bg-orange-50 text-orange-700",
+  MultipleChoice: "border-blue-400 bg-blue-50 text-blue-700",
+  ShortAnswer: "border-green-400 bg-green-50 text-green-700",
+  Listening: "border-purple-400 bg-purple-50 text-purple-700",
+  Coding: "border-pink-400 bg-pink-50 text-pink-700",
+  Drawing: "border-indigo-400 bg-indigo-50 text-indigo-700",
 };
 
 const PDF_TYPE_ACCENT: Record<PracticeQuestionType, string> = {
-  FillInTheBlank: "#b45309",
-  MultipleChoice: "#0369a1",
-  ShortAnswer: "#047857",
-  Listening: "#4338ca",
-  Coding: "#be123c",
-  Drawing: "#9333ea",
+  FillInTheBlank: "#f97316",
+  MultipleChoice: "#3b82f6",
+  ShortAnswer: "#22c55e",
+  Listening: "#a855f7",
+  Coding: "#ec4899",
+  Drawing: "#6366f1",
 };
 
 const PDF_ANSWER_LINES: Record<PracticeQuestionType, number> = {
@@ -550,27 +587,31 @@ const PDF_PAGE_STYLE = `
 
 const CORRECTNESS_META: Record<
   ReviewCorrectness,
-  { label: string; badgeClassName: string; summaryClassName: string }
+  { label: string; badgeClassName: string; summaryClassName: string; icon: typeof CheckCircle2 }
 > = {
   correct: {
     label: "回答正确",
-    badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    summaryClassName: "text-emerald-700",
+    badgeClassName: "border-green-500 bg-green-50 text-green-700",
+    summaryClassName: "text-green-700",
+    icon: CheckCircle2,
   },
   partially_correct: {
     label: "部分正确",
-    badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",
-    summaryClassName: "text-amber-700",
+    badgeClassName: "border-orange-500 bg-orange-50 text-orange-700",
+    summaryClassName: "text-orange-700",
+    icon: AlertTriangle,
   },
   incorrect: {
-    label: "需要改进",
-    badgeClassName: "border-rose-200 bg-rose-50 text-rose-700",
-    summaryClassName: "text-rose-700",
+    label: "回答错误",
+    badgeClassName: "border-red-500 bg-red-50 text-red-700",
+    summaryClassName: "text-red-700",
+    icon: XCircle,
   },
   ungradable: {
     label: "暂无法判定",
-    badgeClassName: "border-border bg-muted/50 text-foreground",
-    summaryClassName: "text-foreground",
+    badgeClassName: "border-gray-300 bg-gray-50 text-gray-700",
+    summaryClassName: "text-gray-700",
+    icon: HelpCircle,
   },
 };
 
@@ -584,6 +625,46 @@ function isStringArray(value: unknown): value is string[] {
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function stripChoiceAnswerPrefix(value: string) {
+  return value
+    .trim()
+    .replace(/^(?:正确答案|答案)\s*[:：]?\s*/u, "")
+    .trim();
+}
+
+function extractChoiceLabel(value: string) {
+  const text = stripChoiceAnswerPrefix(value);
+  const standaloneMatch = text.match(/^[（(]?\s*(?:选项?|选择)?\s*([A-Za-z])\s*[）)]?$/u);
+  if (standaloneMatch) {
+    return standaloneMatch[1].toUpperCase();
+  }
+
+  const prefixedMatch = text.match(/^[（(]?\s*(?:选项?|选择)?\s*([A-Za-z])\s*[）)]?\s*[.．、:：\-\s]/u);
+  return prefixedMatch ? prefixedMatch[1].toUpperCase() : null;
+}
+
+function normalizeChoiceText(value: string) {
+  return stripChoiceAnswerPrefix(value)
+    .replace(/^[（(]?\s*(?:选项?|选择)?\s*[A-Za-z]\s*[）)]?\s*[.．、:：\-\s]\s*/u, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeMultipleChoiceAnswer(options: string[], answer: string) {
+  const answerLabel = extractChoiceLabel(answer);
+  if (answerLabel) {
+    const optionIndex = answerLabel.charCodeAt(0) - 65;
+    if (optionIndex >= 0 && optionIndex < options.length) {
+      return options[optionIndex];
+    }
+  }
+
+  const normalizedAnswer = normalizeChoiceText(answer);
+  const matchedOption = options.find((option) => normalizeChoiceText(option) === normalizedAnswer);
+  return matchedOption ?? answer.trim();
 }
 
 function escapeHtml(value: string) {
@@ -605,7 +686,7 @@ function renderPdfMarkdown(markdown: string) {
     const idx = mathBlocks.length;
     try {
       mathBlocks.push(
-        katex.renderToString(tex.trim(), { throwOnError: false, displayMode: true, strict: "ignore" })
+        katex.renderToString(tex.trim(), { ...KATEX_RENDER_OPTIONS, displayMode: true })
       );
     } catch {
       mathBlocks.push(`<code>$$${escapeHtml(tex.trim())}$$</code>`);
@@ -618,7 +699,7 @@ function renderPdfMarkdown(markdown: string) {
     const idx = mathBlocks.length;
     try {
       mathBlocks.push(
-        katex.renderToString(tex.trim(), { throwOnError: false, displayMode: false, strict: "ignore" })
+        katex.renderToString(tex.trim(), { ...KATEX_RENDER_OPTIONS, displayMode: false })
       );
     } catch {
       mathBlocks.push(`<code>$${escapeHtml(tex.trim())}$</code>`);
@@ -660,6 +741,21 @@ function formatExportDateTime(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(
     date.getHours()
   )}${pad(date.getMinutes())}`;
+}
+
+function readImageFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("图片读取失败，请重新选择文件。"));
+      }
+    };
+    reader.onerror = () => reject(new Error("图片读取失败，请重新选择文件。"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function renderPdfAnswerLines(lineCount: number) {
@@ -861,6 +957,9 @@ function formatAnswerPreview(value: unknown): string {
 }
 
 function questionNeedsAIJudge(question: PracticeQuestionRecord) {
+  if (question.question_type === "FillInTheBlank") {
+    return true;
+  }
   if (typeof question.need_ai_judge === "boolean") {
     return question.need_ai_judge;
   }
@@ -900,7 +999,7 @@ function buildPracticeReviewQuestionPayload(question: PracticeQuestionRecord) {
       return {
         ...basePayload,
         options: question.options,
-        correct_answer: question.correct_answer,
+        correct_answer: normalizeMultipleChoiceAnswer(question.options, question.correct_answer),
       };
     case "ShortAnswer":
       return {
@@ -1006,10 +1105,12 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
     }
     case "MultipleChoice": {
       const submitted = String(studentAnswer ?? "").trim();
-      const isCorrect =
-        normalizeText(submitted) === normalizeText(question.correct_answer) ||
-        normalizeText(submitted.replace(/^[A-Z][\.\s、:：-]*/, "")) ===
-        normalizeText(question.correct_answer);
+      const normalizedSubmitted = normalizeMultipleChoiceAnswer(question.options, submitted);
+      const normalizedCorrectAnswer = normalizeMultipleChoiceAnswer(
+        question.options,
+        question.correct_answer
+      );
+      const isCorrect = normalizeText(normalizedSubmitted) === normalizeText(normalizedCorrectAnswer);
 
       return {
         correctness: isCorrect ? "correct" : "incorrect",
@@ -1020,7 +1121,7 @@ function buildLocalReview(question: PracticeQuestionRecord, studentAnswer: unkno
         review_advice: isCorrect
           ? ["如果想更扎实，可以再解释一下为什么其他选项不对。"]
           : ["先定位题干中的关键限定词。", "再逐项排除与题意不符的干扰项。"],
-        reference_points: [`参考答案：${question.correct_answer}`],
+        reference_points: [`参考答案：${normalizedCorrectAnswer}`],
         limitations: [],
         skill_judgments: [],
         learner_observations: [],
@@ -1113,7 +1214,7 @@ function parseQuestion(item: unknown): PracticeQuestionRecord | null {
         ...commonFields,
         question_type: "MultipleChoice",
         options: item.options,
-        correct_answer: item.correct_answer,
+        correct_answer: normalizeMultipleChoiceAnswer(item.options, item.correct_answer),
       };
     case "ShortAnswer":
       if (typeof item.reference_answer !== "string") {
@@ -1365,18 +1466,18 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
   if (state.status === "submitting") {
     return (
-      <Card className="border-primary/15 bg-primary/5 shadow-sm">
-        <CardContent className="flex items-start gap-3 p-5">
-          <LoaderCircle className="mt-0.5 h-4 w-4 animate-spin text-primary" />
-          <div className="space-y-1.5 text-sm">
-            <p className="font-medium text-foreground">
-              {state.mode === "ai" ? "AI 正在批阅这道题..." : "正在进行自动判题..."}
+      <Card className="border-blue-200 bg-blue-50/50">
+        <CardContent className="flex items-start gap-3 p-4">
+          <div className="rounded-full bg-blue-100 p-2">
+            <LoaderCircle className="h-5 w-5 animate-spin text-blue-600" />
+          </div>
+          <div className="flex-1 space-y-1 text-sm">
+            <p className="font-medium text-gray-900">
+              {state.mode === "ai" ? "AI 正在批阅..." : "正在自动判题..."}
             </p>
             {state.answerPreview ? (
-              <p className="text-muted-foreground">已提交：{state.answerPreview}</p>
-            ) : (
-              <p className="text-muted-foreground">已收到本次提交，正在生成反馈。</p>
-            )}
+              <p className="text-gray-600">你的答案：{state.answerPreview}</p>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -1385,26 +1486,27 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
   if (state.status === "error") {
     return (
-      <Card className="border-rose-200 bg-rose-50 shadow-sm">
-        <CardContent className="space-y-3 p-5">
+      <Card className="border-red-200 bg-red-50/50">
+        <CardContent className="p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-4 w-4 text-rose-600" />
-              <div className="space-y-1.5 text-sm">
-                <p className="font-medium text-rose-700">批阅失败</p>
+              <div className="rounded-full bg-red-100 p-2">
+                <AlertCircle className="h-5 w-5 text-red-600" />
+              </div>
+              <div className="flex-1 space-y-1 text-sm">
+                <p className="font-medium text-red-900">批阅失败</p>
                 {!isCollapsed ? (
-                  <p className="text-rose-600">{state.error || "提交后暂时无法返回结果，请稍后重试。"}</p>
+                  <p className="text-red-700">{state.error || "提交后暂时无法返回结果，请稍后重试。"}</p>
                 ) : null}
               </div>
             </div>
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 rounded-full px-3 text-rose-700 hover:bg-rose-100 hover:text-rose-800"
+              className="h-7 shrink-0 px-2 text-xs text-red-700 hover:bg-red-100"
               onClick={() => setIsCollapsed((previous) => !previous)}
             >
               {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-              <span className="ml-1">{isCollapsed ? "展开" : "收起"}</span>
             </Button>
           </div>
         </CardContent>
@@ -1417,29 +1519,28 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
   }
 
   const meta = CORRECTNESS_META[state.review.correctness];
+  const StatusIcon = meta.icon;
 
   return (
-    <Card className="border shadow-sm">
-      <CardContent className="space-y-4 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <Card className="border shadow-sm bg-white">
+      <CardContent className="p-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full px-3 py-1">
-              {state.mode === "ai" ? "AI 批阅" : "自动判题"}
-            </Badge>
-            <Badge variant="outline" className={meta.badgeClassName}>
+            <Badge variant="outline" className={`px-2.5 py-0.5 text-xs font-medium ${meta.badgeClassName}`}>
+              <StatusIcon className="mr-1 h-3.5 w-3.5" />
               {meta.label}
             </Badge>
-            <Badge variant="outline" className="border-border bg-muted/50 text-foreground">
+            <Badge variant="outline" className="border-blue-400 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
               {state.review.score} 分
             </Badge>
-            {state.review.judged_at ? (
-              <span className="text-xs text-muted-foreground">{new Date(state.review.judged_at).toLocaleString()}</span>
-            ) : null}
+            <span className="text-xs text-gray-500">
+              {state.mode === "ai" ? "AI批阅" : "自动判题"}
+            </span>
           </div>
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 rounded-full px-3 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="h-7 shrink-0 px-2 text-xs text-gray-600 hover:bg-gray-100"
             onClick={() => setIsCollapsed((previous) => !previous)}
           >
             {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -1447,20 +1548,23 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
           </Button>
         </div>
 
-        <div className="space-y-1">
-          <p className={`text-sm font-semibold ${meta.summaryClassName}`}>{state.review.summary}</p>
-          {state.answerPreview ? <p className="text-sm text-muted-foreground">你的提交：{state.answerPreview}</p> : null}
+        <div className="space-y-1.5">
+          <p className={`text-sm font-medium ${meta.summaryClassName}`}>{state.review.summary}</p>
+          {state.answerPreview ? <p className="text-sm text-gray-600">你的答案：{state.answerPreview}</p> : null}
         </div>
 
         {!isCollapsed && state.review.review_advice.length > 0 ? (
-          <div className="rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-primary">
+          <div className="rounded-lg border border-blue-200 bg-blue-50/50 px-3.5 py-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-900">
               <Sparkles className="h-4 w-4" />
               审阅建议
             </div>
-            <ul className="space-y-1 text-sm text-foreground">
+            <ul className="space-y-1.5 text-sm leading-relaxed text-gray-700">
               {state.review.review_advice.map((item, index) => (
-                <li key={`${item}-${index}`}>- {item}</li>
+                <li key={`${item}-${index}`} className="flex gap-2">
+                  <span className="text-blue-600">•</span>
+                  <span className="flex-1">{item}</span>
+                </li>
               ))}
             </ul>
           </div>
@@ -1468,10 +1572,16 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         {!isCollapsed && state.review.strengths.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">做得好的地方</p>
-            <ul className="space-y-1 text-sm text-muted-foreground">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              做得好的地方
+            </p>
+            <ul className="space-y-1 rounded-lg border border-green-200 bg-green-50/50 px-3.5 py-2.5 text-sm leading-relaxed text-gray-700">
               {state.review.strengths.map((item, index) => (
-                <li key={`${item}-${index}`}>- {item}</li>
+                <li key={`${item}-${index}`} className="flex gap-2">
+                  <span className="text-green-600">•</span>
+                  <span className="flex-1">{item}</span>
+                </li>
               ))}
             </ul>
           </div>
@@ -1479,10 +1589,16 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         {!isCollapsed && state.review.issues.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">还需要关注</p>
-            <ul className="space-y-1 text-sm text-muted-foreground">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+              <AlertTriangle className="h-4 w-4 text-orange-600" />
+              需要改进
+            </p>
+            <ul className="space-y-1 rounded-lg border border-orange-200 bg-orange-50/50 px-3.5 py-2.5 text-sm leading-relaxed text-gray-700">
               {state.review.issues.map((item, index) => (
-                <li key={`${item}-${index}`}>- {item}</li>
+                <li key={`${item}-${index}`} className="flex gap-2">
+                  <span className="text-orange-600">•</span>
+                  <span className="flex-1">{item}</span>
+                </li>
               ))}
             </ul>
           </div>
@@ -1490,23 +1606,193 @@ function QuestionReviewPanel({ state }: { state?: QuestionReviewState }) {
 
         {!isCollapsed && state.review.reference_points.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">参考要点</p>
-            <ul className="space-y-1 text-sm text-muted-foreground">
+            <p className="text-sm font-medium text-gray-900">参考答案</p>
+            <ul className="space-y-1 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm leading-relaxed text-gray-700">
               {state.review.reference_points.map((item, index) => (
-                <li key={`${item}-${index}`}>- {item}</li>
+                <li key={`${item}-${index}`} className="flex gap-2">
+                  <span className="text-gray-500">•</span>
+                  <span className="flex-1">{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PaperPracticeReviewPanel({
+  review,
+  isLoading,
+  error,
+}: {
+  review: PaperPracticeReviewResponse | null;
+  isLoading: boolean;
+  error: string | null;
+}) {
+  if (isLoading) {
+    return (
+      <Card className="border-blue-200 bg-blue-50/50">
+        <CardContent className="flex items-start gap-3 p-4">
+          <div className="rounded-full bg-blue-100 p-2">
+            <LoaderCircle className="h-5 w-5 animate-spin text-blue-600" />
+          </div>
+          <div className="space-y-1 text-sm">
+            <p className="font-medium text-blue-950">正在批阅纸笔答案...</p>
+            <p className="text-blue-700">大模型会读取上传图片，并按当前题目逐项给出反馈。</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="border-red-200 bg-red-50/50">
+        <CardContent className="flex items-start gap-3 p-4">
+          <div className="rounded-full bg-red-100 p-2">
+            <AlertCircle className="h-5 w-5 text-red-600" />
+          </div>
+          <div className="space-y-1 text-sm">
+            <p className="font-medium text-red-900">纸笔答案批阅失败</p>
+            <p className="text-red-700">{error}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!review) {
+    return null;
+  }
+
+  const meta = CORRECTNESS_META[review.correctness];
+  const StatusIcon = meta.icon;
+
+  return (
+    <Card className="border shadow-sm bg-white">
+      <CardContent className="space-y-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className={`px-2.5 py-0.5 text-xs font-medium ${meta.badgeClassName}`}>
+              <StatusIcon className="mr-1 h-3.5 w-3.5" />
+              {meta.label}
+            </Badge>
+            <Badge variant="outline" className="border-blue-400 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+              {review.score} 分
+            </Badge>
+            <span className="text-xs text-gray-500">纸笔批阅 · {review.answer_image_count} 张图片</span>
+          </div>
+          {review.judged_at ? (
+            <span className="text-xs text-gray-400">{new Date(review.judged_at).toLocaleString()}</span>
+          ) : null}
+        </div>
+
+        <p className={`text-sm font-medium ${meta.summaryClassName}`}>{review.summary}</p>
+
+        {(review.strengths.length > 0 || review.issues.length > 0) ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {review.strengths.length > 0 ? (
+              <div className="rounded-lg border border-green-200 bg-green-50/50 px-3.5 py-3">
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-green-900">
+                  <CheckCircle2 className="h-4 w-4" />
+                  做得好的地方
+                </p>
+                <ul className="space-y-1.5 text-sm leading-relaxed text-gray-700">
+                  {review.strengths.map((item, index) => (
+                    <li key={`${item}-${index}`} className="flex gap-2">
+                      <span className="text-green-600">•</span>
+                      <span className="flex-1">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {review.issues.length > 0 ? (
+              <div className="rounded-lg border border-orange-200 bg-orange-50/50 px-3.5 py-3">
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-orange-900">
+                  <AlertTriangle className="h-4 w-4" />
+                  主要问题
+                </p>
+                <ul className="space-y-1.5 text-sm leading-relaxed text-gray-700">
+                  {review.issues.map((item, index) => (
+                    <li key={`${item}-${index}`} className="flex gap-2">
+                      <span className="text-orange-600">•</span>
+                      <span className="flex-1">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {review.review_advice.length > 0 ? (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/50 px-3.5 py-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-900">
+              <Sparkles className="h-4 w-4" />
+              整卷建议
+            </div>
+            <ul className="space-y-1.5 text-sm leading-relaxed text-gray-700">
+              {review.review_advice.map((item, index) => (
+                <li key={`${item}-${index}`} className="flex gap-2">
+                  <span className="text-blue-600">•</span>
+                  <span className="flex-1">{item}</span>
+                </li>
               ))}
             </ul>
           </div>
         ) : null}
 
-        {!isCollapsed && state.review.limitations.length > 0 ? (
-          <div className="rounded-2xl border border-border bg-muted/50 px-4 py-3">
-            <p className="mb-2 text-sm font-medium text-foreground">判定说明</p>
-            <ul className="space-y-1 text-sm text-muted-foreground">
-              {state.review.limitations.map((item, index) => (
-                <li key={`${item}-${index}`}>- {item}</li>
-              ))}
-            </ul>
+        {review.question_reviews.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-900">逐题反馈</p>
+            <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+              {review.question_reviews.map((item) => {
+                const itemMeta = CORRECTNESS_META[item.correctness];
+                const ItemIcon = itemMeta.icon;
+                return (
+                  <div key={`${item.question_id}-${item.question_index}`} className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-900">第 {item.question_index} 题</span>
+                      <Badge variant="outline" className={`px-2 py-0 text-xs font-medium ${itemMeta.badgeClassName}`}>
+                        <ItemIcon className="mr-1 h-3 w-3" />
+                        {itemMeta.label}
+                      </Badge>
+                      <span className="text-xs text-gray-500">{item.score} 分</span>
+                    </div>
+                    <p className="text-sm leading-relaxed text-gray-700">{item.summary}</p>
+                    {item.issues.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-sm leading-relaxed text-orange-700">
+                        {item.issues.map((issue, index) => (
+                          <li key={`${issue}-${index}`} className="flex gap-2">
+                            <span>•</span>
+                            <span className="flex-1">{issue}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {item.review_advice.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-sm leading-relaxed text-blue-700">
+                        {item.review_advice.map((advice, index) => (
+                          <li key={`${advice}-${index}`} className="flex gap-2">
+                            <span>•</span>
+                            <span className="flex-1">{advice}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {review.limitations.length > 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-sm leading-relaxed text-gray-600">
+            {review.limitations.join(" ")}
           </div>
         ) : null}
       </CardContent>
@@ -1603,17 +1889,29 @@ export function PracticeQuestionWorkspace({
   learningGoal,
   questions,
   learnerId,
+  graphContext,
   sessionId,
   isLoading = false,
   error,
   emptyHint = "当前还没有可展示的练习题，请等待题库生成完成。",
+  onReviewStatesChange,
 }: PracticeQuestionWorkspaceProps) {
   const [reviewStates, setReviewStates] = useState<Record<string, QuestionReviewState>>({});
   const [reviewCapabilities, setReviewCapabilities] =
     useState<PracticeReviewCapabilitiesResponse | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [exportPdfError, setExportPdfError] = useState<string | null>(null);
-  const [pdfLayoutMode, setPdfLayoutMode] = useState<"compact" | "loose">("loose");
+  const [isPaperMenuOpen, setIsPaperMenuOpen] = useState(false);
+  const [isReviewingPaper, setIsReviewingPaper] = useState(false);
+  const [paperReviewError, setPaperReviewError] = useState<string | null>(null);
+  const [paperReview, setPaperReview] = useState<PaperPracticeReviewResponse | null>(null);
+  const paperAnswerInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (onReviewStatesChange) {
+      onReviewStatesChange(reviewStates);
+    }
+  }, [reviewStates, onReviewStatesChange]);
 
   const typeCounts = useMemo(() => {
     return questions.reduce<Record<PracticeQuestionType, number>>(
@@ -1685,6 +1983,7 @@ export function PracticeQuestionWorkspace({
           session_id: sessionId ?? null,
           source,
           learning_goal: learningGoal,
+          graph_context: graphContext ?? null,
           question: buildPracticeReviewQuestionPayload(question),
           student_answer: studentAnswer,
           submission_context: submissionContext,
@@ -1779,6 +2078,7 @@ export function PracticeQuestionWorkspace({
           learner_id: learnerId ?? null,
           session_id: sessionId ?? null,
           learning_goal: learningGoal,
+          graph_context: graphContext ?? null,
           question: buildPracticeReviewQuestionPayload(question),
           student_answer: studentAnswer,
           submission_context: submissionContext,
@@ -1849,7 +2149,7 @@ export function PracticeQuestionWorkspace({
     const container = document.createElement("div");
     container.style.cssText =
       "position:fixed;left:-9999px;top:0;width:794px;z-index:-9999;pointer-events:none;";
-    container.innerHTML = buildPracticeQuestionsPdfHtml(learningGoal, questions, generatedAt, pdfLayoutMode)
+    container.innerHTML = buildPracticeQuestionsPdfHtml(learningGoal, questions, generatedAt, "loose")
       .replace(/<!DOCTYPE[^>]*>/i, "")
       .replace(/<\/?html[^>]*>/gi, "")
       .replace(/<\/?head[^>]*>/gi, "")
@@ -1898,13 +2198,90 @@ export function PracticeQuestionWorkspace({
     }
   };
 
+  const handlePaperAnswerImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (isReviewingPaper || questions.length === 0) {
+      event.target.value = "";
+      return;
+    }
+
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length === 0) {
+      return;
+    }
+
+    const nonImageFile = files.find((file) => !file.type.startsWith("image/"));
+    if (nonImageFile) {
+      setPaperReviewError(`"${nonImageFile.name}" 不是图片文件，请上传答案图片。`);
+      setPaperReview(null);
+      return;
+    }
+
+    const capabilities = reviewCapabilities ?? (await loadReviewCapabilities());
+    if (capabilities && !capabilities.support_vision) {
+      setPaperReviewError("当前模型未开启视觉能力，不支持纸笔答案图片批阅。");
+      setPaperReview(null);
+      return;
+    }
+
+    setIsPaperMenuOpen(false);
+    setIsReviewingPaper(true);
+    setPaperReviewError(null);
+    setPaperReview(null);
+
+    try {
+      const answerImages = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          data_url: await readImageFileAsDataUrl(file),
+        }))
+      );
+
+      const response = await fetch("/api/v1/practice-review/paper/judge", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          learner_id: learnerId ?? null,
+          session_id: sessionId ?? null,
+          learning_goal: learningGoal,
+          graph_context: graphContext ?? null,
+          questions: questions.map((question) => buildPracticeReviewQuestionPayload(question)),
+          answer_images: answerImages,
+        }),
+      });
+
+      if (!response.ok) {
+        let message = `纸笔答案批阅请求失败（${response.status}）`;
+        try {
+          const errorPayload = (await response.json()) as { detail?: string };
+          if (typeof errorPayload.detail === "string" && errorPayload.detail.trim()) {
+            message = errorPayload.detail;
+          }
+        } catch {
+          // Keep the fallback message when error payload is not JSON.
+        }
+        throw new Error(message);
+      }
+
+      const review = (await response.json()) as PaperPracticeReviewResponse;
+      setPaperReview(review);
+    } catch (error) {
+      setPaperReviewError(error instanceof Error ? error.message : "纸笔答案批阅失败，请稍后重试。");
+    } finally {
+      setIsReviewingPaper(false);
+    }
+  };
+
   return (
-    <div className="custom-scrollbar w-full h-full flex flex-col gap-8 overflow-y-auto pr-4">
-      <div className="rounded-3xl border bg-card text-card-foreground px-5 py-5 shadow-sm">
+    <div className="custom-scrollbar w-full h-full flex flex-col gap-6 overflow-y-auto pr-4">
+      <div className="rounded-lg border bg-white px-6 py-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Practice Goal</p>
-            <p className="max-w-3xl text-sm leading-6 text-foreground">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">学习目标</p>
+            <p className="max-w-3xl text-base font-medium leading-relaxed text-gray-900">
               {learningGoal.trim() || "当前未提供学习目标，系统将按题目内容进行批阅。"}
             </p>
           </div>
@@ -1914,88 +2291,117 @@ export function PracticeQuestionWorkspace({
                 <Badge
                   key={type}
                   variant="outline"
-                  className={`rounded-full px-3 py-1 ${QUESTION_TYPE_BADGE_CLASS[type]}`}
+                  className={`px-2.5 py-0.5 text-xs font-medium ${QUESTION_TYPE_BADGE_CLASS[type]}`}
                 >
-                  {QUESTION_TYPE_LABELS[type]} x {count}
+                  {QUESTION_TYPE_LABELS[type]} × {count}
                 </Badge>
               ))}
             </div>
-            <div className="flex flex-col items-start gap-2 sm:items-end">
-              <div className="flex items-center gap-1 rounded-full border bg-muted/30 p-0.5">
-                <button
-                  type="button"
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    pdfLayoutMode === "loose"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  onClick={() => setPdfLayoutMode("loose")}
-                >
-                  松散
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    pdfLayoutMode === "compact"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  onClick={() => setPdfLayoutMode("compact")}
-                >
-                  紧凑
-                </button>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-full"
-                disabled={isLoading || !!error || questions.length === 0 || isExportingPdf}
-                onClick={handleExportPdf}
-              >
-                {isExportingPdf ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
-                {isExportingPdf ? "正在导出" : "导出 PDF"}
-              </Button>
-              {exportPdfError ? <p className="max-w-xs text-xs text-destructive">{exportPdfError}</p> : null}
+            <div className="flex flex-col items-start gap-2.5 sm:items-end">
+              <input
+                ref={paperAnswerInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handlePaperAnswerImageChange}
+              />
+              <Popover open={isPaperMenuOpen} onOpenChange={setIsPaperMenuOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-blue-200 bg-white text-blue-600 hover:bg-blue-50"
+                    disabled={isLoading || !!error || questions.length === 0 || isExportingPdf || isReviewingPaper}
+                  >
+                    {isExportingPdf || isReviewingPaper ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ClipboardCheck className="h-4 w-4" />
+                    )}
+                    纸笔答题
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-64 p-2">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isExportingPdf}
+                    onClick={() => {
+                      setIsPaperMenuOpen(false);
+                      void handleExportPdf();
+                    }}
+                  >
+                    {isExportingPdf ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                    <span>{isExportingPdf ? "正在导出 PDF" : "下载 PDF"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isReviewingPaper}
+                    onClick={() => paperAnswerInputRef.current?.click()}
+                  >
+                    {isReviewingPaper ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    <span>{isReviewingPaper ? "正在批阅答案" : "上传答案图片"}</span>
+                  </button>
+                </PopoverContent>
+              </Popover>
+              {exportPdfError ? <p className="max-w-xs text-xs text-red-600">{exportPdfError}</p> : null}
             </div>
           </div>
         </div>
       </div>
 
+      <PaperPracticeReviewPanel
+        review={paperReview}
+        isLoading={isReviewingPaper}
+        error={paperReviewError}
+      />
+
       {isLoading ? (
-        <div className="flex items-center gap-2 rounded-2xl border bg-card text-card-foreground px-5 py-4 text-sm text-muted-foreground shadow-sm">
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-          正在加载真实题库...
+        <div className="flex items-center gap-3 rounded-lg border bg-white px-4 py-3 text-sm text-gray-600">
+          <div className="rounded-full bg-blue-100 p-2">
+            <LoaderCircle className="h-4 w-4 animate-spin text-blue-600" />
+          </div>
+          正在加载题目...
         </div>
       ) : null}
 
       {!isLoading && error ? (
-        <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-5 py-4 text-sm text-destructive shadow-sm">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       ) : null}
 
       {!isLoading && !error && questions.length === 0 ? (
-        <div className="rounded-2xl border border-dashed bg-card text-card-foreground px-5 py-8 text-sm text-muted-foreground shadow-sm">
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-8 text-center text-sm text-gray-500">
           {emptyHint}
         </div>
       ) : null}
 
       {!isLoading && !error && questions.length > 0
         ? questions.map((question, index) => (
-          <section key={question.id} className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="rounded-full px-3 py-1">
-                第 {index + 1} 题
-              </Badge>
-              <Badge variant="outline" className={QUESTION_TYPE_BADGE_CLASS[question.question_type]}>
+          <section key={question.id} id={`question-${question.id}`} className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-full font-semibold text-white shadow-sm"
+                style={{ backgroundColor: PDF_TYPE_ACCENT[question.question_type] }}
+              >
+                {index + 1}
+              </div>
+              <Badge
+                variant="outline"
+                className={`px-2.5 py-0.5 text-xs font-medium ${QUESTION_TYPE_BADGE_CLASS[question.question_type]}`}
+              >
                 {QUESTION_TYPE_LABELS[question.question_type]}
               </Badge>
               {questionNeedsAIJudge(question) ? (
-                <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
-                  AI 批阅
+                <Badge variant="outline" className="border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600">
+                  <Sparkles className="mr-1 h-3 w-3" />
+                  AI批阅
                 </Badge>
               ) : (
-                <Badge variant="outline" className="border-border bg-muted/50 text-muted-foreground">
+                <Badge variant="outline" className="border-gray-300 bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                   自动判题
                 </Badge>
               )}
@@ -2009,4 +2415,3 @@ export function PracticeQuestionWorkspace({
     </div>
   );
 }
-

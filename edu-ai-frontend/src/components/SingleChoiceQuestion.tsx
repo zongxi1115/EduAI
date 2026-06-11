@@ -7,6 +7,7 @@ import { PenTool } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { DraftBoard } from "@/components/DraftBoard";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 import { X } from "lucide-react";
 
 export interface Option {
@@ -22,20 +23,26 @@ export interface SingleChoiceQuestionProps {
 
 export function SingleChoiceQuestion({ questionContent, options, onSelect }: SingleChoiceQuestionProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const draftQuestionContent = [
+    questionContent,
+    options.length > 0
+      ? options.map((option) => `**${option.id}.** ${option.content}`).join("\n\n")
+      : "",
+  ].filter(Boolean).join("\n\n");
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
   };
 
   return (
-    <div className="custom-scrollbar w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto">
-      <div className="flex items-start justify-between gap-4 mb-6">
+    <div className="w-full space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div className="prose prose-slate max-w-none flex-1">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
             components={{
-              p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
+              p: ({ ...props }) => <p className="text-base text-gray-900 m-0 mb-3 leading-relaxed" {...props} />,
             }}
           >
             {questionContent}
@@ -44,20 +51,18 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
 
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="shrink-0 gap-2 text-primary border-primary/20 hover:bg-primary/10 transition-colors">
-              <PenTool className="w-4 h-4" />
+            <Button variant="outline" size="sm" className="shrink-0 gap-1.5 border-blue-200 bg-white text-blue-600 hover:bg-blue-50">
+              <PenTool className="w-3.5 h-3.5" />
               草稿纸
             </Button>
           </DialogTrigger>
-          {/* @ts-ignore */}
+          {/* @ts-expect-error shadcn DialogContent wrapper accepts showCloseButton at runtime. */}
           <DialogContent className="fixed inset-0 m-0 max-w-none max-h-none h-[100dvh] w-[100dvw] p-0 flex flex-col rounded-none overflow-hidden border-none top-0 left-0 translate-x-0 translate-y-0 sm:max-w-none" showCloseButton={false}>
             <DialogTitle className="sr-only">在线草稿纸</DialogTitle>
 
-            {/* DraftBoard fills entire modal */}
             <div className="flex-1 w-full h-full relative">
-              <DraftBoard questionContent={questionContent} />
+              <DraftBoard questionContent={draftQuestionContent} />
 
-              {/* Custom Close Button to ensure it renders above the absolutely positioned DraftBoard elements */}
               <DialogClose asChild>
                 <Button
                   variant="secondary"
@@ -73,29 +78,53 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
         </Dialog>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {options.map((option) => {
           const isSelected = selectedId === option.id;
           return (
             <div
               key={option.id}
               onClick={() => handleSelect(option.id)}
-              className={`p-4 border rounded-lg cursor-pointer transition-colors ${isSelected
-                  ? "border-primary bg-primary/5 shadow-sm"
-                  : "border-border hover:border-border hover:bg-muted/50"
-                }`}
+              className={`group relative p-3.5 border rounded-lg cursor-pointer transition-all ${
+                isSelected
+                  ? "border-blue-400 bg-blue-50/50"
+                  : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+              }`}
             >
-              <div className="flex items-start gap-4">
-                <div className={`mt-0.5 shrink-0 flex items-center justify-center w-6 h-6 rounded-full border text-sm font-medium transition-colors ${isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border text-muted-foreground bg-card text-card-foreground"
-                  }`}>
+              <div className="flex items-start gap-3">
+                {/* 圆形单选框 */}
+                <div className="relative mt-0.5 shrink-0">
+                  <div
+                    className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
+                      isSelected
+                        ? "border-blue-500 bg-blue-500"
+                        : "border-gray-300 bg-white group-hover:border-blue-400"
+                    }`}
+                  >
+                    {isSelected && (
+                      <div className="h-2 w-2 rounded-full bg-white" />
+                    )}
+                  </div>
+                </div>
+
+                {/* 选项标识 */}
+                <div
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-xs font-semibold transition-colors ${
+                    isSelected
+                      ? "text-blue-600"
+                      : "text-gray-600 group-hover:text-blue-500"
+                  }`}
+                >
                   {option.id}
                 </div>
-                <div className={`prose prose-slate max-w-none flex-1 overflow-hidden ${isSelected ? "text-primary" : "text-foreground"}`}>
+
+                {/* 选项内容 */}
+                <div className={`prose prose-slate max-w-none flex-1 overflow-hidden transition-colors ${isSelected ? "text-gray-900" : "text-gray-700"}`}>
                   <ReactMarkdown
                     remarkPlugins={[remarkMath]}
-                    rehypePlugins={[rehypeKatex]}
+                    rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
                     components={{
-                      p: ({ node, ...props }) => <p className="m-0" {...props} />,
+                      p: ({ ...props }) => <p className="m-0 leading-relaxed" {...props} />,
                     }}
                   >
                     {option.content}
@@ -107,11 +136,11 @@ export function SingleChoiceQuestion({ questionContent, options, onSelect }: Sin
         })}
       </div>
 
-      <div className="mt-8 flex justify-end">
+      <div className="flex justify-end pt-2">
         <Button
           disabled={!selectedId}
           onClick={() => onSelect && onSelect(selectedId!)}
-          className="gap-2 px-8"
+          className="gap-2 px-6 bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
         >
           提交答案
         </Button>

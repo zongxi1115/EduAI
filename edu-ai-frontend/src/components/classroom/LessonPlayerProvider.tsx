@@ -336,6 +336,69 @@ function buildLessonStageDocument(sectionHtml: string, runId?: string) {
       }
     </style>
     <script>
+      const eduLessonNormalizeText = (text) => String(text || "").replace(/\\s+/g, " ").trim();
+      const eduLessonIgnoredTags = new Set(["BUTTON", "INPUT", "MATH-FIELD", "SELECT", "TEXTAREA"]);
+
+      function eduLessonClosestContext(node) {
+        let element = node && node.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        while (element) {
+          if (["ARTICLE", "BLOCKQUOTE", "DIV", "LI", "MAIN", "P", "SECTION", "TD", "TH"].includes(element.tagName)) {
+            const text = eduLessonNormalizeText(element.textContent);
+            if (text) {
+              return text.slice(0, 900);
+            }
+          }
+          element = element.parentElement;
+        }
+        return "";
+      }
+
+      function eduLessonPostSelection() {
+        try {
+          const selection = window.getSelection();
+          if (!selection || selection.rangeCount === 0) {
+            window.parent.postMessage({ source: "edu-lesson-stage", type: "lesson-stage-selection-clear" }, "*");
+            return;
+          }
+
+          const anchorElement = selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+            ? selection.anchorNode
+            : selection.anchorNode?.parentElement;
+          if (anchorElement?.closest(Array.from(eduLessonIgnoredTags).join(","))) {
+            return;
+          }
+
+          const text = eduLessonNormalizeText(selection.toString());
+          if (!text) {
+            window.parent.postMessage({ source: "edu-lesson-stage", type: "lesson-stage-selection-clear" }, "*");
+            return;
+          }
+
+          const range = selection.getRangeAt(0);
+          const rect = Array.from(range.getClientRects()).find((item) => item.width > 0 && item.height > 0) || range.getBoundingClientRect();
+          if (!rect || (rect.width <= 0 && rect.height <= 0)) {
+            return;
+          }
+
+          window.parent.postMessage({
+            source: "edu-lesson-stage",
+            type: "lesson-stage-selection",
+            selection: text,
+            context: eduLessonClosestContext(range.commonAncestorContainer) || text,
+            rect: {
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+            },
+          }, "*");
+        } catch {}
+      }
+
+      document.addEventListener("selectionchange", () => window.setTimeout(eduLessonPostSelection, 80));
+      window.addEventListener("pointerup", () => window.setTimeout(eduLessonPostSelection, 40), true);
       window.addEventListener("dblclick", () => {
         try {
           window.parent.postMessage({ source: "edu-lesson-stage", type: "lesson-stage-dblclick" }, "*");

@@ -6,6 +6,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { HtmlMarkdown } from "./html-markdown"
 import { Markdown } from "./markdown"
 
 export type MessageProps = {
@@ -47,12 +48,14 @@ const MessageAvatar = ({
 export type MessageContentProps = {
   children: React.ReactNode
   markdown?: boolean
+  html?: boolean
   className?: string
 } & React.ComponentProps<typeof Markdown> &
   React.HTMLProps<HTMLDivElement>
 
 const MessageContent = ({
   children,
+  html = false,
   markdown = false,
   className,
   ...props
@@ -62,7 +65,11 @@ const MessageContent = ({
     className
   )
 
-  return markdown ? (
+  return html ? (
+    <HtmlMarkdown className={classNames}>
+      {children as string}
+    </HtmlMarkdown>
+  ) : markdown ? (
     <Markdown className={classNames} {...props}>
       {children as string}
     </Markdown>

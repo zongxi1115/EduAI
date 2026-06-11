@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..parser import normalize_script_question_payload, parse_page
 from ..state import PageScriptTaskState
-from ._common import flatten_content, load_prompt
+from ._common import flatten_content, invoke_llm_with_retry, load_prompt
 
 
 class PageScriptGenerationError(ValueError):
@@ -58,13 +58,15 @@ class PageScriptAgent:
         page_idx = int(page_blueprint["idx"])
         attempts: list[dict[str, Any]] = []
         for attempt_no in range(1, self._max_attempts + 1):
-            response = self._llm.invoke(
-                [
-                    SystemMessage(content=self._system_prompt),
-                    HumanMessage(
-                        content=self._build_user_prompt(state, feedback=feedback)
-                    ),
-                ]
+            response = invoke_llm_with_retry(
+                lambda: self._llm.invoke(
+                    [
+                        SystemMessage(content=self._system_prompt),
+                        HumanMessage(
+                            content=self._build_user_prompt(state, feedback=feedback)
+                        ),
+                    ]
+                )
             )
             page_script = normalize_script_question_payload(flatten_content(response.content))
             try:
@@ -126,7 +128,9 @@ class PageScriptAgent:
             "- 当前页禁止输出 <to_next_page/>。\n"
             "- 按照 target_reveal_count 生成 3 到 6 个 reveal。\n"
             "- 如果提供了 quiz_goal，请在本页安排 1 个 <question> 和紧随其后的 <false_intro>。\n"
-            "- 只写旁白讲稿，不要使用 <on_slide>。\n"
+            "- 每个 reveal 都尽量写一个 <on_slide>，放这一屏应展示的结构化内容、公式、图解说明、表格要点或代码片段。\n"
+            "- <on_slide> 不是旁白复读，应服务于画面设计；旁白在标签外，页面显示内容在标签内。\n"
+            "- 优先复用 page_blueprint.material_focus 中的素材块，不要把整份材料平均摊开。\n"
             "- 不要输出 markdown 围栏或解释。\n\n"
             f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
             f"{feedback}"

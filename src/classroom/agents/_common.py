@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 
 PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
 SLIDE_PROMPT_NAME_RE = re.compile(r"^slide(?:[._-].+)?\.md$", re.IGNORECASE)
+RetryResultT = TypeVar("RetryResultT")
+RETRYABLE_LLM_ERROR_MARKERS = (
+    "apiconnectionerror",
+    "connection error",
+    "request timed out",
+    "timed out",
+    "timeout",
+    "502",
+    "bad gateway",
+    "upstream_error",
+    "temporarily unavailable",
+    "connection reset",
+)
 
 
 def normalize_prompt_name(name: str) -> str:
@@ -64,6 +79,28 @@ def list_slide_prompt_names() -> list[str]:
 
 def load_prompt(name: str) -> str:
     return resolve_prompt_path(name).read_text(encoding="utf-8").strip()
+
+
+def is_retryable_llm_exception(exc: Exception) -> bool:
+    message = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in message for marker in RETRYABLE_LLM_ERROR_MARKERS)
+
+
+def invoke_llm_with_retry(
+    invoke: Callable[[], RetryResultT],
+    *,
+    max_retries: int = 3,
+    delay_seconds: float = 1.5,
+) -> RetryResultT:
+    for attempt_no in range(max_retries + 1):
+        try:
+            return invoke()
+        except Exception as exc:
+            if attempt_no >= max_retries or not is_retryable_llm_exception(exc):
+                raise
+            time.sleep(delay_seconds * (2**attempt_no))
+
+    raise RuntimeError("LLM retry loop exited unexpectedly.")
 
 
 def flatten_content(

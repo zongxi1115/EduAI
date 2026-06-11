@@ -10,6 +10,7 @@ import { DraftBoard } from "@/components/DraftBoard";
 import { X } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { Textarea } from "@/components/ui/textarea";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 
 export interface ProgrammingQuestionProps {
   questionContent: string; // Markdown + LaTeX
@@ -463,7 +464,7 @@ export function ProgrammingQuestion({
         <div className="custom-scrollbar p-6 overflow-y-auto flex-1 prose prose-slate max-w-none">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
           >
             {questionContent}
           </ReactMarkdown>

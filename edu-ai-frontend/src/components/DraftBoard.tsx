@@ -10,6 +10,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 
 type Point = [number, number, number];
 type Tool = "pencil" | "eraser" | "line" | "circle" | "rectangle" | "text";
@@ -351,7 +352,7 @@ export function DraftBoard({ questionContent, onExportReady }: DraftBoardProps) 
         <div className="absolute top-0 left-0 w-full p-6 pb-24 prose prose-slate dark:prose-invert max-w-none pointer-events-none select-none z-0">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
             components={{
               p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
             }}

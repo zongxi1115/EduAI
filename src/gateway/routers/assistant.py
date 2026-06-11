@@ -9,17 +9,22 @@ from edu_multi_agent.file_io import now_iso
 from edu_multi_agent.llm import LLMClient
 
 from ..dependencies import get_llm_client
-from ..schemas.assistant import SelectionQuestionRequest
-from ..services.assistant import build_selection_qa_prompts
+from ..schemas.assistant import (
+    AskQuestionRequest,
+    AssistantRenderTarget,
+    AssistantResponseMode,
+    SelectionQuestionRequest,
+)
+from ..services.assistant import build_ask_prompts, build_selection_qa_prompts
 from ..services.prep_runs import encode_sse
 
 
-router = APIRouter(prefix="/api/v1/assistant", tags=["选区问答"])
+router = APIRouter(prefix="/api/v1/assistant", tags=["AI 助手"])
 
 LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
 
 SELECTION_QA_SSE_EXAMPLE = """event: started
-data: {"timestamp":"2026-04-16T10:30:00+08:00","question":"为什么 a 为负数时抛物线开口向下？","selection_length":13,"has_context":true,"history_length":0}
+data: {"timestamp":"2026-04-16T10:30:00+08:00","question":"为什么 a 为负数时抛物线开口向下？","mode":"markdown","render_target":"inline","selection_length":13,"has_context":true,"history_length":0}
 
 event: delta
 data: {"delta":"因为二次项系数 a 决定了抛物线的开口方向。"}
@@ -28,8 +33,125 @@ event: delta
 data: {"delta":"当 a 为负数时，函数值会随着 |x| 增大而整体减小，所以图像向下张开。"}
 
 event: completed
-data: {"timestamp":"2026-04-16T10:30:02+08:00","answer":"因为二次项系数 a 决定了抛物线的开口方向。当 a 为负数时，函数值会随着 |x| 增大而整体减小，所以图像向下张开。"}
+data: {"timestamp":"2026-04-16T10:30:02+08:00","mode":"markdown","render_target":"inline","answer":"因为二次项系数 a 决定了抛物线的开口方向。当 a 为负数时，函数值会随着 |x| 增大而整体减小，所以图像向下张开。"}
 """
+
+ASK_SSE_EXAMPLE = """event: started
+data: {"timestamp":"2026-04-16T10:30:00+08:00","question":"用一个可视化结构解释二次函数顶点式。","mode":"html","render_target":"artifact","has_context":true,"history_length":0}
+
+event: delta
+data: {"delta":"顶点式可以拆成三个视觉锚点：\\n\\n<section style=\\"border:1px solid #ddd;padding:12px;border-radius:8px\\">"}
+
+event: completed
+data: {"timestamp":"2026-04-16T10:30:02+08:00","mode":"html","render_target":"artifact","answer":"顶点式可以拆成三个视觉锚点：...<edu-html-artifact title=\\"二次函数可视化解释器\\"><!doctype html>...</edu-html-artifact>"}
+"""
+
+
+def _stream_answer_response(
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    question: str,
+    mode: AssistantResponseMode,
+    render_target: AssistantRenderTarget,
+    started_payload: dict[str, Any],
+) -> StreamingResponse:
+    async def event_generator() -> Any:
+        """按 SSE 格式生成问答事件。"""
+        full_answer_parts: list[str] = []
+        yield "retry: 3000\n\n"
+        yield encode_sse(
+            "started",
+            {
+                "timestamp": now_iso(),
+                "question": question,
+                "mode": mode,
+                "render_target": render_target,
+                **started_payload,
+            },
+        )
+
+        try:
+            async for chunk in llm_client.stream_text(system_prompt, user_prompt):
+                if not chunk:
+                    continue
+                full_answer_parts.append(chunk)
+                yield encode_sse("delta", {"delta": chunk})
+
+            full_answer = "".join(full_answer_parts)
+            yield encode_sse(
+                "completed",
+                {
+                    "timestamp": now_iso(),
+                    "mode": mode,
+                    "render_target": render_target,
+                    "answer": full_answer,
+                },
+            )
+        except Exception as exc:
+            yield encode_sse(
+                "error",
+                {
+                    "timestamp": now_iso(),
+                    "mode": mode,
+                    "render_target": render_target,
+                    "error": str(exc),
+                },
+            )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/ask/stream",
+    summary="通用 AI Ask 流式问答",
+    description=(
+        "通用 AI Ask 接口，以 Server-Sent Events (SSE) 流式返回答案。"
+        "请求体包含用户问题 `question`、可选上下文 `context`、可选历史消息 `history`，"
+        "以及回答格式 `mode`。`mode=markdown` 保持普通 Markdown 输出；"
+        "`mode=html` 允许 Markdown 与静态 HTML 片段混合，用于结构化说明、表格、步骤卡片、"
+        "简单 SVG 图示或可视化注解。`render_target=artifact` 时会要求模型输出独立 HTML 展示层，"
+        "供前端以 sandbox iframe 预览。"
+    ),
+    response_description="返回包含 `started`、`delta`、`completed`、`error` 的 SSE 事件流。",
+    responses={
+        200: {
+            "description": "SSE 实时事件流。",
+            "content": {
+                "text/event-stream": {
+                    "example": ASK_SSE_EXAMPLE,
+                }
+            },
+        }
+    },
+)
+async def stream_ask(
+    payload: AskQuestionRequest,
+    llm_client: LLMClientDep,
+) -> StreamingResponse:
+    """通用 AI Ask，支持 Markdown 与 HTML 混合输出模式。"""
+    system_prompt, user_prompt = build_ask_prompts(payload)
+    return _stream_answer_response(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        question=payload.question,
+        mode=payload.mode,
+        render_target=payload.render_target,
+        started_payload={
+            "has_context": bool((payload.context or "").strip()),
+            "history_length": len(payload.history),
+        },
+    )
 
 
 @router.post(
@@ -64,52 +186,16 @@ async def stream_selection_qa(
 ) -> StreamingResponse:
     """针对用户选中的文本与提问，流式返回尽量基于上下文的回答。"""
     system_prompt, user_prompt = build_selection_qa_prompts(payload)
-
-    async def event_generator() -> Any:
-        """按 SSE 格式生成问答事件。"""
-        full_answer_parts: list[str] = []
-        yield "retry: 3000\n\n"
-        yield encode_sse(
-            "started",
-            {
-                "timestamp": now_iso(),
-                "question": payload.question,
-                "selection_length": len((payload.selection or "").strip()),
-                "has_context": bool((payload.context or "").strip()),
-                "history_length": len(payload.history),
-            },
-        )
-
-        try:
-            async for chunk in llm_client.stream_text(system_prompt, user_prompt):
-                if not chunk:
-                    continue
-                full_answer_parts.append(chunk)
-                yield encode_sse("delta", {"delta": chunk})
-
-            full_answer = "".join(full_answer_parts)
-            yield encode_sse(
-                "completed",
-                {
-                    "timestamp": now_iso(),
-                    "answer": full_answer,
-                },
-            )
-        except Exception as exc:
-            yield encode_sse(
-                "error",
-                {
-                    "timestamp": now_iso(),
-                    "error": str(exc),
-                },
-            )
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
+    return _stream_answer_response(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        question=payload.question,
+        mode=payload.mode,
+        render_target=payload.render_target,
+        started_payload={
+            "selection_length": len((payload.selection or "").strip()),
+            "has_context": bool((payload.context or "").strip()),
+            "history_length": len(payload.history),
         },
     )

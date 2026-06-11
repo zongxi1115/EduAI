@@ -6,6 +6,7 @@ import "katex/dist/katex.min.css";
 import { CheckCircle, Maximize2, Shrink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DraftBoard, type DraftBoardExportApi } from "@/components/DraftBoard";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 
 export interface DrawingSubmission {
   imageDataUrl: string | null;
@@ -41,7 +42,7 @@ export function DrawingQuestion({ questionContent, onSubmit }: DrawingQuestionPr
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
             components={{
               p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
             }}

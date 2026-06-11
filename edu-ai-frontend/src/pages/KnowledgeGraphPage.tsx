@@ -32,6 +32,15 @@ type GraphIndexResponse = {
   datasets: GraphDataset[];
 };
 
+type LearningGraphContext = {
+  dataset_id: string | null;
+  course_group_id: string | null;
+  course_id: string | null;
+  focus_node_id: string | null;
+  focus_node_title: string | null;
+  source_graph_id: string | null;
+};
+
 /* ───────── Helpers ───────── */
 
 function hexToRgba(hex: string, alpha: number) {
@@ -370,6 +379,28 @@ export default function KnowledgeGraphPage() {
         ? String(selectedNode.parentId).split("::")[0]
         : courseName
       : (activeDataset?.title ?? courseName);
+    const focusNodeId = selectedNode?.id != null ? String(selectedNode.id) : knowledgePoint;
+    const courseGroupId = isCourseGroups
+      ? selectedNode?.parentId
+        ? String(selectedNode.parentId).split("::")[0]
+        : selectedNode?.isModule
+          ? focusNodeId
+          : null
+      : null;
+    const courseId = isCourseGroups
+      ? selectedNode?.isModule
+        ? null
+        : focusNodeId
+      : (activeDataset?.id ?? null);
+    const graphContext: LearningGraphContext = {
+      dataset_id: activeDataset?.id ?? null,
+      course_group_id: courseGroupId,
+      course_id: courseId,
+      focus_node_id: focusNodeId,
+      focus_node_title: knowledgePoint,
+      source_graph_id:
+        selectedNode?.graph_id != null ? String(selectedNode.graph_id) : null,
+    };
 
     setLearningTaskId(knowledgePoint);
     try {
@@ -386,6 +417,7 @@ export default function KnowledgeGraphPage() {
           learner_id: learnerId,
           learner_profile: "适用学段：大学与成人；希望教学风格：鼓励启发",
           notes: `课程：${courseName}；知识点：${knowledgePoint}`,
+          graph_context: graphContext,
           language: "zh-CN",
         }),
       });

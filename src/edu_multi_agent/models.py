@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,6 +14,35 @@ QuestionTypeName = Literal[
     "Coding",
     "Drawing",
 ]
+
+
+class LearningGraphContext(BaseModel):
+    """Explicit graph scope carried from graph-based learning flows."""
+
+    dataset_id: str | None = Field(
+        default=None,
+        description="知识图谱数据集标识，例如 high_math 或 ai_foundation_course_groups。",
+    )
+    course_group_id: str | None = Field(
+        default=None,
+        description="课程群节点标识；非课程群图谱可为空。",
+    )
+    course_id: str | None = Field(
+        default=None,
+        description="课程节点标识；没有明确课程节点时可为空。",
+    )
+    focus_node_id: str | None = Field(
+        default=None,
+        description="本次学习入口对应的图谱节点标识。",
+    )
+    focus_node_title: str | None = Field(
+        default=None,
+        description="本次学习入口对应的图谱节点名称。",
+    )
+    source_graph_id: str | None = Field(
+        default=None,
+        description="课程群节点关联的细分课程图谱标识。",
+    )
 
 
 class GenerationRequest(BaseModel):
@@ -46,6 +75,10 @@ class GenerationRequest(BaseModel):
     notes: str = Field(
         default="None",
         description="教师补充说明、交付约束或强调重点。",
+    )
+    graph_context: LearningGraphContext | None = Field(
+        default=None,
+        description="从知识图谱发起学习时携带的显式图谱上下文。",
     )
     language: str = Field(
         default="zh-CN",
@@ -161,6 +194,79 @@ class PracticeBlueprint(BaseModel):
         default_factory=list,
         description="各题型的建议数量与用途。",
     )
+
+
+class PracticeQuestionBase(BaseModel):
+    """练习题通用字段。"""
+
+    question_type: QuestionTypeName = Field(description="题型名称。")
+    question: str = Field(description="题干。")
+    analysis: str = Field(description="解析。")
+    need_ai_judge: bool = Field(description="是否需要 AI 主观批改。")
+    skill_tags: list[str] = Field(
+        default_factory=list,
+        description="该题主要诊断或训练的技能标签。",
+    )
+    difficulty: float = Field(
+        ge=0,
+        le=1,
+        description="0-1 之间的相对难度。",
+    )
+
+
+class FillInTheBlankPracticeQuestion(PracticeQuestionBase):
+    question_type: Literal["FillInTheBlank"] = "FillInTheBlank"
+    answer: str = Field(description="填空题答案。")
+
+
+class MultipleChoicePracticeQuestion(PracticeQuestionBase):
+    question_type: Literal["MultipleChoice"] = "MultipleChoice"
+    options: list[str] = Field(description="选项内容列表。")
+    correct_answer: str = Field(description="正确选项的完整内容。")
+
+
+class ShortAnswerPracticeQuestion(PracticeQuestionBase):
+    question_type: Literal["ShortAnswer"] = "ShortAnswer"
+    reference_answer: str = Field(description="简答题参考答案。")
+
+
+class ListeningPracticeQuestion(PracticeQuestionBase):
+    question_type: Literal["Listening"] = "Listening"
+    audio_src: str = Field(description="听力材料音频地址或占位说明。")
+    answer: str = Field(description="听力题答案。")
+
+
+class CodingPracticeQuestion(PracticeQuestionBase):
+    question_type: Literal["Coding"] = "Coding"
+    reference_code: str = Field(description="参考代码。")
+    test_cases: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="可 JSON 序列化的测试用例。",
+    )
+
+
+class DrawingPracticeQuestion(PracticeQuestionBase):
+    question_type: Literal["Drawing"] = "Drawing"
+    reference_image: str = Field(description="参考图像地址、描述或占位说明。")
+
+
+PracticeQuestion = Annotated[
+    FillInTheBlankPracticeQuestion
+    | MultipleChoicePracticeQuestion
+    | ShortAnswerPracticeQuestion
+    | ListeningPracticeQuestion
+    | CodingPracticeQuestion
+    | DrawingPracticeQuestion,
+    Field(discriminator="question_type"),
+]
+
+
+class PracticePackage(BaseModel):
+    """练习 Agent 的结构化输出。"""
+
+    summary: str = Field(description="一句中文摘要，说明本次练习包内容。")
+    questions: list[PracticeQuestion] = Field(description="结构化练习题列表。")
+    answer_key_markdown: str = Field(description="中文 Markdown 答案解析。")
 
 
 class ArtifactResult(BaseModel):

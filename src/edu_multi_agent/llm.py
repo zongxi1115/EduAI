@@ -15,6 +15,17 @@ from .file_io import ParsedBundle, parse_tagged_bundle
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+class BundleParseError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_outputs: list[str],
+    ) -> None:
+        self.raw_outputs = raw_outputs
+        super().__init__(message)
+
+
 def _flatten_content(
     content: Any,
     *,
@@ -137,8 +148,11 @@ class LLMClient:
     ) -> ParsedBundle:
         feedback = ""
         last_error: Exception | None = None
+        raw_outputs: list[str] = []
+        required_file_list = ", ".join(required_files)
         for _ in range(max_attempts):
             raw_text = self.invoke_text(system_prompt, user_prompt + feedback)
+            raw_outputs.append(raw_text)
             try:
                 return parse_tagged_bundle(raw_text, required_files)
             except Exception as exc:
@@ -146,9 +160,13 @@ class LLMClient:
                 feedback = (
                     "\n\nYour previous output did not match the required tag format. "
                     "Return the output again using the exact tags and exact filenames. "
+                    "Do not return JSON only, markdown only, or any prose outside the "
+                    "required tagged bundle. "
+                    f"Required files: {required_file_list}. "
                     f"Error: {exc}"
                 )
 
-        raise RuntimeError(
-            f"Failed to parse tagged bundle output: {last_error}"
+        raise BundleParseError(
+            f"Failed to parse tagged bundle output: {last_error}",
+            raw_outputs=raw_outputs,
         ) from last_error

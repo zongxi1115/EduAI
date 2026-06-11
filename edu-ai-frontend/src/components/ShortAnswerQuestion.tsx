@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { DraftBoard } from "@/components/DraftBoard";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 import { X } from "lucide-react";
 
 export interface ShortAnswerQuestionProps {
@@ -28,14 +29,14 @@ export function ShortAnswerQuestion({ questionContent, onSubmit }: ShortAnswerQu
   };
 
   return (
-    <div className="custom-scrollbar w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto mt-6">
-      <div className="flex items-start justify-between gap-4 mb-6">
+    <div className="w-full space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
             components={{
-              p: ({ node, ...props }) => <p className="text-base text-foreground m-0 mb-4" {...props} />,
+              p: ({ node, ...props }) => <p className="text-base text-gray-900 m-0 mb-3 leading-relaxed" {...props} />,
             }}
           >
             {questionContent}
@@ -44,8 +45,8 @@ export function ShortAnswerQuestion({ questionContent, onSubmit }: ShortAnswerQu
 
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="shrink-0 gap-2 text-primary border-primary/20 hover:bg-primary/10 transition-colors">
-              <PenTool className="w-4 h-4" />
+            <Button variant="outline" size="sm" className="shrink-0 gap-1.5 border-blue-200 bg-white text-blue-600 hover:bg-blue-50">
+              <PenTool className="w-3.5 h-3.5" />
               草稿纸
             </Button>
           </DialogTrigger>
@@ -69,19 +70,19 @@ export function ShortAnswerQuestion({ questionContent, onSubmit }: ShortAnswerQu
         </Dialog>
       </div>
 
-      <div className="mt-4 mb-6">
+      <div>
         <Textarea
           placeholder="请输入你的答案..."
-          className="min-h-[150px] resize-y p-4 text-base leading-relaxed focus-visible:ring-primary/50"
+          className="min-h-[160px] resize-y p-3.5 text-base leading-relaxed border-gray-200 focus-visible:ring-blue-500 focus-visible:border-blue-500"
           value={answer}
           onChange={e => setAnswer(e.target.value)}
         />
       </div>
 
-      <div className="pt-4 border-t flex justify-end">
-        <Button onClick={handleSubmit} className="gap-2 px-8">
+      <div className="flex justify-end pt-2">
+        <Button onClick={handleSubmit} className="gap-2 px-6 bg-blue-500 hover:bg-blue-600 text-white">
           <CheckCircle className="w-4 h-4" />
-          提交简答
+          提交答案
         </Button>
       </div>
     </div>

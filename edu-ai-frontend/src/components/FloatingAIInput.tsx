@@ -11,6 +11,13 @@ const CONTEXT_MAX_LENGTH = 640;
 const EXPANDED_INPUT_HEIGHT_ESTIMATE = 220;
 
 type FloatingPlacement = "top" | "bottom";
+type AssistantResponseMode = "markdown" | "html";
+type AssistantRenderTarget = "inline" | "artifact";
+
+export interface FloatingAIInputProps {
+  responseMode?: AssistantResponseMode;
+  renderTarget?: AssistantRenderTarget;
+}
 
 const BLOCK_TAGS = new Set([
   "ARTICLE",
@@ -213,7 +220,10 @@ function resolveFloatingPosition(rect: DOMRect) {
   };
 }
 
-export function FloatingAIInput() {
+export function FloatingAIInput({
+  responseMode = "markdown",
+  renderTarget = "inline",
+}: FloatingAIInputProps = {}) {
   const [hasSelection, setHasSelection] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number; placement: FloatingPlacement }>({
     top: 0,
@@ -390,6 +400,8 @@ export function FloatingAIInput() {
         initialQuery={queryStr}
         selectionContext={selectionStr}
         contextContent={contextStr}
+        responseMode={responseMode}
+        renderTarget={renderTarget}
       />
     </>
   );

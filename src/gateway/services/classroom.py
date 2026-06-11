@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +17,16 @@ from edu_multi_agent.models import ArtifactResult, GenerationRequest
 from edu_multi_agent.llm import LLMClient
 
 from ..schemas.classroom import (
+    ClassroomChapterSummariesResponse,
     ClassroomGenerateRequest,
     ClassroomGenerateResponse,
     ClassroomParseScriptResponse,
 )
 from ..schemas.prep_runs import RunStatus
+from .image_assets import (
+    build_commons_image_assets_for_request,
+    build_image_media_resources,
+)
 
 OutlineNode = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
@@ -27,6 +34,8 @@ TEXTUAL_MATERIAL_SUFFIXES = {".md", ".txt", ".json", ".py", ".html"}
 MAX_CLASSROOM_MATERIAL_COUNT = 16
 MAX_CLASSROOM_MATERIAL_CHARS = 28_000
 MAX_CLASSROOM_FILE_CHARS = 3_600
+MAX_STORYBOARD_MATERIAL_FOCUS = 4
+MAX_SUMMARY_CHAPTER_SOURCE_CHARS = 3_200
 PREFERRED_CLASSROOM_FILE_NAMES = {
     "preparation_plan.md": 0,
     "study_guide.md": 1,
@@ -73,7 +82,7 @@ def run_classroom_workflow(
     except ScriptParseError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Generated classroom script violated the parsing contract: {exc}",
+            detail=f"生成的课堂讲稿不符合解析规则：{exc}",
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -104,6 +113,79 @@ def parse_classroom_script(script: str) -> ClassroomParseScriptResponse:
     except ScriptParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ClassroomParseScriptResponse(page_count=len(pages), pages=pages)
+
+
+def build_classroom_chapter_summaries(
+    payload: Mapping[str, Any],
+    llm_client: LLMClient,
+) -> ClassroomChapterSummariesResponse:
+    """Summarize each classroom page from narration and rendered HTML content."""
+
+    page_blueprints = payload.get("page_blueprints")
+    pages = payload.get("pages")
+    bundle = payload.get("bundle") if isinstance(payload.get("bundle"), Mapping) else {}
+    bundle_pages = bundle.get("pages") if isinstance(bundle, Mapping) else None
+
+    if not isinstance(pages, list) or not isinstance(bundle_pages, list):
+        raise HTTPException(status_code=422, detail="Classroom result is missing page content.")
+
+    blueprint_by_idx = {
+        int(item.get("idx", index)): item
+        for index, item in enumerate(page_blueprints)
+        if isinstance(item, Mapping)
+    } if isinstance(page_blueprints, list) else {}
+    bundle_by_idx = {
+        int(item.get("idx", index)): item
+        for index, item in enumerate(bundle_pages)
+        if isinstance(item, Mapping)
+    }
+
+    chapters: list[dict[str, Any]] = []
+    for index, page in enumerate(pages):
+        if not isinstance(page, Mapping):
+            continue
+        idx = int(page.get("idx", index))
+        blueprint = blueprint_by_idx.get(idx, {})
+        bundle_page = bundle_by_idx.get(idx, {})
+        title = str(blueprint.get("theme") or f"第 {idx + 1} 章").strip()
+        narration = "\n".join(
+            _clean_transcript_text(str(reveal.get("narration") or ""))
+            for reveal in page.get("reveals", [])
+            if isinstance(reveal, Mapping)
+        )
+        html_text = _clean_transcript_text(_html_to_compact_text(str(bundle_page.get("html") or "")))
+        source = f"【文稿】\n{narration}\n\n【HTML 页面内容】\n{html_text}".strip()
+        chapters.append({
+            "idx": idx,
+            "title": title,
+            "source": source[:MAX_SUMMARY_CHAPTER_SOURCE_CHARS],
+        })
+
+    if not chapters:
+        raise HTTPException(status_code=422, detail="Classroom result has no summarizable chapters.")
+
+    system_prompt = (
+        "你是善于整理课堂笔记的中文助教。请把每个章节的口播文稿和 HTML 页面内容综合成一段前端可直接展示的总结。"
+        "要求：每章只写一段，80-140 个中文字符，保留关键概念、推理线索、例题或页面中的重要结论。"
+        "不要写 Markdown，不要编造材料中没有的信息。"
+    )
+    user_prompt = json.dumps(
+        {
+            "topic": payload.get("topic"),
+            "chapters": chapters,
+            "output_contract": {
+                "chapters": [
+                    {"idx": "number", "title": "string", "summary": "string"}
+                ]
+            },
+        },
+        ensure_ascii=False,
+    )
+    return llm_client.invoke_json(
+        system_prompt,
+        user_prompt,
+        ClassroomChapterSummariesResponse,
+    )
 
 
 def build_classroom_request_from_prep_view(
@@ -146,16 +228,19 @@ def build_classroom_request_from_prep_view(
         plan_path=view.get("plan_path"),
         report_path=view.get("report_path"),
     )
+    media_resources = _build_classroom_media_resources(
+        artifacts=artifacts,
+        output_dir=output_dir,
+    )
+    image_assets = build_commons_image_assets_for_request(request, output_dir)
+    media_resources.extend(build_image_media_resources(image_assets))
     outline = _build_classroom_outline(
         prep_run_id=run_id,
         request=request,
         plan=plan,
         artifacts=artifacts,
         output_dir=output_dir,
-    )
-    media_resources = _build_classroom_media_resources(
-        artifacts=artifacts,
-        output_dir=output_dir,
+        media_resources=media_resources,
     )
 
     try:
@@ -187,15 +272,15 @@ def build_generate_response(
     bundle = result.get("assembled")
 
     if not isinstance(outline, dict) or not outline:
-        raise HTTPException(status_code=502, detail="Workflow did not return a valid outline.")
+        raise HTTPException(status_code=502, detail="工作流未返回有效课堂大纲。")
     if not isinstance(script, str) or not script.strip():
-        raise HTTPException(status_code=502, detail="Workflow did not return a valid script.")
+        raise HTTPException(status_code=502, detail="工作流未返回有效课堂讲稿。")
     if not isinstance(page_blueprints, list) or not page_blueprints:
-        raise HTTPException(status_code=502, detail="Workflow did not return page blueprints.")
+        raise HTTPException(status_code=502, detail="工作流未返回页面规划。")
     if not isinstance(pages, list) or not pages:
-        raise HTTPException(status_code=502, detail="Workflow did not return parsed pages.")
+        raise HTTPException(status_code=502, detail="工作流未返回解析后的页面。")
     if not isinstance(bundle, dict) or not isinstance(bundle.get("pages"), list):
-        raise HTTPException(status_code=502, detail="Workflow did not return a valid bundle.")
+        raise HTTPException(status_code=502, detail="工作流未返回有效播放器数据包。")
 
     return ClassroomGenerateResponse(
         topic=topic,
@@ -225,8 +310,8 @@ def resolve_outline_node(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Missing outline. Provide request.outline or configure "
-                "app.state.classroom_outline_agent."
+                "缺少课堂大纲。请提供 request.outline，或配置 "
+                "app.state.classroom_outline_agent。"
             ),
         )
 
@@ -239,7 +324,7 @@ def resolve_outline_node(
 
     raise HTTPException(
         status_code=500,
-        detail="Configured classroom_outline_agent is not callable.",
+        detail="已配置的 classroom_outline_agent 不可调用。",
     )
 
 
@@ -330,8 +415,17 @@ def _build_classroom_outline(
     plan: Mapping[str, Any],
     artifacts: list[ArtifactResult],
     output_dir: Path | None = None,
+    media_resources: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     practice_summary = _extract_practice_questions_summary(artifacts, output_dir)
+    artifact_summaries = _build_artifact_summaries(artifacts)
+    lesson_storyboard = _build_lesson_storyboard(
+        request=request,
+        plan=plan,
+        artifacts=artifacts,
+        practice_summary=practice_summary,
+        media_resources=media_resources or [],
+    )
     return {
         "source_prep_run_id": prep_run_id,
         "learning_goal": request.learning_goal,
@@ -347,29 +441,217 @@ def _build_classroom_outline(
         "teacher_checklist": _clean_string_list(plan.get("teacher_checklist")),
         "quality_bar": _clean_string_list(plan.get("quality_bar")),
         "practice_questions_summary": practice_summary,
-        "artifact_summaries": [
-            {
-                "agent_name": artifact.agent_name,
-                "title": artifact.title,
-                "summary": artifact.summary,
-                "status": artifact.status,
-                "file_types": sorted(
-                    {Path(f).suffix for f in artifact.files if isinstance(f, (str, Path))}
-                ),
-                "has_video": any(
-                    Path(f).suffix.lower() == ".mp4"
-                    for f in artifact.files
-                    if isinstance(f, (str, Path))
-                ),
-                "has_interactive_html": any(
-                    Path(f).suffix.lower() == ".html"
-                    for f in artifact.files
-                    if isinstance(f, (str, Path))
-                ),
-            }
-            for artifact in artifacts
-        ],
+        "artifact_summaries": artifact_summaries,
+        "lesson_storyboard_policy": {
+            "role": "素材候选池，不是固定分页模板",
+            "adaptation_required": True,
+            "instructions": [
+                "页面规划前先判断课型，再决定节奏。",
+                "可以合并、跳过、重排、拆分 storyboard 素材块。",
+                "计算训练、阅读讨论、实验观察、项目实践等课型应生成不同页面结构。",
+            ],
+        },
+        "lesson_storyboard": lesson_storyboard,
     }
+
+
+def _build_artifact_summaries(artifacts: list[ArtifactResult]) -> list[dict[str, Any]]:
+    return [
+        {
+            "agent_name": artifact.agent_name,
+            "title": artifact.title,
+            "summary": artifact.summary,
+            "status": artifact.status,
+            "file_types": sorted(
+                {Path(f).suffix for f in artifact.files if isinstance(f, (str, Path))}
+            ),
+            "has_video": any(
+                Path(f).suffix.lower() == ".mp4"
+                for f in artifact.files
+                if isinstance(f, (str, Path))
+            ),
+            "has_interactive_html": any(
+                Path(f).suffix.lower() == ".html"
+                for f in artifact.files
+                if isinstance(f, (str, Path))
+            ),
+        }
+        for artifact in artifacts
+    ]
+
+
+def _build_lesson_storyboard(
+    *,
+    request: GenerationRequest,
+    plan: Mapping[str, Any],
+    artifacts: list[ArtifactResult],
+    practice_summary: list[dict[str, str]] | None,
+    media_resources: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Create deterministic seed blocks from prep assets.
+
+    These blocks are a material bridge between raw prep outputs and page planning.
+    They are not a fixed teaching sequence; the page planner can merge, skip,
+    reorder, or reshape them to match the actual lesson type.
+    """
+    teaching_focus = _clean_string_list(plan.get("teaching_focus"))
+    required_materials = _clean_string_list(plan.get("required_materials"))
+    completed_agents = {artifact.agent_name for artifact in artifacts if artifact.status == "completed"}
+    has_media = bool(media_resources)
+    has_practice = bool(practice_summary)
+
+    blocks: list[dict[str, Any]] = [
+        {
+            "block_id": "hook-context",
+            "title": "情境引入与目标对齐",
+            "teaching_purpose": f"用真实问题引出“{request.learning_goal}”，让学生知道本节课要解决什么。",
+            "material_focus": _compact_storyboard_items([
+                request.learning_goal,
+                *teaching_focus[:2],
+                *required_materials[:1],
+            ]),
+            "visual_plan": "用问题场景、目标地图或情境路径图建立第一屏吸引力。",
+            "layout_style": "scene-map",
+            "interaction_plan": "用一个低门槛观察问题让学生先预测。",
+            "suggested_media_types": ["image", "diagram"],
+            "source_agents": ["planner", "study_guide"] if "study_guide" in completed_agents else ["planner"],
+        },
+        {
+            "block_id": "concept-model",
+            "title": "核心概念与模型拆解",
+            "teaching_purpose": "把抽象概念拆成可见结构，明确公式、条件、变量和适用边界。",
+            "material_focus": _compact_storyboard_items([
+                *teaching_focus,
+                *required_materials[:2],
+            ]),
+            "visual_plan": "优先使用结构图、公式卡、对比表或流程图，而不是纯段落。",
+            "layout_style": "concept-board",
+            "interaction_plan": "逐步揭示概念部件，并在关键部件处暂停观察。",
+            "suggested_media_types": ["diagram", "table"],
+            "source_agents": ["study_guide"] if "study_guide" in completed_agents else ["planner"],
+        },
+        {
+            "block_id": "worked-example",
+            "title": "样例演示与方法迁移",
+            "teaching_purpose": "选一个代表性任务完整演示从读题、建模、推理到验证的过程。",
+            "material_focus": _compact_storyboard_items([
+                request.learning_goal,
+                *(teaching_focus[1:4] or teaching_focus[:2]),
+            ]),
+            "visual_plan": "用左右分栏呈现题目情境与求解步骤，必要时加入几何图或状态图。",
+            "layout_style": "worked-example",
+            "interaction_plan": "每揭示一步都让学生判断下一步应该选择什么工具。",
+            "suggested_media_types": ["diagram", "video"] if has_media else ["diagram"],
+            "source_agents": ["study_guide", "manim"] if "manim" in completed_agents else ["study_guide"],
+        },
+        {
+            "block_id": "practice-check",
+            "title": "即时检查与误区修正",
+            "teaching_purpose": "复用课前练习或题型蓝图，检查学生是否真正会迁移。",
+            "material_focus": _compact_storyboard_items(
+                [
+                    item.get("question", "")
+                    for item in (practice_summary or [])[:MAX_STORYBOARD_MATERIAL_FOCUS]
+                ]
+            ),
+            "visual_plan": "用题目卡、选项对比、错误路径提示或诊断表呈现。",
+            "layout_style": "quiz-diagnostic",
+            "interaction_plan": "至少安排一次课堂提问，答错后给出针对性补讲。",
+            "suggested_media_types": ["question", "table"],
+            "source_agents": ["practice"] if has_practice else ["planner"],
+        },
+        {
+            "block_id": "summary-transfer",
+            "title": "总结收束与迁移任务",
+            "teaching_purpose": "把本节课的方法压缩成可带走的策略，并给出迁移应用方向。",
+            "material_focus": _compact_storyboard_items([
+                *teaching_focus[-2:],
+                request.notes,
+            ]),
+            "visual_plan": "用路线图、清单或三栏总结收束全课。",
+            "layout_style": "takeaway-roadmap",
+            "interaction_plan": "让学生说出一个能迁移到新情境的判断标准。",
+            "suggested_media_types": ["diagram", "checklist"],
+            "source_agents": ["planner", "practice"] if has_practice else ["planner"],
+        },
+    ]
+
+    if has_media:
+        blocks.insert(
+            3,
+            {
+                "block_id": "media-exploration",
+                "title": "素材观察与互动探究",
+                "teaching_purpose": "把课前生成的视频、交互网页或图像嵌入到最适合观察和操作的页面。",
+                "material_focus": _compact_storyboard_items(
+                    [resource.get("description", "") for resource in media_resources]
+                ),
+                "visual_plan": "把本地媒体作为主视觉，再配一组观察问题和结论栏。",
+                "layout_style": "media-lab",
+                "interaction_plan": "播放、拖动或观察素材后，再推进到解释和规律总结。",
+                "suggested_media_types": sorted(
+                    {
+                        resource.get("resource_type", "")
+                        for resource in media_resources
+                        if resource.get("resource_type")
+                    }
+                ),
+                "source_agents": sorted(
+                    {
+                        resource.get("source_agent", "")
+                        for resource in media_resources
+                        if resource.get("source_agent")
+                    }
+                ),
+            },
+        )
+
+    return blocks
+
+
+def _compact_storyboard_items(items: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw_item in items:
+        item = str(raw_item or "").strip()
+        if not item or item == "None" or item in seen:
+            continue
+        cleaned.append(item[:220])
+        seen.add(item)
+        if len(cleaned) >= MAX_STORYBOARD_MATERIAL_FOCUS:
+            break
+    return cleaned
+
+
+def _html_to_compact_text(html: str) -> str:
+    text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _clean_transcript_text(text: str) -> str:
+    text = re.sub(r"```[\s\S]*?```", " ", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"</?(?:on_slide|question|false_intro)>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*(?:to_next|to_next_page|pause)\s*/?\s*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\[\s*(?:to_next|to_next_page|pause|to\s+next|next)\s*\]",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\b(?:to_next|to_next_page|to\s+next)\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s{0,3}>\s?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"[*_~]{1,3}", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _build_classroom_materials(
@@ -636,6 +918,10 @@ MEDIA_RESOURCE_SUFFIX_MAP: dict[str, str] = {
     ".mp4": "video",
     ".html": "interactive_html",
     ".svg": "image",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".webp": "image",
 }
 
 

@@ -143,6 +143,7 @@ SVG 适合公式、关系图、几何、路径描边、流程箭头；Canvas 适
 如果输入提供 `media_resources`，可以嵌入本地同源资源：
 - video：`<video src="{relative_path}" controls>`
 - interactive_html：`<iframe src="{relative_path}">`
+- image：`<figure><img src="{relative_path}" alt="..."><figcaption>...</figcaption></figure>`，必须使用本地 `relative_path`，并配简短图注；不要编造或引用外部图片 URL。
 
 ---
 

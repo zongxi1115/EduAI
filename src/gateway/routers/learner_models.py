@@ -80,6 +80,7 @@ def ingest_learner_review(
         learner_id=payload.learner_id,
         session_id=payload.session_id,
         learning_goal=payload.learning_goal,
+        graph_context=payload.graph_context,
         question=question,
         student_answer=payload.student_answer,
         submission_context=payload.submission_context,

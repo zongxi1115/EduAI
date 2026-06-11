@@ -12,7 +12,16 @@ class MediaResource(TypedDict):
     source_agent: str
 
 
-class PageBlueprint(TypedDict):
+class PageBlueprintOptional(TypedDict, total=False):
+    source_storyboard_block_id: str | None
+    material_focus: list[str]
+    visual_plan: str | None
+    layout_style: str | None
+    interaction_plan: str | None
+    suggested_media_types: list[str]
+
+
+class PageBlueprint(PageBlueprintOptional):
     idx: int
     theme: str
     objective: str

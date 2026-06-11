@@ -11,12 +11,29 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 import homepageBackground from "@/assets/homepage.png"
 
 const SUGGESTIONS = [
-  { text: "帮我总结一下昨天刚学的牛顿三大定律", icon: Lightbulb },
-  { text: "如何高效记忆中国历史各个朝代的顺序？", icon: History },
-  { text: "用费曼技巧给我讲解一下植物的光合作用", icon: Beaker },
-  { text: "这道数列大题我一直没做出来，帮我理清思路", icon: Calculator },
-  { text: "下个月就要考四六级了，请给出复习计划", icon: Languages },
-  { text: "什么是量子力学？用通俗易懂的话给我解释", icon: Sparkles }
+  // Row 1
+  { text: "帮我总结一下昨天刚学的牛顿三大定律", icon: Lightbulb, row: 1 },
+  { text: "如何高效记忆中国历史各个朝代的顺序？", icon: History, row: 1 },
+  { text: "用费曼技巧给我讲解一下植物的光合作用", icon: Beaker, row: 1 },
+  { text: "这道数列大题我一直没做出来，帮我理清思路", icon: Calculator, row: 1 },
+  { text: "下个月就要考四六级了，请给出复习计划", icon: Languages, row: 1 },
+  { text: "什么是量子力学？用通俗易懂的话给我解释", icon: Sparkles, row: 1 },
+
+  // Row 2
+  { text: "解释一下三角函数在实际生活中的应用", icon: Calculator, row: 2 },
+  { text: "帮我分析《红楼梦》中林黛玉的人物形象", icon: BookOpen, row: 2 },
+  { text: "化学元素周期表有什么规律可以帮助记忆？", icon: Beaker, row: 2 },
+  { text: "请教我如何快速提高英语听力水平", icon: Languages, row: 2 },
+  { text: "世界地理气候类型分布有哪些特点？", icon: History, row: 2 },
+  { text: "用简单的例子讲解一下概率论基础知识", icon: Lightbulb, row: 2 },
+
+  // Row 3
+  { text: "马克思主义哲学的核心思想是什么？", icon: Lightbulb, row: 3 },
+  { text: "DNA复制和转录的过程有什么区别？", icon: Beaker, row: 3 },
+  { text: "古诗词鉴赏有哪些常用的解题技巧？", icon: BookOpen, row: 3 },
+  { text: "电磁感应定律在生活中有哪些应用实例？", icon: Sparkles, row: 3 },
+  { text: "如何系统地准备高考数学压轴题？", icon: Calculator, row: 3 },
+  { text: "世界近代史的重要事件梳理和记忆方法", icon: History, row: 3 }
 ]
 
 const PHRASES = [
@@ -40,6 +57,14 @@ interface PrepRun {
 
 interface CreatePrepRunResponse {
   run_id?: string
+}
+
+interface PrepRunListResponse {
+  items?: PrepRun[]
+}
+
+function normalizeTaskGoal(goal: string) {
+  return goal.trim().replace(/\s+/g, " ")
 }
 
 function getOrCreateLearnerId() {
@@ -216,6 +241,29 @@ export default function HomePage() {
     setIsSubmitting(true)
 
     try {
+      let latestHistoryRuns = historyRuns
+      try {
+        const historyResponse = await fetch("/api/v1/prep-runs")
+        if (historyResponse.ok) {
+          const historyPayload = (await historyResponse.json()) as PrepRunListResponse
+          latestHistoryRuns = historyPayload.items || []
+          setHistoryRuns(latestHistoryRuns)
+          setIsLoadingHistory(false)
+        }
+      } catch (err) {
+        console.error("Failed to check reusable history:", err)
+      }
+
+      const reusableRun = latestHistoryRuns.find(
+        run =>
+          run.status !== "failed" &&
+          normalizeTaskGoal(run.request?.learning_goal || "") === normalizeTaskGoal(trimmedQuery)
+      )
+      if (reusableRun) {
+        navigate(`/load/${reusableRun.run_id}`)
+        return
+      }
+
       const response = await fetch("/api/v1/prep-runs", {
         method: "POST",
         headers: {
@@ -297,6 +345,15 @@ export default function HomePage() {
         <Button
           variant="ghost"
           size="sm"
+          onClick={() => navigate(`/profile?learner_id=${encodeURIComponent(learnerId)}`)}
+          className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm gap-1.5 h-9 px-3"
+        >
+          <User2 className="w-4 h-4" />
+          <span className="text-sm font-medium">学生画像</span>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => navigate("/graphs/ai_foundation_course_groups")}
           className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm gap-1.5 h-9 px-3"
         >
@@ -370,7 +427,13 @@ export default function HomePage() {
                       hover: { opacity: 1, y: 0 }
                     }}
                     key={run.run_id}
-                    onClick={() => navigate(`/load/${run.run_id}`)}
+                    onClick={() =>
+                      navigate(
+                        run.status === "succeeded"
+                          ? `/paths/${run.run_id}`
+                          : `/load/${run.run_id}`
+                      )
+                    }
                     className="p-3.5 rounded-xl bg-white/70 dark:bg-zinc-950/50 border border-zinc-200/50 dark:border-zinc-800/60 shadow-[0_2px_10px_rgb(0,0,0,0.02)] hover:shadow-md hover:bg-white/90 dark:hover:bg-zinc-900/80 hover:border-blue-300/60 dark:hover:border-blue-900/50 cursor-pointer transition-all duration-300 flex flex-col gap-2.5 group relative overflow-hidden"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/0 to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -825,29 +888,163 @@ export default function HomePage() {
 
           {/* Suggestions */}
           <motion.div
-            className="w-full max-w-5xl mt-8 px-4"
+            className="w-full max-w-5xl mt-8 relative"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.4 }}
           >
-            <div className="flex flex-wrap items-center justify-center gap-2 relative z-10">
-              {SUGGESTIONS.map((suggestion, idx) => (
-                <motion.div
-                  key={idx}
-                  whileHover={{ y: -2 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
-                    <PromptSuggestion
-                      className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden"
-                    >
+            <div className="relative w-full overflow-hidden">
+              {/* Left fade gradient */}
+              <div className="absolute left-0 top-0 bottom-0 w-24 bg-gradient-to-r from-[#fafafa] dark:from-zinc-950 to-transparent z-20 pointer-events-none" />
 
-                      <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
-                      <span>{suggestion.text}</span>
-                    </PromptSuggestion>
-                  </div>
+              {/* Right fade gradient */}
+              <div className="absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-[#fafafa] dark:from-zinc-950 to-transparent z-20 pointer-events-none" />
+
+              <div className="relative z-10 space-y-2">
+                {/* Row 1 - moves left */}
+                <motion.div
+                  className="flex gap-2 items-center"
+                  animate={{
+                    x: [0, -1800]
+                  }}
+                  transition={{
+                    duration: 45,
+                    repeat: Infinity,
+                    ease: "linear"
+                  }}
+                >
+                  {SUGGESTIONS.filter(s => s.row === 1).map((suggestion, idx) => (
+                    <motion.div
+                      key={`row1-first-${idx}`}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex-shrink-0"
+                    >
+                      <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                        <PromptSuggestion
+                          className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden whitespace-nowrap"
+                        >
+                          <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                          <span>{suggestion.text}</span>
+                        </PromptSuggestion>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {SUGGESTIONS.filter(s => s.row === 1).map((suggestion, idx) => (
+                    <motion.div
+                      key={`row1-second-${idx}`}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex-shrink-0"
+                    >
+                      <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                        <PromptSuggestion
+                          className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden whitespace-nowrap"
+                        >
+                          <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                          <span>{suggestion.text}</span>
+                        </PromptSuggestion>
+                      </div>
+                    </motion.div>
+                  ))}
                 </motion.div>
-              ))}
+
+                {/* Row 2 - moves right */}
+                <motion.div
+                  className="flex gap-2 items-center"
+                  animate={{
+                    x: [-1800, 0]
+                  }}
+                  transition={{
+                    duration: 50,
+                    repeat: Infinity,
+                    ease: "linear"
+                  }}
+                >
+                  {SUGGESTIONS.filter(s => s.row === 2).map((suggestion, idx) => (
+                    <motion.div
+                      key={`row2-first-${idx}`}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex-shrink-0"
+                    >
+                      <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                        <PromptSuggestion
+                          className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden whitespace-nowrap"
+                        >
+                          <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                          <span>{suggestion.text}</span>
+                        </PromptSuggestion>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {SUGGESTIONS.filter(s => s.row === 2).map((suggestion, idx) => (
+                    <motion.div
+                      key={`row2-second-${idx}`}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex-shrink-0"
+                    >
+                      <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                        <PromptSuggestion
+                          className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden whitespace-nowrap"
+                        >
+                          <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                          <span>{suggestion.text}</span>
+                        </PromptSuggestion>
+                      </div>
+                    </motion.div>
+                  ))}
+                </motion.div>
+
+                {/* Row 3 - moves left */}
+                <motion.div
+                  className="flex gap-2 items-center"
+                  animate={{
+                    x: [0, -1800]
+                  }}
+                  transition={{
+                    duration: 42,
+                    repeat: Infinity,
+                    ease: "linear"
+                  }}
+                >
+                  {SUGGESTIONS.filter(s => s.row === 3).map((suggestion, idx) => (
+                    <motion.div
+                      key={`row3-first-${idx}`}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex-shrink-0"
+                    >
+                      <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                        <PromptSuggestion
+                          className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden whitespace-nowrap"
+                        >
+                          <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                          <span>{suggestion.text}</span>
+                        </PromptSuggestion>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {SUGGESTIONS.filter(s => s.row === 3).map((suggestion, idx) => (
+                    <motion.div
+                      key={`row3-second-${idx}`}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex-shrink-0"
+                    >
+                      <div onClick={(e) => handleSuggestionClick(e, suggestion.text)} className="cursor-pointer group">
+                        <PromptSuggestion
+                          className="bg-card text-card-foreground backdrop-blur-sm border border-zinc-300/90 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 px-5 py-2.5 h-auto text-sm rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] transition-all font-medium pointer-events-none flex items-center justify-center gap-2 relative overflow-hidden whitespace-nowrap"
+                        >
+                          <suggestion.icon className="w-4 h-4 opacity-70 relative z-10" />
+                          <span>{suggestion.text}</span>
+                        </PromptSuggestion>
+                      </div>
+                    </motion.div>
+                  ))}
+                </motion.div>
+              </div>
             </div>
           </motion.div>
         </motion.div>

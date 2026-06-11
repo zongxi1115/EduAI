@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DraftBoard } from "@/components/DraftBoard";
+import { KATEX_RENDER_OPTIONS } from "@/lib/math";
 import { X } from "lucide-react";
 
 const BlankContext = createContext<{
@@ -43,9 +44,8 @@ const CodeRenderer = ({ node, inline, className, children, ...props }: any) => {
 
     try {
       return katex.renderToString(currentValue, {
-        throwOnError: false,
+        ...KATEX_RENDER_OPTIONS,
         displayMode: false,
-        strict: "ignore",
       });
     } catch {
       return escapeHtml(currentValue);
@@ -101,83 +101,71 @@ const CodeRenderer = ({ node, inline, className, children, ...props }: any) => {
           <button
             type="button"
             aria-label={`编辑第 ${blankIndex + 1} 空`}
+            className="group inline-flex items-center gap-2 min-w-[10rem] max-w-full mx-1 px-3 py-1 border-b-2 border-blue-300 bg-blue-50/30 rounded-sm transition-all hover:border-blue-400 hover:bg-blue-50/50 focus:outline-none focus:ring-2 focus:ring-blue-200"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              width: currentValue.trim() ? "fit-content" : "12rem",
-              minWidth: "12rem",
-              maxWidth: "100%",
-              margin: "0 0.5rem",
-              padding: "0.25rem 0.25rem 0.3rem",
-              border: "none",
-              borderBottom: "2px solid var(--border)",
-              boxShadow: "inset 0 -1px 0 0 color-mix(in oklab, var(--foreground) 14%, transparent)",
-              color: "var(--foreground)",
-              background: "transparent",
-              fontSize: "1.125rem",
+              fontSize: "0.95rem",
               lineHeight: "1.6",
               verticalAlign: "baseline",
-              outline: "none",
-              boxSizing: "border-box",
-              borderRadius: "0",
               cursor: "text",
             }}
           >
             <span
-              style={{
-                flex: 1,
-                minWidth: 0,
-                textAlign: "left",
-                opacity: currentValue ? 1 : 0.5,
-                overflow: "hidden",
-              }}
+              className={`flex-1 min-w-0 text-left ${currentValue ? 'text-gray-900 font-medium' : 'text-gray-400'}`}
+              style={{ overflow: "hidden" }}
             >
               {currentValue.trim() ? (
                 <span
                   dangerouslySetInnerHTML={{ __html: renderedAnswerHtml }}
-                  style={{ display: "inline-flex", alignItems: "center", fontSize: "0.95rem" }}
+                  className="inline-flex items-center"
+                  style={{ fontSize: "0.95rem" }}
                 />
               ) : (
-                "点击输入答案"
+                "点击填写"
               )}
             </span>
-            <PenTool className="h-4 w-4 shrink-0 opacity-60" />
+            <PenTool className="h-3.5 w-3.5 shrink-0 text-blue-500 transition-transform group-hover:scale-110" />
           </button>
         </PopoverTrigger>
 
-        <PopoverContent side="bottom" align="start" sideOffset={10} className="w-[min(28rem,calc(100vw-2rem))] p-4">
-          <div className="space-y-4">
+        <PopoverContent side="bottom" align="start" sideOffset={8} className="w-[min(28rem,calc(100vw-2rem))] p-4 shadow-lg border-gray-200">
+          <div className="space-y-3.5">
             <div className="space-y-1">
-              <div className="text-sm font-medium text-foreground">编辑第 {blankIndex + 1} 空</div>
-              <div className="text-xs text-muted-foreground">支持公式输入，不会影响正文排版。</div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs font-semibold text-white">
+                  {blankIndex + 1}
+                </div>
+                <div className="text-sm font-semibold text-gray-900">编辑第 {blankIndex + 1} 空</div>
+              </div>
+              <div className="text-xs text-gray-500 pl-7">支持公式输入</div>
             </div>
 
-            <div className="rounded-xl border border-border bg-muted/30 px-4 py-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3">
               <math-field
                 ref={mfRef}
                 style={{
                   display: "block",
                   width: "100%",
-                  minHeight: "3rem",
+                  minHeight: "2.5rem",
                   padding: "0.5rem 0",
                   border: "none",
-                  color: "var(--foreground)",
+                  color: "#111827",
                   background: "transparent",
-                  fontSize: "1.125rem",
+                  fontSize: "1rem",
                   outline: "none",
                   boxSizing: "border-box",
                 }}
               />
             </div>
 
-            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-              当前内容：{draftValue || "（空）"}
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+              <span className="font-medium text-gray-700">预览：</span>
+              <span className="text-gray-600">{draftValue || "（空）"}</span>
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsEditorOpen(false)}>取消</Button>
-              <Button onClick={handleConfirm}>
+              <Button variant="outline" size="sm" onClick={() => setIsEditorOpen(false)}>取消</Button>
+              <Button size="sm" onClick={handleConfirm} className="bg-blue-500 hover:bg-blue-600 text-white">
+                <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
                 完成
               </Button>
             </div>
@@ -235,13 +223,13 @@ export function FillInTheBlanksQuestion({ questionContent, onSubmit }: FillInThe
   };
 
   return (
-    <div className="custom-scrollbar w-full flex-1 max-w-4xl mx-auto p-6 bg-card text-card-foreground border rounded-xl shadow-sm overflow-y-auto">
-      <div className="flex items-start justify-between gap-4 mb-6">
+    <div className="w-full space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div className="prose prose-slate max-w-none flex-1 leading-loose">
           <BlankContext.Provider value={{ answers, onChange: handleInputChange }}>
             <ReactMarkdown
               remarkPlugins={[remarkMath]}
-              rehypePlugins={[rehypeKatex]}
+              rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
               components={markdownComponents}
             >
               {processedContent}
@@ -251,8 +239,8 @@ export function FillInTheBlanksQuestion({ questionContent, onSubmit }: FillInThe
 
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="shrink-0 gap-2 text-primary border-primary/20 hover:bg-primary/10 transition-colors">
-              <PenTool className="w-4 h-4" />
+            <Button variant="outline" size="sm" className="shrink-0 gap-1.5 border-blue-200 bg-white text-blue-600 hover:bg-blue-50">
+              <PenTool className="w-3.5 h-3.5" />
               草稿纸
             </Button>
           </DialogTrigger>
@@ -276,10 +264,10 @@ export function FillInTheBlanksQuestion({ questionContent, onSubmit }: FillInThe
         </Dialog>
       </div>
 
-      <div className="mt-8 pt-4 border-t flex justify-end">
-        <Button onClick={handleSubmit} className="gap-2 px-8">
+      <div className="flex justify-end pt-2">
+        <Button onClick={handleSubmit} className="gap-2 px-6 bg-blue-500 hover:bg-blue-600 text-white">
           <CheckCircle className="w-4 h-4" />
-          提交填空
+          提交答案
         </Button>
       </div>
     </div>

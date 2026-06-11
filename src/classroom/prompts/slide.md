@@ -23,7 +23,7 @@ window.to_next = function () {
 };
 ```
 4. **核心机制澄清（解决视口/动画慢一拍落后的问题）**：页面初始加载时（无需调用 `to_next()`），你**必须让第一步讲稿（通常是步骤 0）所对应的内容默认且完全处于可见状态**（即自带 `.active` 或不放入 `.step` 隐藏队列中）！当音频开始播放时首段讲稿已在发声，如果起始画面为空，等第一次调用 `to_next()` 去揭示第一个要素时，画面就会永远比讲话**满一拍/落后一个段落**。后续的 `to_next()` 调用，只需恰好依次揭示从“第二步”开始到最后的剩余要素即可。
-5. 离线运行：无外部图片 CDN，无外部字体或组件库。只能使用内联 CSS / 内联 JS / 内联 SVG 等基础 Web 原生表达。**例外**：如果 user prompt 中提供了 `media_resources`，你可以嵌入课前生成的本地视频（`<video src="{relative_path}" controls>`）或交互网页（`<iframe src="{relative_path}">`），这些是同源本地文件，不是外部 CDN。
+5. 离线运行：无外部图片 CDN，无外部字体或组件库。只能使用内联 CSS / 内联 JS / 内联 SVG 等基础 Web 原生表达。**例外**：如果 user prompt 中提供了 `media_resources`，你可以嵌入课前生成的本地视频（`<video src="{relative_path}" controls>`）、交互网页（`<iframe src="{relative_path}">`）或本地图片（`<figure><img src="{relative_path}" alt="..."><figcaption>...</figcaption></figure>`），这些是同源本地文件，不是外部 CDN。本地图片必须配简短 `figcaption`，不要编造或引用外部图片 URL。
 6. 只能输出 HTML 纯文本，不要 markdown 围栏（如 ```html）或是多余解释。
 7. 在需要输出公式的时候，请直接使用 MathJax 的 TeX 语法，前端会自动渲染成美观的数学公式。
 

@@ -5,13 +5,16 @@ import mimetypes
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path as ApiPath, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from classroom.agents._common import list_slide_prompt_names
 from edu_multi_agent.file_io import now_iso
 
-from ..dependencies import get_classroom_task_registry
+from edu_multi_agent.llm import LLMClient
+
+from ..dependencies import get_classroom_task_registry, get_llm_client
 from ..schemas.classroom import (
+    ClassroomChapterSummariesResponse,
     ClassroomGenerateRequest,
     ClassroomPromptFileListResponse,
     ClassroomPromptFileOptionResponse,
@@ -23,8 +26,13 @@ from ..schemas.classroom import (
     ClassroomTaskStatusResponse,
 )
 from ..schemas.prep_runs import RunStatus
-from ..services.classroom import parse_classroom_script
-from ..services.classroom_tasks import ClassroomTaskRegistry, load_run_view, load_stored_events
+from ..services.classroom import build_classroom_chapter_summaries, parse_classroom_script
+from ..services.classroom_tasks import (
+    ClassroomTaskRegistry,
+    load_run_view,
+    load_stored_events,
+    render_classroom_preview_document,
+)
 from ..services.prep_runs import encode_sse
 from ..services.prep_runs import safe_path_within
 
@@ -32,6 +40,7 @@ from ..services.prep_runs import safe_path_within
 router = APIRouter(prefix="/api/v1/classroom", tags=["AI 课堂"])
 
 ClassroomTaskRegistryDep = Annotated[ClassroomTaskRegistry, Depends(get_classroom_task_registry)]
+LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
 
 CLASSROOM_EVENTS_SSE_EXAMPLE = """event: run_created
 id: 0
@@ -165,14 +174,38 @@ def get_classroom_task_result(
 ) -> ClassroomGenerateResponse:
     view = load_run_view(registry, run_id)
     if view["status"] == RunStatus.failed:
-        raise HTTPException(status_code=409, detail=view.get("error") or "Task failed.")
+        raise HTTPException(status_code=409, detail=view.get("error") or "课堂任务生成失败。")
     if view["status"] != RunStatus.succeeded:
-        raise HTTPException(status_code=409, detail="Task is not finished yet.")
+        raise HTTPException(status_code=409, detail="课堂任务尚未完成。")
 
     payload = view.get("result")
     if not isinstance(payload, dict):
-        raise HTTPException(status_code=404, detail="Task result not found.")
+        raise HTTPException(status_code=404, detail="未找到课堂任务结果。")
     return ClassroomGenerateResponse.model_validate(payload)
+
+
+@router.get(
+    "/{run_id}/chapter-summaries",
+    response_model=ClassroomChapterSummariesResponse,
+    summary="生成课堂逐章节总结",
+    description="在用户打开章节总结面板时，结合每章文稿和 HTML 页面内容生成逐章节总结。",
+    response_description="逐章节总结列表。",
+)
+def get_classroom_chapter_summaries(
+    registry: ClassroomTaskRegistryDep,
+    llm_client: LLMClientDep,
+    run_id: str = ApiPath(description="AI 课堂任务唯一标识。"),
+) -> ClassroomChapterSummariesResponse:
+    view = load_run_view(registry, run_id)
+    if view["status"] == RunStatus.failed:
+        raise HTTPException(status_code=409, detail=view.get("error") or "课堂任务生成失败。")
+    if view["status"] != RunStatus.succeeded:
+        raise HTTPException(status_code=409, detail="课堂任务尚未完成。")
+
+    payload = view.get("result")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail="未找到课堂任务结果。")
+    return build_classroom_chapter_summaries(payload, llm_client)
 
 
 @router.get(
@@ -190,6 +223,39 @@ def download_classroom_file(
     target = safe_path_within(output_dir, file_path)
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(target, media_type=media_type)
+
+
+@router.get(
+    "/{run_id}/html-preview.html",
+    summary="下载课堂 HTML 预览",
+    description="下载课堂任务输出的单文件交互 HTML 预览。",
+    response_description="返回可直接打开的单文件 HTML 预览。",
+)
+def download_classroom_html_preview(
+    registry: ClassroomTaskRegistryDep,
+    run_id: str = ApiPath(description="AI 课堂任务唯一标识。"),
+) -> Response:
+    view = load_run_view(registry, run_id)
+    if view["status"] == RunStatus.failed:
+        raise HTTPException(status_code=409, detail=view.get("error") or "课堂任务生成失败。")
+    if view["status"] != RunStatus.succeeded:
+        raise HTTPException(status_code=409, detail="课堂任务尚未完成。")
+
+    payload = view.get("result")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail="未找到课堂任务结果。")
+
+    html = render_classroom_preview_document(payload)
+    if not html:
+        raise HTTPException(status_code=404, detail="未找到课堂 HTML 预览。")
+
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{run_id}_html_preview.html"',
+        },
+    )
 
 
 @router.get(
@@ -265,3 +331,4 @@ async def stream_classroom_task_events(
             )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+

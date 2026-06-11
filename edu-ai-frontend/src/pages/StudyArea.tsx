@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
   ArrowRight,
   BookOpen,
   Brain,
-  CheckCircle2,
   ChevronRight,
   ChevronDown,
   FolderOpen,
@@ -21,6 +20,7 @@ import {
   Target,
   User,
   X,
+  ClipboardList,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -54,7 +54,17 @@ interface GenerationRequestSnapshot {
   learner_id?: string | null;
   learner_profile: string;
   notes: string;
+  graph_context?: LearningGraphContext | null;
   language: string;
+}
+
+interface LearningGraphContext {
+  dataset_id?: string | null;
+  course_group_id?: string | null;
+  course_id?: string | null;
+  focus_node_id?: string | null;
+  focus_node_title?: string | null;
+  source_graph_id?: string | null;
 }
 
 interface PrepRunStatusResponse {
@@ -120,6 +130,7 @@ interface StudyWorkspaceData {
   workspaceTitle: string;
   workspaceSubtitle: string;
   learnerId?: string | null;
+  graphContext?: LearningGraphContext | null;
   goals: string[];
   requiredMaterials: string[];
   teacherChecklist: string[];
@@ -147,9 +158,22 @@ interface LearnerModelSnapshot {
   weak_skills: string[];
   key_misconceptions: string[];
   recommended_focus: string[];
+  learning_recommendations?: LearningRecommendation[];
   prompt_profile: string;
   evaluation_summary: string;
   updated_at: string;
+}
+
+type RecommendationType = "diagnose" | "remediate" | "consolidate" | "advance" | "challenge";
+
+interface LearningRecommendation {
+  target_id: string;
+  title: string;
+  recommendation_type: RecommendationType;
+  priority: number;
+  score: number;
+  reason: string;
+  suggested_action: string;
 }
 
 interface SkillJudgment {
@@ -162,6 +186,7 @@ interface SkillJudgment {
 interface LearningEvidenceEvent {
   event_id: string;
   learner_id: string;
+  graph_context?: LearningGraphContext | null;
   question_id: string;
   question_type: string;
   correctness: string;
@@ -171,15 +196,53 @@ interface LearningEvidenceEvent {
   timestamp: string;
 }
 
+interface LearnerSkillState {
+  skill_id: string;
+  display_name: string;
+  graph_dataset_id?: string | null;
+  graph_node_id?: string | null;
+  graph_node_title?: string | null;
+  course_group_id?: string | null;
+  course_id?: string | null;
+  source_graph_id?: string | null;
+  mastery: number;
+  confidence: number;
+  freshness?: number;
+  evidence_count: number;
+  misconception_counts?: Record<string, number>;
+  recent_observations?: string[];
+}
+
+interface LearnerModelRecord {
+  skills: Record<string, LearnerSkillState>;
+}
+
 interface LearnerModelData {
+  learner: LearnerModelRecord;
   snapshot: LearnerModelSnapshot;
   recent_events: LearningEvidenceEvent[];
+}
+
+interface ScopedLearnerProfile {
+  isScoped: boolean;
+  scopeTitle: string;
+  mastery: number;
+  confidence: number;
+  band: AbilityBand;
+  evaluationSummary: string;
+  strongSkills: string[];
+  weakSkills: string[];
+  keyMisconceptions: string[];
+  recommendedFocus: string[];
+  learningRecommendations: LearningRecommendation[];
+  recentEvents: LearningEvidenceEvent[];
+  relatedSkillCount: number;
 }
 
 interface WorkspaceTab {
   id: string;
   title: string;
-  type: "workspace" | "prep" | "markdown" | "html" | "video";
+  type: "workspace" | "markdown" | "html" | "video";
   status: "ready" | "loading" | "error";
   content?: string;
   error?: string;
@@ -188,9 +251,6 @@ interface WorkspaceTab {
 }
 
 const WORKSPACE_TAB_ID = "workspace";
-const PREP_CLASSROOM_TAB_ID = "prep-classroom";
-const PREP_CLASSROOM_QUERY_VALUE = "prep-classroom";
-
 const DEFAULT_WORKSPACE_TAB: WorkspaceTab = {
   id: WORKSPACE_TAB_ID,
   title: "学习区",
@@ -198,17 +258,25 @@ const DEFAULT_WORKSPACE_TAB: WorkspaceTab = {
   status: "ready",
 };
 
-const DEFAULT_PREP_CLASSROOM_TAB: WorkspaceTab = {
-  id: PREP_CLASSROOM_TAB_ID,
-  title: "准备课中",
-  type: "prep",
-  status: "ready",
-};
-
 const DEFAULT_STICKY_TABS: WorkspaceTab[] = [
   DEFAULT_WORKSPACE_TAB,
-  DEFAULT_PREP_CLASSROOM_TAB,
 ];
+
+const RECOMMENDATION_TYPE_LABELS: Record<RecommendationType, string> = {
+  diagnose: "先诊断",
+  remediate: "补弱",
+  consolidate: "巩固",
+  advance: "进阶",
+  challenge: "挑战",
+};
+
+const RECOMMENDATION_TYPE_STYLES: Record<RecommendationType, string> = {
+  diagnose: "bg-sky-50 text-sky-700 border-sky-100",
+  remediate: "bg-orange-50 text-orange-700 border-orange-100",
+  consolidate: "bg-amber-50 text-amber-700 border-amber-100",
+  advance: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  challenge: "bg-violet-50 text-violet-700 border-violet-100",
+};
 
 const MOCK_PRACTICE_QUESTIONS: PracticeQuestionRecord[] = [
   {
@@ -495,6 +563,7 @@ function buildWorkspaceData(
       statusResponse.plan_summary?.trim() ||
       `${statusLabel} · 当前已识别 ${statusResponse.artifact_count} 份产物`,
     learnerId: statusResponse.request?.learner_id ?? null,
+    graphContext: statusResponse.request?.graph_context ?? null,
     goals,
     requiredMaterials,
     teacherChecklist: checklist,
@@ -510,246 +579,270 @@ function buildWorkspaceData(
   };
 }
 
+function normalizeProfileText(value?: string | null) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-·:：，,。.!?？（）()[\]【】]+/g, "");
+}
+
+function textOverlaps(left?: string | null, right?: string | null) {
+  const normalizedLeft = normalizeProfileText(left);
+  const normalizedRight = normalizeProfileText(right);
+  if (normalizedLeft.length < 2 || normalizedRight.length < 2) {
+    return false;
+  }
+  return normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft);
+}
+
+function getAbilityBand(mastery: number, confidence: number): AbilityBand {
+  if (confidence < 0.2) {
+    return "evidence_needed";
+  }
+  if (mastery < 0.45) {
+    return "needs_support";
+  }
+  if (mastery < 0.65) {
+    return "developing";
+  }
+  if (mastery < 0.82) {
+    return "proficient";
+  }
+  return "advanced";
+}
+
+function skillMatchesLearningScope(
+  skill: LearnerSkillState,
+  graphContext: LearningGraphContext | null | undefined,
+  fallbackTitle: string
+) {
+  if (!graphContext) {
+    return true;
+  }
+
+  if (
+    graphContext.dataset_id &&
+    skill.graph_dataset_id &&
+    skill.graph_dataset_id !== graphContext.dataset_id
+  ) {
+    return false;
+  }
+
+  if (
+    graphContext.course_group_id &&
+    skill.course_group_id &&
+    skill.course_group_id !== graphContext.course_group_id
+  ) {
+    return false;
+  }
+
+  if (
+    graphContext.course_id &&
+    skill.course_id &&
+    skill.course_id !== graphContext.course_id
+  ) {
+    return false;
+  }
+
+  if (graphContext.focus_node_id && skill.graph_node_id === graphContext.focus_node_id) {
+    return true;
+  }
+
+  const focusTitles = [graphContext.focus_node_title, fallbackTitle].filter(
+    (item): item is string => Boolean(item?.trim())
+  );
+  if (
+    focusTitles.some(
+      (title) => textOverlaps(title, skill.graph_node_title) || textOverlaps(title, skill.display_name)
+    )
+  ) {
+    return true;
+  }
+
+  if (graphContext.focus_node_id || graphContext.focus_node_title) {
+    return false;
+  }
+
+  return Boolean(
+    (graphContext.dataset_id && skill.graph_dataset_id === graphContext.dataset_id) ||
+    (graphContext.course_group_id && skill.course_group_id === graphContext.course_group_id) ||
+    (graphContext.course_id && skill.course_id === graphContext.course_id)
+  );
+}
+
+function eventMatchesLearningScope(
+  event: LearningEvidenceEvent,
+  graphContext: LearningGraphContext | null | undefined,
+  fallbackTitle: string
+) {
+  if (!graphContext) {
+    return true;
+  }
+
+  const eventContext = event.graph_context;
+  if (eventContext) {
+    if (
+      graphContext.dataset_id &&
+      eventContext.dataset_id &&
+      eventContext.dataset_id !== graphContext.dataset_id
+    ) {
+      return false;
+    }
+    if (graphContext.focus_node_id && eventContext.focus_node_id) {
+      return eventContext.focus_node_id === graphContext.focus_node_id;
+    }
+    if (graphContext.focus_node_title && eventContext.focus_node_title) {
+      return textOverlaps(eventContext.focus_node_title, graphContext.focus_node_title);
+    }
+  }
+
+  const focusTitles = [graphContext.focus_node_title, fallbackTitle].filter(
+    (item): item is string => Boolean(item?.trim())
+  );
+  return event.skill_judgments.some((judgment) =>
+    focusTitles.some((title) => textOverlaps(title, judgment.display_name))
+  );
+}
+
+function weightedAverage(
+  skills: LearnerSkillState[],
+  valueSelector: (skill: LearnerSkillState) => number
+) {
+  let totalWeight = 0;
+  let totalValue = 0;
+  skills.forEach((skill) => {
+    const weight =
+      Math.max(0.25, skill.confidence) *
+      Math.max(0.5, skill.evidence_count) *
+      Math.max(0.3, skill.freshness ?? 1);
+    totalWeight += weight;
+    totalValue += valueSelector(skill) * weight;
+  });
+  return totalWeight > 0 ? totalValue / totalWeight : 0;
+}
+
+function uniqueByText(items: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  items.forEach((item) => {
+    const trimmed = item.trim();
+    const key = normalizeProfileText(trimmed);
+    if (!trimmed || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(trimmed);
+  });
+  return result;
+}
+
+function buildScopedLearnerProfile(
+  learnerModel: LearnerModelData,
+  graphContext: LearningGraphContext | null | undefined,
+  fallbackTitle: string
+): ScopedLearnerProfile {
+  const isScoped = Boolean(graphContext?.focus_node_id || graphContext?.focus_node_title);
+  const allSkills = Object.values(learnerModel.learner.skills ?? {});
+  const relatedSkills = isScoped
+    ? allSkills.filter((skill) => skillMatchesLearningScope(skill, graphContext, fallbackTitle))
+    : allSkills;
+  const sortedStrongSkills = [...relatedSkills]
+    .filter((skill) => skill.mastery >= 0.68 && skill.confidence >= 0.3)
+    .sort((left, right) => right.mastery - left.mastery || right.confidence - left.confidence);
+  const sortedWeakSkills = [...relatedSkills]
+    .filter((skill) => skill.mastery < 0.62 || skill.confidence < 0.35)
+    .sort((left, right) => left.mastery - right.mastery || left.confidence - right.confidence);
+  const relatedMisconceptions = relatedSkills.flatMap((skill) =>
+    Object.entries(skill.misconception_counts ?? {}).map(([tag, count]) => ({ tag, count }))
+  );
+  relatedMisconceptions.sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
+  const focusTexts = [graphContext?.focus_node_title, fallbackTitle, ...relatedSkills.map((skill) => skill.display_name)];
+  const scopedRecommendations = (learnerModel.snapshot.learning_recommendations ?? []).filter((item) =>
+    relatedSkills.some((skill) => item.target_id === skill.skill_id || textOverlaps(item.title, skill.display_name)) ||
+    focusTexts.some((title) => textOverlaps(item.title, title))
+  );
+
+  const hasRelatedSkills = relatedSkills.length > 0;
+  const mastery = hasRelatedSkills
+    ? weightedAverage(relatedSkills, (skill) => skill.mastery)
+    : learnerModel.snapshot.overall_mastery;
+  const confidence = hasRelatedSkills
+    ? weightedAverage(relatedSkills, (skill) => skill.confidence)
+    : learnerModel.snapshot.overall_confidence;
+  const scopeTitle = graphContext?.focus_node_title?.trim() || fallbackTitle;
+  const weakSkills = isScoped
+    ? sortedWeakSkills.slice(0, 4).map((skill) => skill.display_name)
+    : learnerModel.snapshot.weak_skills;
+  const strongSkills = isScoped
+    ? sortedStrongSkills.slice(0, 4).map((skill) => skill.display_name)
+    : learnerModel.snapshot.strong_skills;
+  const recommendedFocus = isScoped
+    ? weakSkills.map((skill) => `优先巩固：${skill}`)
+    : learnerModel.snapshot.recommended_focus;
+  const evaluationSummary = isScoped
+    ? hasRelatedSkills
+      ? `当前知识点“${scopeTitle}”关联到 ${relatedSkills.length} 项技能证据。`
+      : `当前知识点“${scopeTitle}”暂无关联技能证据，完成本页练习后画像会更新。`
+    : learnerModel.snapshot.evaluation_summary;
+
+  return {
+    isScoped,
+    scopeTitle,
+    mastery,
+    confidence,
+    band: isScoped ? getAbilityBand(mastery, confidence) : learnerModel.snapshot.overall_band,
+    evaluationSummary,
+    strongSkills: uniqueByText(strongSkills),
+    weakSkills: uniqueByText(weakSkills),
+    keyMisconceptions: isScoped
+      ? uniqueByText(relatedMisconceptions.map((item) => item.tag)).slice(0, 4)
+      : learnerModel.snapshot.key_misconceptions,
+    recommendedFocus: uniqueByText(recommendedFocus),
+    learningRecommendations: isScoped
+      ? scopedRecommendations.slice(0, 4)
+      : learnerModel.snapshot.learning_recommendations ?? [],
+    recentEvents: isScoped
+      ? learnerModel.recent_events.filter((event) =>
+        eventMatchesLearningScope(event, graphContext, fallbackTitle)
+      )
+      : learnerModel.recent_events,
+    relatedSkillCount: relatedSkills.length,
+  };
+}
+
 function MainWorkspaceQuestions({
   learningGoal,
   learnerId,
+  graphContext,
   sessionId,
   questions,
   isLoading,
   error,
   emptyHint,
+  onReviewStatesChange,
 }: {
   learningGoal: string;
   learnerId?: string | null;
+  graphContext?: LearningGraphContext | null;
   sessionId?: string | null;
   questions: PracticeQuestionRecord[];
   isLoading: boolean;
   error?: string | null;
   emptyHint?: string;
+  onReviewStatesChange?: (states: Record<string, any>) => void;
 }) {
   return (
     <PracticeQuestionWorkspace
       learningGoal={learningGoal}
       learnerId={learnerId}
+      graphContext={graphContext}
       sessionId={sessionId}
       questions={questions}
       isLoading={isLoading}
       error={error}
       emptyHint={emptyHint}
+      onReviewStatesChange={onReviewStatesChange}
     />
-  );
-}
-
-function MainPreparationWorkspace({
-  workspaceData,
-  canPrepareClassroom,
-  isPreparingClassroom,
-  prepareClassroomError,
-  onPrepareClassroom,
-  onOpenMaterial,
-}: {
-  workspaceData: StudyWorkspaceData;
-  canPrepareClassroom: boolean;
-  isPreparingClassroom: boolean;
-  prepareClassroomError: string | null;
-  onPrepareClassroom: () => void;
-  onOpenMaterial: (material: StudyMaterialItem) => void;
-}) {
-  const featuredMaterials = workspaceData.materials.slice(0, 6);
-
-  return (
-    <div className="h-full min-h-0 overflow-y-auto pr-1">
-      <div className="relative overflow-hidden rounded-[28px] border border-slate-200/70 bg-[linear-gradient(135deg,rgba(246,248,252,0.96),rgba(255,255,255,0.98))] p-6 shadow-[0_24px_80px_rgba(15,23,42,0.06)] md:p-8">
-        <div className="absolute right-0 top-0 h-36 w-36 rounded-full bg-sky-100/70 blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-emerald-100/70 blur-3xl" />
-
-        <div className="relative flex flex-col gap-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl space-y-4">
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-slate-500">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                课前准备
-              </div>
-              <div className="space-y-3">
-                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-[2rem]">
-                  先把课前多智能体产物收拢好，再一键带入课中生成
-                </h2>
-                <p className="max-w-2xl text-sm leading-7 text-slate-600 md:text-[15px]">
-                  这里会统一检查学案、题型蓝图、讲解备注和辅助素材。点击“准备课中”后，后端会把这些课前
-                  material 自动整理并透传给课中工作流，用同一个主题继续生成课堂播放内容。
-                </p>
-              </div>
-            </div>
-
-            <div className="w-full max-w-sm rounded-[24px] border border-slate-200/80 bg-white/92 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">当前状态</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-900">{workspaceData.statusLabel}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">{workspaceData.workspaceSubtitle}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-100 px-3 py-2 text-right">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">素材数</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">{workspaceData.materials.length}</div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={onPrepareClassroom}
-                disabled={!canPrepareClassroom || isPreparingClassroom}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-[0_16px_32px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                {isPreparingClassroom ? (
-                  <>
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                    正在准备课中
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    准备课中
-                  </>
-                )}
-              </button>
-
-              {!canPrepareClassroom && (
-                <p className="mt-3 text-xs leading-6 text-slate-500">
-                  {workspaceData.usingMock
-                    ? "当前是示例数据，创建真实课前任务后才能进入课中生成。"
-                    : "请等待课前任务完成后，再继续准备课中播放。"}
-                </p>
-              )}
-
-              {prepareClassroomError && (
-                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-6 text-rose-600">
-                  {prepareClassroomError}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr_1fr]">
-            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">课中将沿用</p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-900">核心教学目标</h3>
-                </div>
-                <Target className="h-5 w-5 text-sky-500" />
-              </div>
-              <div className="mt-4 space-y-2">
-                {workspaceData.goals.map((goal, index) => (
-                  <div
-                    key={`${goal}-${index}`}
-                    className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-700"
-                  >
-                    {goal}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">进入课中前</p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-900">教师检查项</h3>
-                </div>
-                <Brain className="h-5 w-5 text-emerald-500" />
-              </div>
-              <div className="mt-4 space-y-3 text-sm text-slate-600">
-                {workspaceData.teacherChecklist.length > 0 ? (
-                  workspaceData.teacherChecklist.map((item, index) => (
-                    <div key={`${item}-${index}`} className="flex items-start gap-3">
-                      <span className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
-                      <span className="leading-6">{item}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="leading-6 text-slate-500">当前还没有额外的教师检查项。</p>
-                )}
-              </div>
-            </section>
-
-            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">透传到课中</p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-900">重点素材</h3>
-                </div>
-                <Package className="h-5 w-5 text-amber-500" />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {featuredMaterials.length > 0 ? (
-                  featuredMaterials.map((material) => (
-                    <button
-                      key={material.id}
-                      type="button"
-                      onClick={() => onOpenMaterial(material)}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/80 px-3 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900"
-                    >
-                      <span>{material.label}</span>
-                      <span className="max-w-28 truncate text-slate-400">{material.name}</span>
-                    </button>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-500">当前还没有可透传的素材文件。</p>
-                )}
-              </div>
-            </section>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.9fr]">
-            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">准备说明</p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-900">课中生成会继承什么</h3>
-                </div>
-                <ArrowRight className="h-5 w-5 text-slate-400" />
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">1</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">保留课前主题</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">继续沿用当前学习目标、学段、学情和总控规划重点。</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">2</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">透传多智能体材料</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">学案、题型蓝图、教师备注等文本素材会作为 materials 输入给课中工作流。</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">3</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">生成可播放课堂</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">课中生成完成后会自动进入播放器，随后再进入独立练习区。</p>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-[24px] border border-slate-200/80 bg-white/92 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">质量基线</p>
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">当前备课标准</h3>
-              <div className="mt-4 space-y-3">
-                {workspaceData.qualityBar.length > 0 ? (
-                  workspaceData.qualityBar.map((item, index) => (
-                    <div
-                      key={`${item}-${index}`}
-                      className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm leading-6 text-slate-700"
-                    >
-                      {item}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm leading-6 text-slate-500">当前还没有额外的质量要求。</p>
-                )}
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -851,8 +944,7 @@ function MaterialFileTree({ materials, handleMaterialAction }: { materials: Stud
 export default function StudyArea() {
   const { runId } = useParams();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [activePanel, setActivePanel] = useState<string | null>("answer-sheet");
   const [drawerWidth, setDrawerWidth] = useState(320);
   const [isDragging, setIsDragging] = useState(false);
   const [workspaceData, setWorkspaceData] = useState<StudyWorkspaceData>(MOCK_WORKSPACE_DATA);
@@ -866,31 +958,19 @@ export default function StudyArea() {
   const [isLoadingLearnerModel, setIsLoadingLearnerModel] = useState(false);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>(DEFAULT_STICKY_TABS);
   const [activeTabId, setActiveTabId] = useState<string>(WORKSPACE_TAB_ID);
+  const [reviewStates, setReviewStates] = useState<Record<string, any>>({});
 
   const activeTab =
     openTabs.find((tab) => tab.id === activeTabId) ?? DEFAULT_WORKSPACE_TAB;
+  const canEnterClassroom = Boolean(runId) && !workspaceData.usingMock && workspaceData.statusLabel === "已完成";
 
   const togglePanel = (panel: string) => {
     setActivePanel((current) => (current === panel ? null : panel));
   };
 
-  const resolveBuiltInTabId = (requestedTab: string | null) =>
-    requestedTab === PREP_CLASSROOM_QUERY_VALUE ? PREP_CLASSROOM_TAB_ID : WORKSPACE_TAB_ID;
-
-  const setBuiltInTab = (tabId: typeof WORKSPACE_TAB_ID | typeof PREP_CLASSROOM_TAB_ID) => {
-    setActiveTabId(tabId);
-    const nextSearchParams = new URLSearchParams(searchParams);
-    if (tabId === PREP_CLASSROOM_TAB_ID) {
-      nextSearchParams.set("tab", PREP_CLASSROOM_QUERY_VALUE);
-    } else {
-      nextSearchParams.delete("tab");
-    }
-    setSearchParams(nextSearchParams, { replace: true });
-  };
-
   useEffect(() => {
     setOpenTabs(DEFAULT_STICKY_TABS);
-    setActiveTabId(resolveBuiltInTabId(searchParams.get("tab")));
+    setActiveTabId(WORKSPACE_TAB_ID);
     setPrepareClassroomError(null);
     setIsPreparingClassroom(false);
   }, [runId]);
@@ -1058,6 +1138,17 @@ export default function StudyArea() {
     ],
     [workspaceData]
   );
+  const scopedLearnerProfile = useMemo(
+    () =>
+      learnerModel
+        ? buildScopedLearnerProfile(
+          learnerModel,
+          workspaceData.graphContext,
+          workspaceData.workspaceTitle
+        )
+        : null,
+    [learnerModel, workspaceData.graphContext, workspaceData.workspaceTitle]
+  );
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -1082,12 +1173,12 @@ export default function StudyArea() {
   };
 
   const closeTab = (tabId: string) => {
-    if (tabId === WORKSPACE_TAB_ID || tabId === PREP_CLASSROOM_TAB_ID) {
+    if (tabId === WORKSPACE_TAB_ID) {
       return;
     }
     setOpenTabs((currentTabs) => currentTabs.filter((tab) => tab.id !== tabId));
     if (activeTabId === tabId) {
-      setActiveTabId(resolveBuiltInTabId(searchParams.get("tab")));
+      setActiveTabId(WORKSPACE_TAB_ID);
     }
   };
 
@@ -1216,7 +1307,7 @@ export default function StudyArea() {
       });
 
       if (!response.ok) {
-        let message = `准备课中失败（${response.status}）`;
+        let message = `进入课中失败（${response.status}）`;
         try {
           const payload = (await response.json()) as { detail?: string | Array<{ msg?: string }> };
           if (typeof payload.detail === "string" && payload.detail.trim()) {
@@ -1243,7 +1334,7 @@ export default function StudyArea() {
       });
     } catch (error) {
       setPrepareClassroomError(
-        error instanceof Error ? error.message : "准备课中失败，请稍后重试。"
+        error instanceof Error ? error.message : "进入课中失败，请稍后重试。"
       );
     } finally {
       setIsPreparingClassroom(false);
@@ -1256,6 +1347,7 @@ export default function StudyArea() {
         <MainWorkspaceQuestions
           learningGoal={workspaceData.workspaceTitle}
           learnerId={workspaceData.learnerId}
+          graphContext={workspaceData.graphContext}
           sessionId={runId ?? null}
           questions={practiceQuestions}
           isLoading={isLoadingWorkspace && !workspaceData.usingMock}
@@ -1265,21 +1357,7 @@ export default function StudyArea() {
               ? "当前展示的是示例题库。创建真实任务后，这里会自动切换为生成产物里的练习题。"
               : "当前还没有真实题库，请等待练习 Agent 完成生成。"
           }
-        />
-      );
-    }
-
-    if (activeTab.type === "prep") {
-      return (
-        <MainPreparationWorkspace
-          workspaceData={workspaceData}
-          canPrepareClassroom={
-            Boolean(runId) && !workspaceData.usingMock && workspaceData.statusLabel === "已完成"
-          }
-          isPreparingClassroom={isPreparingClassroom}
-          prepareClassroomError={prepareClassroomError}
-          onPrepareClassroom={handlePrepareClassroom}
-          onOpenMaterial={handleMaterialAction}
+          onReviewStatesChange={setReviewStates}
         />
       );
     }
@@ -1354,7 +1432,7 @@ export default function StudyArea() {
   return (
     <TooltipProvider>
       <div className="flex flex-col h-screen bg-background">
-        <FloatingAIInput />
+        <FloatingAIInput responseMode="html" renderTarget="artifact" />
         <header className="h-14 border-b bg-card flex items-center px-6 shrink-0 shadow-sm">
           <div className="flex items-center gap-2 font-semibold text-lg min-w-0">
             <BookOpen className="w-5 h-5 text-primary shrink-0" />
@@ -1365,7 +1443,35 @@ export default function StudyArea() {
               </div>
             </div>
           </div>
-          <div className="ml-auto flex items-center pr-2">
+          <div className="ml-auto flex items-center gap-2 pr-2">
+            {prepareClassroomError && (
+              <span
+                className="hidden max-w-64 truncate rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-600 md:inline"
+                title={prepareClassroomError}
+              >
+                {prepareClassroomError}
+              </span>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handlePrepareClassroom}
+              disabled={!canEnterClassroom || isPreparingClassroom}
+              className="h-9 rounded-full px-3 text-xs font-semibold"
+              title={
+                canEnterClassroom
+                  ? "进入或回到已生成的课中播放页"
+                  : "课前任务完成后可进入课中"
+              }
+            >
+              {isPreparingClassroom ? (
+                <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+              {isPreparingClassroom ? "正在进入" : "回到课中"}
+            </Button>
             <ThemeToggle />
           </div>
         </header>
@@ -1378,25 +1484,14 @@ export default function StudyArea() {
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
-                onClick={() => setBuiltInTab(WORKSPACE_TAB_ID)}
+                onClick={() => setActiveTabId(WORKSPACE_TAB_ID)}
               >
                 <LayoutDashboard className="w-4 h-4" />
                 学习区
               </button>
 
-              <button
-                className={`flex items-center gap-2 h-full px-2 border-b-2 font-medium text-sm transition-colors ${activeTabId === PREP_CLASSROOM_TAB_ID
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                onClick={() => setBuiltInTab(PREP_CLASSROOM_TAB_ID)}
-              >
-                <Play className="w-4 h-4" />
-                准备课中
-              </button>
-
               {openTabs
-                .filter((tab) => tab.id !== WORKSPACE_TAB_ID && tab.id !== PREP_CLASSROOM_TAB_ID)
+                .filter((tab) => tab.id !== WORKSPACE_TAB_ID)
                 .map((tab) => (
                   <div
                     key={tab.id}
@@ -1470,6 +1565,11 @@ export default function StudyArea() {
                       <User className="w-4 h-4 text-primary" /> 学生画像
                     </>
                   )}
+                  {activePanel === "answer-sheet" && (
+                    <>
+                      <ClipboardList className="w-4 h-4 text-primary" /> 答题卡
+                    </>
+                  )}
                 </span>
                 <Button
                   variant="ghost"
@@ -1482,6 +1582,71 @@ export default function StudyArea() {
               </div>
 
               <ScrollArea className="flex-1 p-4">
+                {activePanel === "answer-sheet" && (
+                  <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200 pb-4">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest pl-1">
+                      答题情况
+                    </p>
+                    {practiceQuestions.length === 0 ? (
+                      <div className="text-sm text-muted-foreground text-center py-8">
+                        暂无题目
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-5 gap-2">
+                        {practiceQuestions.map((q, idx) => {
+                          const reviewState = reviewStates[q.id];
+                          const isAnswered = reviewState?.status === "completed";
+                          const isCorrect = reviewState?.review?.correctness === "correct";
+                          const isPartial = reviewState?.review?.correctness === "partially_correct";
+                          const isIncorrect = reviewState?.review?.correctness === "incorrect";
+
+                          return (
+                            <button
+                              key={q.id}
+                              type="button"
+                              className={`
+                                aspect-square rounded-lg border-2 flex items-center justify-center text-sm font-semibold transition-all
+                                ${isCorrect ? "border-green-500 bg-green-50 text-green-700" : ""}
+                                ${isPartial ? "border-orange-500 bg-orange-50 text-orange-700" : ""}
+                                ${isIncorrect ? "border-red-500 bg-red-50 text-red-700" : ""}
+                                ${!isAnswered ? "border-gray-300 bg-white text-gray-600 hover:border-primary hover:bg-primary/5" : ""}
+                              `}
+                              onClick={() => {
+                                const element = document.getElementById(`question-${q.id}`);
+                                element?.scrollIntoView({ behavior: "smooth", block: "center" });
+                              }}
+                            >
+                              {idx + 1}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="space-y-2 pt-4 border-t">
+                      <p className="text-xs text-muted-foreground font-medium">图例</p>
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 rounded border-2 border-green-500 bg-green-50"></div>
+                          <span className="text-muted-foreground">正确</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 rounded border-2 border-orange-500 bg-orange-50"></div>
+                          <span className="text-muted-foreground">部分正确</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 rounded border-2 border-red-500 bg-red-50"></div>
+                          <span className="text-muted-foreground">错误</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 rounded border-2 border-gray-300 bg-white"></div>
+                          <span className="text-muted-foreground">未作答</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activePanel === "progress" && (
                   <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200 pb-4">
                     <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest pl-1">
@@ -1511,7 +1676,7 @@ export default function StudyArea() {
                             <p className="text-xs text-muted-foreground mb-2">课程目标</p>
                             <ul className="list-disc pl-4 space-y-1 text-sm">
                               {workspaceData.goals.map((goal, index) => (
-                                <li key={`${goal}-${index}`}>{goal}</li>
+                                <li key={`${goal}-${index}`} className="whitespace-pre-line">{goal}</li>
                               ))}
                             </ul>
                           </div>
@@ -1521,7 +1686,7 @@ export default function StudyArea() {
                               <p className="text-xs text-muted-foreground mb-2">课前准备</p>
                               <ul className="list-disc pl-4 space-y-1 text-sm text-muted-foreground">
                                 {workspaceData.requiredMaterials.map((item, index) => (
-                                  <li key={`${item}-${index}`}>{item}</li>
+                                  <li key={`${item}-${index}`} className="whitespace-pre-line">{item}</li>
                                 ))}
                               </ul>
                             </div>
@@ -1532,7 +1697,7 @@ export default function StudyArea() {
                               <p className="text-xs text-muted-foreground mb-2">教师检查项</p>
                               <ul className="list-disc pl-4 space-y-1 text-sm text-muted-foreground">
                                 {workspaceData.teacherChecklist.map((item, index) => (
-                                  <li key={`${item}-${index}`}>{item}</li>
+                                  <li key={`${item}-${index}`} className="whitespace-pre-line">{item}</li>
                                 ))}
                               </ul>
                             </div>
@@ -1582,28 +1747,28 @@ export default function StudyArea() {
                           : "当前未关联学习者，无法显示画像。"}
                       </div>
                     )}
-                    {learnerModel && (
+                    {learnerModel && scopedLearnerProfile && (
                       <>
                         {/* Overall Band */}
                         <div className="flex items-center gap-3">
                           <div className={cn(
                             "w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0",
-                            learnerModel.snapshot.overall_band === "advanced" && "bg-violet-500",
-                            learnerModel.snapshot.overall_band === "proficient" && "bg-emerald-500",
-                            learnerModel.snapshot.overall_band === "developing" && "bg-amber-500",
-                            learnerModel.snapshot.overall_band === "needs_support" && "bg-orange-500",
-                            learnerModel.snapshot.overall_band === "evidence_needed" && "bg-slate-400",
+                            scopedLearnerProfile.band === "advanced" && "bg-violet-500",
+                            scopedLearnerProfile.band === "proficient" && "bg-emerald-500",
+                            scopedLearnerProfile.band === "developing" && "bg-amber-500",
+                            scopedLearnerProfile.band === "needs_support" && "bg-orange-500",
+                            scopedLearnerProfile.band === "evidence_needed" && "bg-slate-400",
                           )}>
-                            {learnerModel.snapshot.overall_mastery != null
-                              ? Math.round(learnerModel.snapshot.overall_mastery * 100)
+                            {scopedLearnerProfile.mastery != null
+                              ? Math.round(scopedLearnerProfile.mastery * 100)
                               : "?"}
                           </div>
                           <div className="min-w-0">
                             <div className="text-sm font-semibold text-foreground">
-                              {({ advanced: "优秀", proficient: "良好", developing: "发展中", needs_support: "需支持", evidence_needed: "待评估" } as Record<string, string>)[learnerModel.snapshot.overall_band] ?? learnerModel.snapshot.overall_band}
+                              {({ advanced: "优秀", proficient: "良好", developing: "发展中", needs_support: "需支持", evidence_needed: "待评估" } as Record<string, string>)[scopedLearnerProfile.band] ?? scopedLearnerProfile.band}
                             </div>
                             <div className="text-xs text-muted-foreground">
-                              掌握度 {Math.round(learnerModel.snapshot.overall_mastery * 100)}% · 可信度 {Math.round(learnerModel.snapshot.overall_confidence * 100)}%
+                              {scopedLearnerProfile.isScoped ? "当前知识点" : "整体"}掌握度 {Math.round(scopedLearnerProfile.mastery * 100)}% · 可信度 {Math.round(scopedLearnerProfile.confidence * 100)}%
                             </div>
                           </div>
                         </div>
@@ -1611,41 +1776,43 @@ export default function StudyArea() {
                         {/* Mastery Bar */}
                         <div>
                           <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-                            <span>整体掌握度</span>
-                            <span>{Math.round(learnerModel.snapshot.overall_mastery * 100)}%</span>
+                            <span>{scopedLearnerProfile.isScoped ? "当前知识点掌握度" : "整体掌握度"}</span>
+                            <span>{Math.round(scopedLearnerProfile.mastery * 100)}%</span>
                           </div>
                           <div className="h-2 rounded-full bg-muted overflow-hidden">
                             <div
                               className="h-full rounded-full bg-primary transition-all duration-500"
-                              style={{ width: `${Math.round(learnerModel.snapshot.overall_mastery * 100)}%` }}
+                              style={{ width: `${Math.round(scopedLearnerProfile.mastery * 100)}%` }}
                             />
                           </div>
                         </div>
 
                         {/* Evaluation Summary */}
-                        {learnerModel.snapshot.evaluation_summary && (
+                        {scopedLearnerProfile.evaluationSummary && (
                           <div className="rounded-lg bg-muted/50 border border-border p-3">
-                            <p className="text-xs text-muted-foreground mb-1 font-medium">整体评价</p>
-                            <p className="text-sm text-foreground leading-relaxed">{learnerModel.snapshot.evaluation_summary}</p>
+                            <p className="text-xs text-muted-foreground mb-1 font-medium">
+                              {scopedLearnerProfile.isScoped ? "当前知识点评价" : "整体评价"}
+                            </p>
+                            <p className="whitespace-pre-line text-sm text-foreground leading-relaxed">{scopedLearnerProfile.evaluationSummary}</p>
                           </div>
                         )}
 
                         {/* Strong / Weak Skills */}
-                        {learnerModel.snapshot.strong_skills.length > 0 && (
+                        {scopedLearnerProfile.strongSkills.length > 0 && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-1.5 font-medium">优势技能</p>
                             <div className="flex flex-wrap gap-1.5">
-                              {learnerModel.snapshot.strong_skills.map((s, i) => (
+                              {scopedLearnerProfile.strongSkills.map((s, i) => (
                                 <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-xs border border-emerald-100">{s}</span>
                               ))}
                             </div>
                           </div>
                         )}
-                        {learnerModel.snapshot.weak_skills.length > 0 && (
+                        {scopedLearnerProfile.weakSkills.length > 0 && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-1.5 font-medium">薄弱技能</p>
                             <div className="flex flex-wrap gap-1.5">
-                              {learnerModel.snapshot.weak_skills.map((s, i) => (
+                              {scopedLearnerProfile.weakSkills.map((s, i) => (
                                 <span key={i} className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-xs border border-amber-100">{s}</span>
                               ))}
                             </div>
@@ -1653,29 +1820,69 @@ export default function StudyArea() {
                         )}
 
                         {/* Misconceptions */}
-                        {learnerModel.snapshot.key_misconceptions.length > 0 && (
+                        {scopedLearnerProfile.keyMisconceptions.length > 0 && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-1.5 font-medium">常见误区</p>
                             <ul className="space-y-1">
-                              {learnerModel.snapshot.key_misconceptions.map((m, i) => (
+                              {scopedLearnerProfile.keyMisconceptions.map((m, i) => (
                                 <li key={i} className="text-xs text-rose-600 flex items-start gap-1.5">
                                   <span className="shrink-0 mt-0.5">•</span>
-                                  <span>{m}</span>
+                                  <span className="whitespace-pre-line">{m}</span>
                                 </li>
                               ))}
                             </ul>
                           </div>
                         )}
 
+                        {/* Model Recommendations */}
+                        {scopedLearnerProfile.learningRecommendations.length > 0 && (
+                          <div className="rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 via-white to-emerald-50 p-3 shadow-sm">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <p className="text-xs text-sky-900 font-semibold flex items-center gap-1.5">
+                                <Brain className="w-3.5 h-3.5" />
+                                {scopedLearnerProfile.isScoped ? "当前知识点推荐" : "智能推荐"}
+                              </p>
+                              <span className="text-[10px] text-sky-700 bg-white/80 border border-sky-100 rounded-full px-2 py-0.5">
+                                学情排序模型
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              {scopedLearnerProfile.learningRecommendations.map((item) => (
+                                <div key={item.target_id} className="rounded-lg bg-white/80 border border-white p-2.5">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5 mb-1">
+                                        <span className="text-[10px] font-semibold text-slate-500">#{item.priority}</span>
+                                        <span className={cn(
+                                          "text-[10px] font-semibold px-1.5 py-0.5 rounded border",
+                                          RECOMMENDATION_TYPE_STYLES[item.recommendation_type],
+                                        )}>
+                                          {RECOMMENDATION_TYPE_LABELS[item.recommendation_type]}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm font-semibold text-slate-900 truncate">{item.title}</p>
+                                    </div>
+                                    <span className="text-[10px] text-slate-500 shrink-0">
+                                      {Math.round(item.score * 100)}分
+                                    </span>
+                                  </div>
+                                  <p className="mt-1.5 whitespace-pre-line text-xs leading-5 text-slate-600">{item.reason}</p>
+                                  <p className="mt-1 whitespace-pre-line text-xs leading-5 text-sky-700">{item.suggested_action}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Recommended Focus */}
-                        {learnerModel.snapshot.recommended_focus.length > 0 && (
+                        {scopedLearnerProfile.recommendedFocus.length > 0 && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-1.5 font-medium">建议关注</p>
                             <ul className="space-y-1">
-                              {learnerModel.snapshot.recommended_focus.map((f, i) => (
+                              {scopedLearnerProfile.recommendedFocus.map((f, i) => (
                                 <li key={i} className="text-xs text-indigo-600 flex items-start gap-1.5">
                                   <ArrowRight className="w-3 h-3 shrink-0 mt-0.5" />
-                                  <span>{f}</span>
+                                  <span className="whitespace-pre-line">{f}</span>
                                 </li>
                               ))}
                             </ul>
@@ -1689,11 +1896,11 @@ export default function StudyArea() {
                         </div>
 
                         {/* Recent Events Timeline */}
-                        {learnerModel.recent_events.length > 0 && (
+                        {scopedLearnerProfile.recentEvents.length > 0 && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-2 font-medium">近期学习记录</p>
                             <div className="space-y-2">
-                              {learnerModel.recent_events.slice(0, 8).map((evt) => (
+                              {scopedLearnerProfile.recentEvents.slice(0, 8).map((evt) => (
                                 <div key={evt.event_id} className="rounded-lg border border-border bg-card p-2.5">
                                   <div className="flex items-center justify-between mb-1">
                                     <span className={cn(
@@ -1711,7 +1918,7 @@ export default function StudyArea() {
                                     {evt.question_type} · {new Date(evt.timestamp).toLocaleDateString()}
                                   </div>
                                   {evt.learner_observations.length > 0 && (
-                                    <p className="text-[11px] text-foreground mt-1 leading-relaxed line-clamp-2">
+                                    <p className="text-[11px] text-foreground mt-1 whitespace-pre-line leading-relaxed line-clamp-2">
                                       {evt.learner_observations[0]}
                                     </p>
                                   )}
@@ -1729,6 +1936,27 @@ export default function StudyArea() {
           </div>
 
           <aside className="w-14 shrink-0 flex flex-col items-center py-4 gap-3 bg-card border-l z-20 shadow-sm relative">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={activePanel === "answer-sheet" ? "secondary" : "ghost"}
+                  size="icon"
+                  className={`w-10 h-10 rounded-xl ${activePanel === "answer-sheet"
+                    ? "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "text-muted-foreground"
+                    }`}
+                  onClick={() => togglePanel("answer-sheet")}
+                >
+                  <ClipboardList className="w-5 h-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="font-medium">
+                答题卡
+              </TooltipContent>
+            </Tooltip>
+
+            <div className="w-8 h-[1px] bg-border my-1 rounded-full" />
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

@@ -129,6 +129,16 @@ class ClassroomGenerateResponse(BaseModel):
     bundle: ClassroomBundleResponse = Field(description="最终交付给播放器的数据包。")
 
 
+class ClassroomChapterSummaryResponse(BaseModel):
+    idx: int = Field(ge=0, description="章节索引。")
+    title: str = Field(description="章节标题。")
+    summary: str = Field(description="结合文稿与页面内容生成的章节总结。")
+
+
+class ClassroomChapterSummariesResponse(BaseModel):
+    chapters: list[ClassroomChapterSummaryResponse] = Field(description="逐章节总结列表。")
+
+
 class ClassroomTaskLinks(BaseModel):
     status: str = Field(description="用于查询任务状态的接口地址。")
     events: str = Field(description="用于通过 SSE 查看任务节点进度的接口地址。")

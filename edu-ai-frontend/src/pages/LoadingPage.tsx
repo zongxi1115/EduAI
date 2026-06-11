@@ -25,6 +25,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import 'katex/dist/katex.min.css';
+import { KATEX_RENDER_OPTIONS } from '@/lib/math';
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
 
@@ -53,6 +54,123 @@ interface Artifact {
   output_dir: string;
 }
 
+const EVENT_LABELS: Record<string, string> = {
+  connected: "已连接",
+  run_created: "任务已创建",
+  workflow_started: "工作流开始",
+  workflow_completed: "工作流完成",
+  workflow_failed: "工作流失败",
+  workflow_event: "工作流事件",
+  state_snapshot: "状态快照",
+  node_started: "节点开始",
+  node_completed: "节点完成",
+  plan_ready: "总控规划完成",
+  practice_blueprint_ready: "题型蓝图完成",
+  practice_blueprint_fallback: "题型蓝图回退完成",
+  practice_blueprint_skipped: "题型蓝图跳过",
+  artifact_validation_started: "产物校验开始",
+  artifact_validation_passed: "产物校验通过",
+  artifact_validation_failed: "产物校验失败",
+  artifact_ready: "产物就绪",
+  artifact_skipped: "产物跳过",
+  artifact_failed: "产物失败",
+  manifest_ready: "清单完成",
+  report_ready: "报告完成",
+};
+
+const NODE_LABELS: Record<string, string> = {
+  api: "任务入口",
+  gateway: "网关",
+  input: "输入参数",
+  planner: "总控规划",
+  practice_planner_agent: "题型规划",
+  study_guide_agent: "学案生成",
+  practice_agent: "练习生成",
+  manim_agent: "动画生成",
+  interactive_web_agent: "互动网页生成",
+  supervisor_report: "总结报告",
+  END: "结束",
+};
+
+const SUMMARY_LABELS: Record<string, string> = {
+  "Run created and queued.": "课前准备任务已创建，正在排队执行。",
+  "LangGraph workflow started.": "课前准备工作流开始执行。",
+  "LangGraph workflow completed successfully.": "课前准备工作流已完成。",
+  "Received unhandled stream mode event.": "收到暂未处理的工作流事件。",
+  "Planner node started.": "开始生成课前准备总控规划。",
+  "Preparation plan generated.": "课前准备总控规划已生成。",
+  "练习题型规划 Agent started.": "开始规划练习题型与题量。",
+  "Practice blueprint generated.": "练习题型蓝图已生成。",
+  "Practice blueprint generated with fallback rules.": "练习题型蓝图已由规则回退生成。",
+  "Practice blueprint skipped because practice route is disabled.": "练习题型规划已跳过：本轮未启用练习 Agent。",
+  "Manim runtime validation started.": "开始校验 Manim 动画脚本。",
+  "Manim runtime validation failed.": "Manim 动画脚本校验失败。",
+  "Manim runtime validation passed.": "Manim 动画脚本校验通过。",
+  "Manim Agent skipped because the manim dependency is unavailable.": "Manim Agent 已跳过：当前环境缺少 Manim 依赖。",
+  "Supervisor report node started.": "开始生成课前准备总结报告。",
+  "Artifact manifest written.": "产物清单已写入。",
+  "Supervisor report generated.": "课前准备总结报告已生成。",
+};
+
+function localizeMessage(value?: string | null) {
+  const message = value?.trim();
+  if (!message) {
+    return "";
+  }
+
+  const direct = SUMMARY_LABELS[message];
+  if (direct) {
+    return direct;
+  }
+
+  let match = message.match(/^Node finished with updates: (.*)$/);
+  if (match) {
+    return `节点已完成，更新字段：${match[1] || "无"}`;
+  }
+
+  match = message.match(/^State snapshot saved after (.+); keys=(.*)$/);
+  if (match) {
+    return `${localizeNodeName(match[1])} 节点后的状态快照已保存；字段：${match[2] || "无"}`;
+  }
+
+  match = message.match(/^Workflow failed at node (.+): (.*)$/);
+  if (match) {
+    return `工作流在 ${localizeNodeName(match[1])} 节点执行失败：${match[2]}`;
+  }
+
+  match = message.match(/^(.+) started\.$/);
+  if (match) {
+    return `${match[1]} 开始生成。`;
+  }
+
+  match = message.match(/^(.+) generated successfully\.$/);
+  if (match) {
+    return `${match[1]} 已生成。`;
+  }
+
+  match = message.match(/^(.+) failed during generation\.$/);
+  if (match) {
+    return `${match[1]} 生成失败。`;
+  }
+
+  match = message.match(/^(.+) skipped by planner\.$/);
+  if (match) {
+    return `${match[1]} 已按总控规划跳过。`;
+  }
+
+  return message;
+}
+
+function localizeEventName(value?: string | null) {
+  const eventName = value?.trim();
+  return eventName ? EVENT_LABELS[eventName] ?? eventName : "未知事件";
+}
+
+function localizeNodeName(value?: string | null) {
+  const nodeName = value?.trim();
+  return nodeName ? NODE_LABELS[nodeName] ?? nodeName : "未知节点";
+}
+
 export default function LoadingPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -62,8 +180,6 @@ export default function LoadingPage() {
   const [fileContent, setFileContent] = useState<string>('');
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [showArtifactPanel, setShowArtifactPanel] = useState(false);
-  const [isStartingClassroom, setIsStartingClassroom] = useState(false);
-  const [startClassroomError, setStartClassroomError] = useState<string | null>(null);
 
   const [isComplete, setIsComplete] = useState(false);
   const [showFocusMode, setShowFocusMode] = useState(false);
@@ -247,7 +363,7 @@ export default function LoadingPage() {
         <div className="mt-3 space-y-2 border-l-2 border-rose-400/30 pl-3 py-1 bg-rose-50/50 rounded-r-md">
           <div className="font-medium text-rose-700">❌ {d.artifact.title} 失败</div>
           <div className="text-xs text-rose-600 max-h-32 overflow-y-auto custom-scrollbar font-mono p-2 bg-background/50 rounded">
-            {d.artifact.notes?.[0] || d.error || 'Unknown error'}
+            {d.artifact.notes?.[0] || d.error || '未知错误'}
           </div>
         </div>
       );
@@ -287,7 +403,7 @@ export default function LoadingPage() {
       const outputsIndex = normalizedPath.indexOf(`/outputs/${id}/`);
 
       if (outputsIndex === -1) {
-        setFileContent(`Error: File path is not within the run outputs folder.\nPath: ${absolutePath}`);
+        setFileContent(`错误：文件不在当前任务输出目录中。\n路径：${absolutePath}`);
         return;
       }
 
@@ -297,100 +413,16 @@ export default function LoadingPage() {
 
       const res = await fetch(`/api/v1/prep-runs/${id}/files/${encodeURIComponent(relativePath)}`);
       if (!res.ok) {
-        throw new Error(`Failed to fetch file: ${res.statusText}`);
+        throw new Error(`文件读取失败：${res.statusText}`);
       }
       const text = await res.text();
       setFileContent(text);
 
     } catch (err) {
       console.error("Error opening file", err);
-      setFileContent('Error loading file content. Check browser console for details.');
+      setFileContent('文件内容加载失败，请稍后重试。');
     } finally {
       setIsLoadingFile(false);
-    }
-  };
-
-  const handleEnterClassroomPreparation = async () => {
-    if (!id || isStartingClassroom) {
-      return;
-    }
-
-    setStartClassroomError(null);
-    setIsStartingClassroom(true);
-
-    try {
-      const classroomLookupResponse = await fetch(
-        `/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`,
-        { headers: { Accept: "application/json" } }
-      );
-
-      if (classroomLookupResponse.ok) {
-        const existingPayload = (await classroomLookupResponse.json()) as { run_id?: string };
-        if (existingPayload.run_id) {
-          navigate(`/lesson/${encodeURIComponent(existingPayload.run_id)}`, {
-            state: { classroomLaunchMode: "existing" },
-          });
-          return;
-        }
-      } else if (classroomLookupResponse.status !== 404) {
-        let message = `检查已有课中任务失败（${classroomLookupResponse.status}）`;
-        try {
-          const payload = (await classroomLookupResponse.json()) as {
-            detail?: string | Array<{ msg?: string }>;
-          };
-          if (typeof payload.detail === "string" && payload.detail.trim()) {
-            message = payload.detail;
-          } else if (Array.isArray(payload.detail)) {
-            const firstMessage = payload.detail[0]?.msg;
-            if (typeof firstMessage === "string" && firstMessage.trim()) {
-              message = firstMessage;
-            }
-          }
-        } catch {
-          // Keep fallback message.
-        }
-        throw new Error(message);
-      }
-
-      const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`, {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-
-      if (!response.ok) {
-        let message = `准备课中失败（${response.status}）`;
-        try {
-          const payload = (await response.json()) as {
-            detail?: string | Array<{ msg?: string }>;
-          };
-          if (typeof payload.detail === "string" && payload.detail.trim()) {
-            message = payload.detail;
-          } else if (Array.isArray(payload.detail)) {
-            const firstMessage = payload.detail[0]?.msg;
-            if (typeof firstMessage === "string" && firstMessage.trim()) {
-              message = firstMessage;
-            }
-          }
-        } catch {
-          // Keep fallback message.
-        }
-        throw new Error(message);
-      }
-
-      const payload = (await response.json()) as { run_id?: string };
-      if (!payload.run_id) {
-        throw new Error("后端未返回课中任务 ID，暂时无法进入课件文稿准备页。");
-      }
-
-      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`, {
-        state: { classroomLaunchMode: "new" },
-      });
-    } catch (error) {
-      setStartClassroomError(
-        error instanceof Error ? error.message : "进入课件文稿准备失败，请稍后重试。"
-      );
-    } finally {
-      setIsStartingClassroom(false);
     }
   };
 
@@ -489,19 +521,15 @@ export default function LoadingPage() {
                 </p>
                 <button
                   onClick={() => {
-                    void handleEnterClassroomPreparation();
+                    if (id) {
+                      navigate(`/paths/${encodeURIComponent(id)}`);
+                    }
                   }}
-                  disabled={isStartingClassroom}
                   className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] disabled:bg-[#09f]/60 disabled:hover:bg-[#09f]/60 text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-5 h-5" />
-                  {isStartingClassroom ? "正在进入课件文稿准备..." : "进入课件文稿准备"}
+                  查看学习路径
                 </button>
-                {startClassroomError && (
-                  <p className="mt-4 max-w-sm text-sm text-rose-500">
-                    {startClassroomError}
-                  </p>
-                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -546,7 +574,7 @@ export default function LoadingPage() {
                   <div key={node} className="flex items-center gap-2 shrink-0">
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono transition-all duration-300 ${isActive ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm ring-1 ring-indigo-500/10' : 'bg-muted/50 border-border text-muted-foreground'}`}>
                       {getNodeIcon(node)}
-                      <span>{node}</span>
+                      <span>{localizeNodeName(node)}</span>
                       {isActive && (
                         <span className="relative flex h-2 w-2 ml-1">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-500 opacity-75"></span>
@@ -597,13 +625,13 @@ export default function LoadingPage() {
                 return (
                   <ChainOfThoughtStep key={ev.id} defaultOpen={isLastThree}>
                     <ChainOfThoughtTrigger leftIcon={getNodeIcon(ev.data.node)}>
-                      <span className={textShimmerClass}>{ev.data.summary}</span>
+                      <span className={textShimmerClass}>{localizeMessage(ev.data.summary)}</span>
                     </ChainOfThoughtTrigger>
                     <ChainOfThoughtContent>
                       <div className="text-xs text-muted-foreground font-mono mt-2 mb-4 bg-muted/50 p-3 rounded-lg border border-border">
                         <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          <span>事件: <span className="text-[#09f] font-semibold">{ev.event}</span></span>
-                          <span>节点: <span className="text-[#09f] font-semibold">{ev.data.node}</span></span>
+                          <span>事件: <span className="text-[#09f] font-semibold">{localizeEventName(ev.event)}</span></span>
+                          <span>节点: <span className="text-[#09f] font-semibold">{localizeNodeName(ev.data.node)}</span></span>
                           <span>时间: <span className="text-muted-foreground">{new Date(ev.data.timestamp).toLocaleTimeString()}</span></span>
                         </div>
                         {ev.data.run_status === 'running' && (
@@ -715,7 +743,7 @@ export default function LoadingPage() {
                         <div className="prose prose-custom max-w-none mb-4 leading-relaxed">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
-                            rehypePlugins={[rehypeKatex]}
+                            rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
                           >
                             {fileContent}
                           </ReactMarkdown>

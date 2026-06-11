@@ -86,7 +86,7 @@ class RunRegistry:
                 "event": "run_created",
                 "node": "api",
                 "phase": "orchestration",
-                "summary": "Run created and queued.",
+                "summary": "课前准备任务已创建，正在排队执行。",
                 "data": {
                     "request": request.model_dump(),
                     "output_dir": str(output_dir),
@@ -115,7 +115,7 @@ class RunRegistry:
                 with session.condition:
                     if session.status not in {RunStatus.succeeded, RunStatus.failed}:
                         session.status = RunStatus.failed
-                        session.error = "Run deleted by user."
+                        session.error = "任务已被用户删除。"
                     session.condition.notify_all()
 
     def list_session_ids(self) -> list[str]:
@@ -177,7 +177,7 @@ class RunRegistry:
         elif event_name == "workflow_failed":
             session.status = RunStatus.failed
             session.finished_at = event.get("timestamp", now_iso())
-            session.error = str(data.get("error") or event.get("summary") or "Workflow failed.")
+            session.error = str(data.get("error") or event.get("summary") or "工作流执行失败。")
         elif event_name == "plan_ready":
             plan_payload = data.get("plan")
             if isinstance(plan_payload, dict):

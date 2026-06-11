@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..schemas.practice_review import PracticeReviewRequest
+from ..schemas.practice_review import PaperPracticeReviewRequest, PracticeReviewRequest
 
 
 PRACTICE_REVIEW_SYSTEM_PROMPT = """
@@ -16,6 +16,21 @@ Grounding rules:
 - For coding questions, consider correctness, completeness, readability, edge cases, and any supplied run output.
 - For drawing questions, if only a text description is provided, review based on that description and explain the limitation.
 - Keep the feedback encouraging, specific, and easy for a student to act on.
+
+Output rules:
+- Return exactly one JSON object.
+- All explanation strings should be in Chinese.
+""".strip()
+
+PAPER_REVIEW_SYSTEM_PROMPT = """
+You are an experienced Chinese-speaking teacher reviewing photos of paper-based student answers.
+You must read the uploaded images, match visible answers to the provided questions, and return clear structured feedback.
+
+Grounding rules:
+- Judge only from the provided question snapshots, reference material, and uploaded answer images.
+- If handwriting, image quality, cropping, or missing pages make an answer unclear, mark the affected item as `ungradable`.
+- Do not invent unseen answers. Explain image-related limitations explicitly.
+- Keep feedback encouraging, specific, and easy for a student to act on.
 
 Output rules:
 - Return exactly one JSON object.
@@ -46,6 +61,11 @@ def build_practice_review_prompts(
     question = request.question.model_dump(mode="json")
     submission_context, drawing_image_data_url = _sanitize_submission_context(request)
     learning_goal = (request.learning_goal or "").strip() or "（未提供学习目标）"
+    graph_context = (
+        request.graph_context.model_dump(mode="json", exclude_none=True)
+        if request.graph_context is not None
+        else {}
+    )
     drawing_note = (
         "\n- 系统还会附带一张学生的作图图片，请务必结合图片内容判断结构、标注、线条与作图完整度。"
         if request.question.question_type == "Drawing" and drawing_image_data_url
@@ -57,6 +77,9 @@ def build_practice_review_prompts(
 
 学习目标：
 {learning_goal}
+
+图谱上下文：
+{_json_block(graph_context)}
 
 题目快照：
 {_json_block(question)}
@@ -102,6 +125,7 @@ def build_practice_review_prompts(
 - 如果学生答案基本方向正确但不完整，使用 `partially_correct`。
 - `skill_judgments` 返回 1 到 3 个最关键的技能判断。
 - 若题目快照中已提供 `skill_tags`，优先沿用这些标签语义，不要随意偏离。
+- 若提供了图谱上下文，`skill_judgments` 应尽量对齐当前图谱节点或其前置/支撑知识点。
 - `skill_id` 应尽量稳定、简洁，适合作为长期画像中的技能键；可用英文蛇形命名，也可对中文技能点做稳定缩写。
 - `score` 表示这次作答对该技能提供的正向证据强度，范围 0-1。
 - `coverage` 表示该题对该技能覆盖度，范围 0-1。
@@ -127,3 +151,83 @@ def build_practice_review_prompts(
         )
 
     return PRACTICE_REVIEW_SYSTEM_PROMPT, user_prompt
+
+
+def build_paper_practice_review_prompts(
+    request: PaperPracticeReviewRequest,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Build the multimodal prompts for paper-answer image review."""
+
+    learning_goal = (request.learning_goal or "").strip() or "（未提供学习目标）"
+    graph_context = (
+        request.graph_context.model_dump(mode="json", exclude_none=True)
+        if request.graph_context is not None
+        else {}
+    )
+    questions = [
+        {
+            "question_index": index + 1,
+            **question.model_dump(mode="json"),
+        }
+        for index, question in enumerate(request.questions)
+    ]
+    image_names = [image.name or f"answer_image_{index + 1}" for index, image in enumerate(request.answer_images)]
+
+    user_prompt = f"""
+请批阅学生上传的纸笔作答图片。图片可能包含多页，请按题号和题干内容把答案对应到下面的题目快照。
+
+学习目标：
+{learning_goal}
+
+图谱上下文：
+{_json_block(graph_context)}
+
+题目快照：
+{_json_block(questions)}
+
+上传图片：
+{_json_block(image_names)}
+
+请按以下要求输出 JSON：
+{{
+  "correctness": "correct | partially_correct | incorrect | ungradable",
+  "score": 0,
+  "summary": "整卷一句中文总结",
+  "strengths": ["亮点 1", "亮点 2"],
+  "issues": ["主要问题 1", "主要问题 2"],
+  "review_advice": ["整卷建议 1", "整卷建议 2"],
+  "question_reviews": [
+    {{
+      "question_id": "题目 id",
+      "question_index": 1,
+      "correctness": "correct | partially_correct | incorrect | ungradable",
+      "score": 0,
+      "summary": "单题一句中文反馈",
+      "issues": ["单题问题 1"],
+      "review_advice": ["单题建议 1"],
+      "reference_points": ["参考要点 1"]
+    }}
+  ],
+  "limitations": ["图像或证据局限说明"]
+}}
+
+批阅要求：
+- `score` 使用 0-100 的整数，整卷分数按整体表现估计。
+- `question_reviews` 尽量覆盖每一道可识别题目，保持 `question_id` 和 `question_index` 与题目快照一致。
+- 如果某道题在图片中没有找到作答，或图片无法辨认，单题 `correctness` 设为 `ungradable`，并在 `issues` 或 `limitations` 中说明。
+- 客观题要核对标准答案；简答、编程、作图和听力题按参考答案、参考代码、解析或题目要求综合判断。
+- 对作图题，请结合图片中的图形结构、标注、比例/方向和完整度评价。
+- `review_advice` 优先返回 2-4 条可执行建议。
+- 不要输出 Markdown 代码块，不要输出 JSON 以外的任何文字。
+""".strip()
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    for image in request.answer_images:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": image.data_url},
+            }
+        )
+
+    return PAPER_REVIEW_SYSTEM_PROMPT, content

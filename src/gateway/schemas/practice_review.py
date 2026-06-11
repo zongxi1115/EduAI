@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from edu_multi_agent.models import LearningGraphContext
+
 from .learner_models import LearnerModelSnapshot, SkillJudgment
 
 
@@ -70,6 +72,10 @@ class PracticeReviewRequest(BaseModel):
         default=None,
         description="当前学习目标，帮助 AI 把建议和目标对齐。",
     )
+    graph_context: LearningGraphContext | None = Field(
+        default=None,
+        description="当前练习题继承的知识图谱上下文。",
+    )
     question: PracticeReviewQuestion = Field(description="题目快照。")
     student_answer: Any = Field(
         default=None,
@@ -133,3 +139,72 @@ class PracticeReviewCapabilitiesResponse(BaseModel):
     """题目批阅能力返回。"""
 
     support_vision: bool = Field(description="当前模型是否开启视觉输入能力。")
+
+
+class PaperAnswerImage(BaseModel):
+    """One uploaded photo or scan for paper-answer review."""
+
+    name: str = Field(default="", description="前端上传的图片文件名。")
+    data_url: str = Field(..., min_length=1, description="图片 Data URL。")
+
+
+class PaperPracticeReviewRequest(BaseModel):
+    """AI 批阅纸笔作答图片请求。"""
+
+    learner_id: str | None = Field(
+        default=None,
+        description="可选的学习者标识。",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="可选的学习会话标识。",
+    )
+    learning_goal: str | None = Field(
+        default=None,
+        description="当前学习目标。",
+    )
+    graph_context: LearningGraphContext | None = Field(
+        default=None,
+        description="当前练习题继承的知识图谱上下文。",
+    )
+    questions: list[PracticeReviewQuestion] = Field(
+        ...,
+        min_length=1,
+        description="本次纸笔答题对应的题目快照。",
+    )
+    answer_images: list[PaperAnswerImage] = Field(
+        ...,
+        min_length=1,
+        description="学生纸笔作答图片，支持多张。",
+    )
+
+
+class PaperQuestionReview(BaseModel):
+    """纸笔批阅中单题的可展示结果。"""
+
+    question_id: str = Field(description="题目唯一标识。")
+    question_index: int = Field(ge=1, description="题目序号，从 1 开始。")
+    correctness: ReviewCorrectness = Field(description="单题判断。")
+    score: int = Field(ge=0, le=100, description="单题建议分数。")
+    summary: str = Field(description="单题一句话反馈。")
+    issues: list[str] = Field(default_factory=list, description="单题主要问题。")
+    review_advice: list[str] = Field(default_factory=list, description="单题改进建议。")
+    reference_points: list[str] = Field(default_factory=list, description="单题参考要点。")
+
+
+class PaperPracticeReviewResponse(BaseModel):
+    """纸笔作答图片的整卷批阅结果。"""
+
+    correctness: ReviewCorrectness = Field(description="整卷整体判断。")
+    score: int = Field(ge=0, le=100, description="整卷建议分数。")
+    summary: str = Field(description="整卷一句话总结。")
+    strengths: list[str] = Field(default_factory=list, description="整卷亮点。")
+    issues: list[str] = Field(default_factory=list, description="整卷主要问题。")
+    review_advice: list[str] = Field(default_factory=list, description="整卷改进建议。")
+    question_reviews: list[PaperQuestionReview] = Field(
+        default_factory=list,
+        description="按题号返回的批阅结果。",
+    )
+    limitations: list[str] = Field(default_factory=list, description="批阅局限或证据不足说明。")
+    answer_image_count: int = Field(default=0, ge=0, description="参与批阅的答案图片数量。")
+    judged_at: str | None = Field(default=None, description="服务端完成批阅的时间。")

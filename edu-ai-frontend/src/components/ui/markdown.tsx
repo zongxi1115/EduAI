@@ -9,6 +9,7 @@ import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 import "katex/dist/katex.min.css"
 import { CodeBlock, CodeBlockCode } from "./code-block"
+import { KATEX_RENDER_OPTIONS } from "@/lib/math"
 
 export type MarkdownProps = {
   children: string
@@ -161,7 +162,7 @@ const MemoizedMarkdownBlock = memo(
     return (
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, KATEX_RENDER_OPTIONS]]}
         components={components}
       >
         {content}

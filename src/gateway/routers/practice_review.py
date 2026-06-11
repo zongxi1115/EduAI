@@ -10,12 +10,14 @@ from edu_multi_agent.llm import LLMClient
 
 from ..dependencies import get_learner_model_service, get_llm_client, get_settings
 from ..schemas.practice_review import (
+    PaperPracticeReviewRequest,
+    PaperPracticeReviewResponse,
     PracticeReviewCapabilitiesResponse,
     PracticeReviewRequest,
     PracticeReviewResponse,
 )
 from ..services.learner_models import LearnerModelService
-from ..services.practice_review import build_practice_review_prompts
+from ..services.practice_review import build_paper_practice_review_prompts, build_practice_review_prompts
 
 
 router = APIRouter(prefix="/api/v1/practice-review", tags=["题目批阅"])
@@ -84,3 +86,42 @@ def judge_practice_answer(
             update={"learner_snapshot": learner_model_service.get_model_response(learner_id, event_limit=1).snapshot}
         )
     return judged_result
+
+
+@router.post(
+    "/paper/judge",
+    response_model=PaperPracticeReviewResponse,
+    summary="AI 批阅纸笔答案图片",
+    description=(
+        "批阅学生上传的一张或多张纸笔作答图片。当前接口需要后端开启视觉能力，"
+        "否则会直接返回错误。"
+    ),
+    response_description="整卷纸笔批阅结果，包括总分、整卷建议和按题号拆分的反馈。",
+)
+def judge_paper_practice_answer(
+    payload: PaperPracticeReviewRequest,
+    llm_client: LLMClientDep,
+    settings: SettingsDep,
+) -> PaperPracticeReviewResponse:
+    """Judge uploaded paper-answer images with a vision-capable model."""
+
+    if not settings.support_vision:
+        raise HTTPException(
+            status_code=409,
+            detail="当前模型未开启视觉能力，不支持纸笔答案图片批阅。",
+        )
+
+    if any(not image.data_url.strip().startswith("data:image/") for image in payload.answer_images):
+        raise HTTPException(
+            status_code=400,
+            detail="纸笔答案批阅仅支持图片文件。",
+        )
+
+    system_prompt, user_prompt = build_paper_practice_review_prompts(payload)
+    result = llm_client.invoke_json(system_prompt, user_prompt, PaperPracticeReviewResponse)
+    return result.model_copy(
+        update={
+            "answer_image_count": len(payload.answer_images),
+            "judged_at": now_iso(),
+        }
+    )
