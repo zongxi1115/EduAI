@@ -104,7 +104,7 @@ jobs:
 
           ssh -i ~/.ssh/id_ed25519 -p "$BACKEND_SSH_PORT" \
             "$BACKEND_SSH_USER@$BACKEND_SSH_HOST" \
-            "BACKEND_DEPLOY_PATH='$BACKEND_DEPLOY_PATH' BACKEND_SERVICE_NAME='$BACKEND_SERVICE_NAME' BACKEND_HEALTH_URL='$BACKEND_HEALTH_URL' bash -l -s" <<'REMOTE'
+            "BACKEND_DEPLOY_PATH='$BACKEND_DEPLOY_PATH' BACKEND_SERVICE_NAME='$BACKEND_SERVICE_NAME' BACKEND_HEALTH_URL='$BACKEND_HEALTH_URL' bash -s" <<'REMOTE'
           set -euo pipefail
 
           cd "$BACKEND_DEPLOY_PATH"
@@ -115,13 +115,18 @@ jobs:
           python -m pip install -e . -i "$PIP_INDEX_URL"
           python -m compileall src run_edu_multi_agent.py
           sudo systemctl restart "$BACKEND_SERVICE_NAME"
+          health_ok=0
           for attempt in $(seq 1 30); do
             if curl -fsS "$BACKEND_HEALTH_URL"; then
-              exit 0
+              health_ok=1
+              break
             fi
             echo "Waiting for backend health check... ($attempt/30)"
             sleep 1
           done
+          if [ "$health_ok" = "1" ]; then
+            exit 0
+          fi
           sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager -l
           exit 1
           REMOTE
