@@ -1,9 +1,14 @@
 name: Backend Deploy
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
     paths:
       - 'src/**'
       - 'scripts/**'
@@ -15,13 +20,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: backend-deploy-main
+  group: backend-deploy-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   deploy:
     name: Sync backend to server
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'deploy')) }}
     permissions:
       contents: read
     env:

@@ -157,7 +157,10 @@ server {
 本仓库已接入以下 workflow：
 
 - 后端部署：`.github/workflows/backend-deploy.yml`
-  - `main` 分支的后端相关代码变更后触发。
+  - PR 目标分支为 `main` 且带有 `deploy` label 时触发。
+  - fork PR 会自动跳过部署，避免向外部 PR 暴露部署密钥。
+  - PR 更新代码后，如果 `deploy` label 仍在，会重新部署该 PR 的最新代码。
+  - 也可以手动触发。
   - 通过 SSH + rsync 把仓库同步到服务器，排除前端、`.env`、缓存和输出目录。
   - 在服务器部署目录创建/复用 `.venv`，执行 `python -m pip install -e .`。
   - 默认使用 `https://pypi.tuna.tsinghua.edu.cn/simple` 作为 pip 镜像源。
