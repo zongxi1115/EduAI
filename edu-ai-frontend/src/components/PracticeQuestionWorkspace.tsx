@@ -1862,7 +1862,7 @@ export function PracticeQuestionWorkspace({
     try {
       await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
-      const target = container.querySelector(".practice-pdf-sheet") ?? container;
+      const target = container.querySelector<HTMLElement>(".practice-pdf-sheet") ?? container;
 
       const html2pdf = (await import("html2pdf.js")).default;
       await html2pdf()
@@ -2009,3 +2009,4 @@ export function PracticeQuestionWorkspace({
     </div>
   );
 }
+
