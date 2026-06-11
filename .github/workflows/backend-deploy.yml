@@ -1,0 +1,113 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'run_edu_multi_agent.py'
+      - '.env.example'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: backend-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Sync backend to server
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BACKEND_SSH_HOST: ${{ secrets.BACKEND_SSH_HOST }}
+      BACKEND_SSH_USER: ${{ secrets.BACKEND_SSH_USER }}
+      BACKEND_SSH_KEY: ${{ secrets.BACKEND_SSH_KEY }}
+      BACKEND_SSH_PORT: ${{ secrets.BACKEND_SSH_PORT || '22' }}
+      BACKEND_DEPLOY_PATH: ${{ vars.BACKEND_DEPLOY_PATH || '/opt/edu' }}
+      BACKEND_SERVICE_NAME: ${{ vars.BACKEND_SERVICE_NAME || 'edu-gateway' }}
+      BACKEND_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL || 'http://127.0.0.1:1234/health' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for required in BACKEND_SSH_HOST BACKEND_SSH_USER BACKEND_SSH_KEY; do
+            if [ -z "${!required}" ]; then
+              echo "::error title=Missing secret::$required is required for backend deployment."
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BACKEND_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$BACKEND_SSH_PORT" "$BACKEND_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ensure remote directory exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh -i ~/.ssh/id_ed25519 -p "$BACKEND_SSH_PORT" \
+            "$BACKEND_SSH_USER@$BACKEND_SSH_HOST" \
+            "mkdir -p '$BACKEND_DEPLOY_PATH'"
+
+      - name: Sync backend files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.claude/' \
+            --exclude='.vscode/' \
+            --exclude='.venv/' \
+            --exclude='.env' \
+            --exclude='edu-ai-frontend/' \
+            --exclude='outputs/' \
+            --exclude='graph_data/' \
+            --exclude='__pycache__/' \
+            --exclude='.pytest_cache/' \
+            --exclude='edge_dom.txt' \
+            --exclude='edge_err.txt' \
+            -e "ssh -i ~/.ssh/id_ed25519 -p $BACKEND_SSH_PORT" \
+            ./ "$BACKEND_SSH_USER@$BACKEND_SSH_HOST:$BACKEND_DEPLOY_PATH/"
+
+      - name: Install, check, and restart service
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh -i ~/.ssh/id_ed25519 -p "$BACKEND_SSH_PORT" \
+            "$BACKEND_SSH_USER@$BACKEND_SSH_HOST" \
+            "BACKEND_DEPLOY_PATH='$BACKEND_DEPLOY_PATH' BACKEND_SERVICE_NAME='$BACKEND_SERVICE_NAME' BACKEND_HEALTH_URL='$BACKEND_HEALTH_URL' bash -l -s" <<'REMOTE'
+          set -euo pipefail
+
+          cd "$BACKEND_DEPLOY_PATH"
+          python3 -m venv .venv
+          . .venv/bin/activate
+          PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+          python -m pip install --upgrade pip -i "$PIP_INDEX_URL"
+          python -m pip install -e . -i "$PIP_INDEX_URL"
+          python -m compileall src run_edu_multi_agent.py
+          sudo systemctl restart "$BACKEND_SERVICE_NAME"
+          curl -fsS "$BACKEND_HEALTH_URL"
+          REMOTE

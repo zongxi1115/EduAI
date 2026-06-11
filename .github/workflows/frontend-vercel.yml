@@ -1,0 +1,90 @@
+name: Frontend Vercel Deploy
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'edu-ai-frontend/**'
+      - '.github/workflows/frontend-vercel.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'edu-ai-frontend/**'
+      - '.github/workflows/frontend-vercel.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Vercel deployment target.
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - preview
+
+concurrency:
+  group: frontend-vercel-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy frontend to Vercel
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: edu-ai-frontend
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate Vercel secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for required in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!required}" ]; then
+              echo "::error title=Missing secret::$required is required for Vercel deployment."
+              exit 1
+            fi
+          done
+
+      - name: Deploy preview
+        if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'preview') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pnpm dlx vercel@latest pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          preview_url="$(pnpm dlx vercel@latest deploy --yes --token="$VERCEL_TOKEN")"
+          echo "Preview deployment: $preview_url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy production
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pnpm dlx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          production_url="$(pnpm dlx vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN")"
+          echo "Production deployment: $production_url" >> "$GITHUB_STEP_SUMMARY"
