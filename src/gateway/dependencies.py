@@ -7,6 +7,7 @@ from fastapi import Request
 from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
 
+from .services.learner_models import LearnerModelService
 from .services.classroom_tasks import ClassroomTaskRegistry
 from .services.run_registry import RunRegistry
 
@@ -24,6 +25,11 @@ def get_run_registry(request: Request) -> RunRegistry:
 def get_llm_client(request: Request) -> LLMClient:
     """Return the shared LLM client stored on FastAPI application state."""
     return cast(LLMClient, request.app.state.llm_client)
+
+
+def get_learner_model_service(request: Request) -> LearnerModelService:
+    """Return the learner-model service stored on FastAPI state."""
+    return cast(LearnerModelService, request.app.state.learner_model_service)
 
 
 def get_classroom_outline_agent(request: Request) -> Any | None:

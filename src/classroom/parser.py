@@ -9,6 +9,7 @@ from .state import PageSpec, Quiz, Reveal
 
 PAGE_BREAK = "<to_next_page/>"
 STEP_BREAK = "<to_next/>"
+PAUSE_TAG = "<pause/>"
 ON_SLIDE_OPEN = "<on_slide>"
 ON_SLIDE_CLOSE = "</on_slide>"
 QUESTION_OPEN = "<question>"
@@ -17,7 +18,7 @@ FALSE_INTRO_OPEN = "<false_intro>"
 FALSE_INTRO_CLOSE = "</false_intro>"
 
 CONTROL_TAG_PATTERN = re.compile(
-    r"</?(?:on_slide|question|false_intro)>|<to_next\s*/>|<to_next_page\s*/>"
+    r"</?(?:on_slide|question|false_intro)>|<to_next\s*/>|<to_next_page\s*/>|<pause\s*/>"
 )
 QUESTION_BLOCK_PATTERN = re.compile(r"<question>(.*?)</question>", re.DOTALL)
 QUESTION_XML_TAG_PATTERN = re.compile(r"(</?(?:choice|fill|prompt|option|answer)\s*>)")
@@ -60,6 +61,8 @@ def parse_page(page_text: str, idx: int) -> PageSpec:
     cursor = 0
     current_reveal_parts: list[str] = []
     raw_reveals: list[str] = []
+    pause_flags: list[bool] = []
+    has_pause = False
     quizzes: list[Quiz] = []
 
     while cursor < len(page_text):
@@ -71,6 +74,11 @@ def parse_page(page_text: str, idx: int) -> PageSpec:
 
         current_reveal_parts.append(page_text[cursor:next_tag])
 
+        if page_text.startswith(PAUSE_TAG, next_tag):
+            has_pause = True
+            cursor = next_tag + len(PAUSE_TAG)
+            continue
+
         if page_text.startswith(STEP_BREAK, next_tag):
             reveal_text = "".join(current_reveal_parts).strip()
             if not reveal_text:
@@ -78,6 +86,8 @@ def parse_page(page_text: str, idx: int) -> PageSpec:
                     f"Page {idx} contains an empty reveal before step {len(raw_reveals)}."
                 )
             raw_reveals.append(reveal_text)
+            pause_flags.append(has_pause)
+            has_pause = False
             current_reveal_parts = []
             cursor = next_tag + len(STEP_BREAK)
             continue
@@ -119,8 +129,11 @@ def parse_page(page_text: str, idx: int) -> PageSpec:
     if not reveal_text:
         raise ScriptParseError(f"Page {idx} ends with an empty reveal.")
     raw_reveals.append(reveal_text)
+    pause_flags.append(has_pause)
 
     reveals = [_parse_reveal(raw_reveal, idx, reveal_idx) for reveal_idx, raw_reveal in enumerate(raw_reveals)]
+    for reveal_idx, pause in enumerate(pause_flags):
+        reveals[reveal_idx]["pause"] = pause
     if not reveals:
         raise ScriptParseError(f"Page {idx} must contain at least one reveal.")
 
@@ -228,6 +241,7 @@ def _parse_reveal(raw_reveal: str, page_idx: int, reveal_idx: int) -> Reveal:
     return {
         "narration": narration,
         "on_slide": on_slide,
+        "pause": False,
     }
 
 

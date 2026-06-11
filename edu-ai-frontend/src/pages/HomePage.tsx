@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
 import { useState, useEffect, useLayoutEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock, Network } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -27,6 +27,7 @@ const PHRASES = [
 const INITIAL_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理"]
 const INITIAL_GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
 const INITIAL_TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
+const LEARNER_ID_STORAGE_KEY = "edu-demo-learner-id"
 
 interface PrepRun {
   run_id: string;
@@ -39,6 +40,24 @@ interface PrepRun {
 
 interface CreatePrepRunResponse {
   run_id?: string
+}
+
+function getOrCreateLearnerId() {
+  if (typeof window === "undefined") {
+    return "browser-demo-learner"
+  }
+
+  const existing = window.localStorage.getItem(LEARNER_ID_STORAGE_KEY)?.trim()
+  if (existing) {
+    return existing
+  }
+
+  const nextId =
+    typeof window.crypto?.randomUUID === "function"
+      ? `browser_${window.crypto.randomUUID()}`
+      : `browser_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  window.localStorage.setItem(LEARNER_ID_STORAGE_KEY, nextId)
+  return nextId
 }
 
 function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
@@ -101,6 +120,7 @@ export default function HomePage() {
   const [customReq, setCustomReq] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [learnerId] = useState(() => getOrCreateLearnerId())
 
   const navigate = useNavigate()
 
@@ -206,6 +226,7 @@ export default function HomePage() {
           learning_goal: trimmedQuery,
           subject,
           grade_level: gradeLevel,
+          learner_id: learnerId,
           learner_profile: learnerProfile,
           notes,
           language: "zh-CN",
@@ -272,7 +293,16 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
-      <div className="absolute top-6 right-6 z-50">
+      <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate("/graphs/ai_foundation_course_groups")}
+          className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm gap-1.5 h-9 px-3"
+        >
+          <Network className="w-4 h-4" />
+          <span className="text-sm font-medium">课程图谱</span>
+        </Button>
         <div className="rounded-xl border border-zinc-200/50 bg-white/80 shadow-sm backdrop-blur-md dark:border-zinc-800/50 dark:bg-zinc-950/80">
           <ThemeToggle />
         </div>

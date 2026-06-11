@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..state import PageBlueprint, PageSpec, SlideTaskState, WindowContext
+from ..state import MediaResource, PageBlueprint, PageSpec, SlideTaskState, WindowContext
 from ._common import flatten_content, load_prompt
 
 
@@ -58,6 +58,7 @@ class SlideHtmlAgent:
         idx = typed_page["idx"]
         page_blueprint = state.get("page_blueprint") if isinstance(state.get("page_blueprint"), dict) else None
         window_context = _normalize_window_context(state.get("window_context"))
+        media_resources = state.get("media_resources") or []
         feedback = ""
         attempts: list[dict[str, Any]] = []
         last_error: Exception | None = None
@@ -71,6 +72,7 @@ class SlideHtmlAgent:
                             typed_page,
                             page_blueprint=page_blueprint,
                             window_context=window_context,
+                            media_resources=media_resources,
                             feedback=feedback,
                         )
                     ),
@@ -135,6 +137,7 @@ class SlideHtmlAgent:
         *,
         page_blueprint: PageBlueprint | None,
         window_context: list[WindowContext],
+        media_resources: list[MediaResource] | None = None,
         feedback: str = "",
     ) -> str:
         step_specs = [
@@ -154,6 +157,16 @@ class SlideHtmlAgent:
             "steps": step_specs,
             "window_context": window_context,
         }
+        media_resources = media_resources or []
+        media_section = ""
+        if media_resources:
+            media_section = (
+                "\n\n- 以下是课前生成的媒体资源，你可以在卡片中嵌入它们：\n"
+                "  - `resource_type` 为 `video` 的资源用 `<video src=\"{relative_path}\" controls>` 嵌入；\n"
+                "  - `resource_type` 为 `interactive_html` 的资源用 `<iframe src=\"{relative_path}\">` 嵌入；\n"
+                "  - 只嵌入与当前页内容相关的资源，不相关的忽略。\n"
+                f"{json.dumps(media_resources, ensure_ascii=False, indent=2)}"
+            )
         return (
             "请根据下面的卡片规格输出一段 HTML。\n"
             "- 只输出 HTML 文本。\n"
@@ -166,6 +179,7 @@ class SlideHtmlAgent:
             "- 重点是让这一页内容丰满、层次清晰、过渡顺滑，而不是拘泥于固定文本槽位。\n"
             "- `window_context` 只是附近页面的风格与节奏参考，禁止复述其中的 summary 原文。\n\n"
             f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
+            f"{media_section}"
             f"{feedback}"
         )
 

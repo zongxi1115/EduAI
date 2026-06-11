@@ -27,10 +27,12 @@ def test_parse_script_extracts_reveals_and_quizzes() -> None:
     assert pages[0]["reveals"][0] == {
         "narration": "今天我们讲牛顿第二定律。",
         "on_slide": "牛顿第二定律：F = ma",
+        "pause": False,
     }
     assert pages[0]["reveals"][1] == {
         "narration": "它说的是合外力等于质量乘加速度。",
         "on_slide": None,
+        "pause": False,
     }
     assert pages[0]["quizzes"] == [
         {

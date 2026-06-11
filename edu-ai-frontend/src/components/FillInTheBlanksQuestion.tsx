@@ -2,11 +2,13 @@ import { useState, useMemo, createContext, useContext, useEffect, useRef } from 
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import "mathlive";
 import { PenTool, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogClose } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DraftBoard } from "@/components/DraftBoard";
 import { X } from "lucide-react";
 
@@ -15,50 +17,173 @@ const BlankContext = createContext<{
   onChange: (index: number, value: string) => void;
 }>({ answers: [], onChange: () => { } });
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const CodeRenderer = ({ node, inline, className, children, ...props }: any) => {
   const { answers, onChange } = useContext(BlankContext);
   const text = String(children);
   const match = text.match(/^__BLANK__(\d+)$/);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState("");
   const mfRef = useRef<any>(null);
 
   const blankIndex = match ? parseInt(match[1], 10) : -1;
-
-  useEffect(() => {
-    if (!mfRef.current || blankIndex === -1) return;
-    const mf = mfRef.current;
-
-    // Prevent cursor resetting unless value actually changed externally
-    if (mf.value !== (answers[blankIndex] || "")) {
-      mf.value = answers[blankIndex] || "";
+  const currentValue = blankIndex === -1 ? "" : answers[blankIndex] || "";
+  const renderedAnswerHtml = useMemo(() => {
+    if (!currentValue.trim()) {
+      return "";
     }
 
+    try {
+      return katex.renderToString(currentValue, {
+        throwOnError: false,
+        displayMode: false,
+        strict: "ignore",
+      });
+    } catch {
+      return escapeHtml(currentValue);
+    }
+  }, [currentValue]);
+  const handleConfirm = () => {
+    if (blankIndex === -1) return;
+    const nextValue = String(mfRef.current?.value ?? draftValue ?? "");
+    setDraftValue(nextValue);
+    onChange(blankIndex, nextValue);
+    setIsEditorOpen(false);
+  };
+
+  useEffect(() => {
+    if (blankIndex === -1 || isEditorOpen) return;
+    setDraftValue(currentValue);
+  }, [blankIndex, currentValue, isEditorOpen]);
+
+  useEffect(() => {
+    if (!isEditorOpen || !mfRef.current || blankIndex === -1) return;
+    const mf = mfRef.current;
+
+    if (mf.value !== draftValue) {
+      mf.value = draftValue;
+    }
+
+    queueMicrotask(() => {
+      if (mfRef.current && mfRef.current.value !== draftValue) {
+        mfRef.current.value = draftValue;
+      }
+    });
+
     const handleInput = (ev: Event) => {
-      onChange(blankIndex, (ev.target as any).value);
+      setDraftValue((ev.target as any).value || "");
     };
 
-    mf.addEventListener('input', handleInput);
-    return () => mf.removeEventListener('input', handleInput);
-  }, [blankIndex, answers, onChange]);
+    mf.addEventListener("input", handleInput);
+    return () => mf.removeEventListener("input", handleInput);
+  }, [blankIndex, draftValue, isEditorOpen]);
 
   if (match) {
     return (
-      <math-field
-        ref={mfRef}
-        style={{
-          display: "inline-block",
-          minWidth: "12rem",
-          padding: "0.25rem 0.5rem",
-          margin: "0 0.5rem",
-          border: "none",
-          borderBottom: "2px solid var(--border)",
-          boxShadow: "inset 0 -1px 0 0 color-mix(in oklab, var(--foreground) 14%, transparent)",
-          color: "var(--foreground)",
-          background: "transparent",
-          fontSize: "1.125rem",
-          transform: "translateY(5px)",
-          outline: "none"
+      <Popover
+        open={isEditorOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setDraftValue(currentValue);
+          }
+          setIsEditorOpen(open);
         }}
-      />
+      >
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`编辑第 ${blankIndex + 1} 空`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              width: currentValue.trim() ? "fit-content" : "12rem",
+              minWidth: "12rem",
+              maxWidth: "100%",
+              margin: "0 0.5rem",
+              padding: "0.25rem 0.25rem 0.3rem",
+              border: "none",
+              borderBottom: "2px solid var(--border)",
+              boxShadow: "inset 0 -1px 0 0 color-mix(in oklab, var(--foreground) 14%, transparent)",
+              color: "var(--foreground)",
+              background: "transparent",
+              fontSize: "1.125rem",
+              lineHeight: "1.6",
+              verticalAlign: "baseline",
+              outline: "none",
+              boxSizing: "border-box",
+              borderRadius: "0",
+              cursor: "text",
+            }}
+          >
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                textAlign: "left",
+                opacity: currentValue ? 1 : 0.5,
+                overflow: "hidden",
+              }}
+            >
+              {currentValue.trim() ? (
+                <span
+                  dangerouslySetInnerHTML={{ __html: renderedAnswerHtml }}
+                  style={{ display: "inline-flex", alignItems: "center", fontSize: "0.95rem" }}
+                />
+              ) : (
+                "点击输入答案"
+              )}
+            </span>
+            <PenTool className="h-4 w-4 shrink-0 opacity-60" />
+          </button>
+        </PopoverTrigger>
+
+        <PopoverContent side="bottom" align="start" sideOffset={10} className="w-[min(28rem,calc(100vw-2rem))] p-4">
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-foreground">编辑第 {blankIndex + 1} 空</div>
+              <div className="text-xs text-muted-foreground">支持公式输入，不会影响正文排版。</div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-muted/30 px-4 py-4">
+              <math-field
+                ref={mfRef}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  minHeight: "3rem",
+                  padding: "0.5rem 0",
+                  border: "none",
+                  color: "var(--foreground)",
+                  background: "transparent",
+                  fontSize: "1.125rem",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+              当前内容：{draftValue || "（空）"}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsEditorOpen(false)}>取消</Button>
+              <Button onClick={handleConfirm}>
+                完成
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
     );
   }
   return <code className={className} {...props}>{children}</code>;

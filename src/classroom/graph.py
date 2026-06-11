@@ -27,6 +27,7 @@ def fanout_page_scripts(state: ClassState) -> list[Send]:
                 "topic": state.get("topic"),
                 "materials": state.get("materials"),
                 "outline": state.get("outline"),
+                "media_resources": state.get("media_resources"),
                 "page_blueprint": page_blueprints[idx],
                 "total_pages": len(page_blueprints),
                 "prev_theme": page_blueprints[idx - 1]["theme"] if idx > 0 else None,
@@ -40,6 +41,8 @@ def fanout_page_scripts(state: ClassState) -> list[Send]:
 def fanout(state: ClassState) -> list[Send]:
     pages = state.get("pages") or []
     page_blueprints = state.get("page_blueprints") or []
+    all_media = state.get("media_resources") or []
+    total_pages = len(pages)
     return [
         Send(
             "slide",
@@ -47,10 +50,48 @@ def fanout(state: ClassState) -> list[Send]:
                 "page": pages[idx],
                 "page_blueprint": page_blueprints[idx] if idx < len(page_blueprints) else None,
                 "window_context": _build_window_context(state, idx),
+                "media_resources": _assign_media_to_page(all_media, idx, total_pages),
             },
         )
         for idx in range(len(pages))
     ]
+
+
+def _assign_media_to_page(
+    media_resources: list[MediaResource],
+    page_idx: int,
+    total_pages: int,
+) -> list[MediaResource]:
+    """Assign each media resource to at most one page so resources are not duplicated.
+
+    Strategy: distribute resources round-robin or by type to the most relevant page.
+    Videos go to early/middle pages (where visuals are most impactful).
+    Interactive HTML goes to middle/late pages (where engagement matters).
+    """
+    if not media_resources or total_pages == 0:
+        return []
+
+    assigned: list[MediaResource] = []
+    for resource in media_resources:
+        rtype = resource.get("resource_type", "")
+        # Determine the best page index for this resource type
+        if rtype == "video":
+            # Videos work best as visual anchors in early-to-mid pages
+            target_idx = min(page_idx, total_pages - 1)
+            # Assign video to the page whose index is closest to 1/3 of total
+            ideal = max(0, min(total_pages - 1, total_pages // 3))
+        elif rtype == "interactive_html":
+            # Interactive elements work best in mid-to-late pages
+            ideal = max(0, min(total_pages - 1, (2 * total_pages) // 3))
+        else:
+            # Images: assign to first page that doesn't already have one
+            ideal = 0
+
+        # Only include if this page is the designated target
+        if page_idx == ideal:
+            assigned.append(resource)
+
+    return assigned
 
 
 def build_graph(

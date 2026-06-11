@@ -1,0 +1,35 @@
+language: zh-CN
+tone_instructions: "用中文 review，优先指出会影响部署、运行、数据安全和用户体验的问题；风格直接但友好。"
+early_access: false
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  poem: false
+  path_filters:
+    - "!outputs/**"
+    - "!graph_data/**"
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!edu-ai-frontend/dist/**"
+    - "!edu-ai-frontend/node_modules/**"
+    - "!edge_dom.txt"
+    - "!edge_err.txt"
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - README.md
+      - CONTRIBUTING.md
+      - docs/**/*.md

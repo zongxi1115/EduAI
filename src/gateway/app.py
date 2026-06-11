@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
@@ -11,9 +11,12 @@ from .routers.assistant import router as assistant_router
 from .routers.classroom import router as classroom_router
 from .routers.code_execution import router as code_execution_router
 from .routers.health import router as health_router
+from .routers.knowledge_graphs import router as knowledge_graphs_router
+from .routers.learner_models import router as learner_models_router
 from .routers.prep_runs import router as prep_runs_router
 from .routers.practice_review import router as practice_review_router
 from .services.classroom_tasks import ClassroomTaskRegistry
+from .services.learner_models import LearnerModelRepository, LearnerModelService
 from .services.run_registry import RunRegistry
 
 
@@ -48,6 +51,14 @@ OPENAPI_TAGS = [
         "name": "题目批阅",
         "description": "用于前端在学生提交答案后调用 AI 进行结构化批阅与建议返回。",
     },
+    {
+        "name": "学习者画像",
+        "description": "用于记录学习事件、维护长期学情画像，并向后续教学流程回流。",
+    },
+    {
+        "name": "知识图谱",
+        "description": "用于返回图谱索引及其对应的课程知识图谱内容。",
+    },
 ]
 
 SWAGGER_UI_PARAMETERS = {
@@ -57,6 +68,24 @@ SWAGGER_UI_PARAMETERS = {
     "deepLinking": True,
     "filter": True,
 }
+
+SCALAR_HTML = """\
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <title>Edu API Docs</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script
+      id="api-reference"
+      data-url="/api/openapi.json"
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference">
+    </script>
+  </body>
+</html>
+"""
 
 
 def create_app(
@@ -69,6 +98,7 @@ def create_app(
     resolved_settings = settings or Settings.from_env()
     registry = RunRegistry(resolved_settings)
     resolved_llm_client = llm_client or LLMClient(resolved_settings)
+    learner_model_service = LearnerModelService(LearnerModelRepository(resolved_settings))
     classroom_task_registry = ClassroomTaskRegistry(
         resolved_settings,
         resolved_llm_client,
@@ -99,6 +129,7 @@ def create_app(
     app.state.run_registry = registry
     app.state.settings = resolved_settings
     app.state.llm_client = resolved_llm_client
+    app.state.learner_model_service = learner_model_service
     app.state.classroom_outline_agent = classroom_outline_agent
     app.state.classroom_task_registry = classroom_task_registry
 
@@ -106,6 +137,8 @@ def create_app(
     app.include_router(classroom_router)
     app.include_router(code_execution_router)
     app.include_router(health_router)
+    app.include_router(knowledge_graphs_router)
+    app.include_router(learner_models_router)
     app.include_router(prep_runs_router)
     app.include_router(practice_review_router)
 
@@ -123,5 +156,15 @@ def create_app(
     def redirect_openapi() -> RedirectResponse:
         """将旧的 OpenAPI 地址重定向到新的命名空间路径。"""
         return RedirectResponse(url=app.openapi_url or "/api/openapi.json")
+
+    @app.get("/api/scalar", include_in_schema=False)
+    def scalar_docs() -> HTMLResponse:
+        """提供 Scalar API 文档页面。"""
+        return HTMLResponse(SCALAR_HTML)
+
+    @app.get("/scalar", include_in_schema=False)
+    def redirect_scalar() -> RedirectResponse:
+        """将旧的 Scalar 地址重定向到新的命名空间路径。"""
+        return RedirectResponse(url="/api/scalar")
 
     return app

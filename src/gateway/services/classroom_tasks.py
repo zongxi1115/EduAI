@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import threading
 from dataclasses import dataclass, field
 from html import escape
@@ -146,6 +147,7 @@ class ClassroomTaskRegistry:
                     "summary": "AI 课堂生成任务开始执行。",
                 },
             )
+            _copy_prep_media_to_classroom_dir(session)
             result = run_classroom_workflow(
                 session.request,
                 self.llm_client,
@@ -340,6 +342,51 @@ def load_run_view(registry: ClassroomTaskRegistry, run_id: str) -> dict[str, Any
     if session is not None:
         return build_run_view_from_session(session)
     return build_run_view_from_disk(registry, run_id)
+
+
+def find_existing_run_for_prep_run(
+    registry: ClassroomTaskRegistry,
+    source_prep_run_id: str,
+) -> dict[str, Any] | None:
+    normalized_run_id = source_prep_run_id.strip()
+    if not normalized_run_id:
+        return None
+
+    for run_id in registry.list_session_ids():
+        session = registry.get_session(run_id)
+        if session is None:
+            continue
+        if session.request.source_prep_run_id == normalized_run_id:
+            return build_run_view_from_session(session)
+
+    if not registry.output_root.is_dir():
+        return None
+
+    candidate_views: list[dict[str, Any]] = []
+    for run_dir in registry.output_root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        request_payload = load_json_file(run_dir / REQUEST_FILENAME)
+        if not isinstance(request_payload, dict):
+            continue
+        if str(request_payload.get("source_prep_run_id") or "").strip() != normalized_run_id:
+            continue
+        try:
+            candidate_views.append(build_run_view_from_disk(registry, run_dir.name))
+        except HTTPException:
+            continue
+
+    if not candidate_views:
+        return None
+
+    candidate_views.sort(
+        key=lambda view: (
+            str(view.get("created_at") or ""),
+            str(view.get("run_id") or ""),
+        ),
+        reverse=True,
+    )
+    return candidate_views[0]
 
 
 def load_stored_events(registry: ClassroomTaskRegistry, run_id: str) -> list[dict[str, Any]]:
@@ -630,3 +677,30 @@ def _render_preview_index(topic: Any, links: list[str]) -> str:
   </body>
 </html>
 """
+
+
+def _copy_prep_media_to_classroom_dir(session: ClassroomTaskSession) -> None:
+    """Copy prep-generated media files into the classroom output directory.
+
+    This makes them accessible via the classroom file-serving endpoint
+    ``/api/v1/classroom/{run_id}/files/{path}`` and updates the
+    ``media_resources`` relative_path values accordingly.
+    """
+    media_resources = session.request.media_resources
+    if not media_resources:
+        return
+
+    media_dir = session.output_dir / "prep_media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    for resource in media_resources:
+        src_path = Path(resource.get("file_path", ""))
+        if not src_path.is_file():
+            continue
+        dest = media_dir / src_path.name
+        try:
+            shutil.copy2(src_path, dest)
+        except OSError as exc:
+            logger.warning("Failed to copy prep media %s: %s", src_path, exc)
+            continue
+        resource["relative_path"] = f"prep_media/{dest.name}"

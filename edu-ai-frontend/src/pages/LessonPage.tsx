@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowLeft,
@@ -27,6 +27,7 @@ import {
   useLessonPlayer,
   type LessonResult,
 } from "@/components/classroom/LessonPlayerProvider";
+import { Markdown } from "@/components/ui/markdown";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,10 @@ type PageState =
   | { status: "pending" }
   | { status: "error"; message: string }
   | { status: "ready"; lesson: LessonResult };
+
+type LessonLaunchState = {
+  classroomLaunchMode?: "existing" | "new";
+};
 
 const CLASSROOM_STREAM_EVENTS = [
   "run_created",
@@ -352,6 +357,7 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
     currentPage,
     pages,
     currentPageIndex,
+    currentReveal,
     currentTheme,
     hasStarted,
     isPlaying,
@@ -737,9 +743,9 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                     <Sparkles className="w-5 h-5" /> 随堂互动
                   </div>
                   
-                  <div className="text-lg md:text-xl font-bold text-slate-900 mb-8 whitespace-pre-wrap leading-relaxed">
+                  <Markdown className="mb-8 text-slate-900 [&_.katex-display]:my-4 [&_p]:text-lg [&_p]:font-bold [&_p]:leading-relaxed md:[&_p]:text-xl">
                     {activeQuiz.payload.question}
-                  </div>
+                  </Markdown>
 
                   {activeQuiz.payload.type === "choice" && activeQuiz.payload.options && (
                     <div className="flex flex-col gap-3">
@@ -754,9 +760,9 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-500 group-hover/option:bg-indigo-500 group-hover/option:text-white transition-colors mr-4">
                               {String.fromCharCode(65 + idx)}
                             </div>
-                            <div className="flex-1 text-slate-700 font-medium text-[15px] self-center">
+                            <Markdown className="flex-1 self-center text-slate-700 [&_.katex-display]:my-3 [&_p]:m-0 [&_p]:text-[15px] [&_p]:font-medium [&_p]:leading-relaxed">
                               {option}
-                            </div>
+                            </Markdown>
                           </div>
                         </button>
                       ))}
@@ -823,9 +829,31 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
               </div>
             )}
 
+            {/* 停顿点提示层 */}
+            {!isPlaying && hasStarted && !isEnded && phase === "narrating" && currentReveal?.pause && (
+              <div
+                className="absolute inset-0 z-[85] flex items-center justify-center pointer-events-auto cursor-pointer"
+                onClick={() => togglePlayback()}
+              >
+                <div className="rounded-2xl bg-black/50 backdrop-blur-md px-8 py-5 text-white shadow-2xl flex flex-col items-center gap-2 animate-in fade-in zoom-in-95 duration-300">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
+                    <Play className="w-7 h-7 ml-1" />
+                  </div>
+                  <span className="text-sm font-medium tracking-wide">点击继续</span>
+                </div>
+              </div>
+            )}
+
             {/* 顶部的 IFrame 画布 */}
             <div
-              className="relative aspect-[16/9] w-full bg-slate-950 flex-1 isolate overflow-hidden min-h-0"
+              className={cn(
+                "relative w-full bg-slate-950 isolate overflow-hidden",
+                isFullscreen
+                  ? "flex-1 min-h-0"
+                  : isTheater
+                    ? "h-[clamp(420px,68vh,900px)] min-h-[420px]"
+                    : "h-[clamp(360px,58vh,780px)] min-h-[360px] lg:h-[clamp(440px,64vh,860px)] lg:min-h-[440px]"
+              )}
               onDoubleClick={() => {
                 togglePlayback();
                 triggerOsd(
@@ -850,7 +878,7 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
                     srcDoc={currentPage.srcDoc}
                     onLoad={handleStageReady}
                     className="absolute inset-0 h-full w-full border-0 bg-transparent"
-                    sandbox="allow-scripts"
+                    sandbox="allow-scripts allow-same-origin"
                   />
                 </motion.div>
               </AnimatePresence>
@@ -1224,6 +1252,8 @@ function LessonPlayerShell({ sourcePrepRunId }: { sourcePrepRunId: string | null
 
 export default function LessonPage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const launchState = (location.state as LessonLaunchState | null) ?? null;
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [progress, setProgress] = useState<ClassroomRunProgress>(() => buildInitialProgress());
   const [sourcePrepRunId, setSourcePrepRunId] = useState<string | null>(null);
@@ -1247,7 +1277,9 @@ export default function LessonPage() {
     const seenEventIndexes = new Set<number>();
 
     loadedResultRef.current = false;
-    setState({ status: "loading" });
+    setState(
+      launchState?.classroomLaunchMode === "new" ? { status: "pending" } : { status: "loading" }
+    );
     setProgress(buildInitialProgress());
     setSourcePrepRunId(null);
 
@@ -1448,10 +1480,10 @@ export default function LessonPage() {
         eventSource.close();
       }
     };
-  }, [id]);
+  }, [id, launchState?.classroomLaunchMode]);
 
   if (state.status !== "ready") {
-    if (state.status !== "error") {
+    if (state.status === "pending") {
       return (
         <GenerationDashboard
           topic={progress.topic}
@@ -1459,6 +1491,26 @@ export default function LessonPage() {
           summary={progress.summary}
           events={progress.events}
         />
+      );
+    }
+
+    if (state.status === "loading") {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6 text-slate-900">
+          <Card className="w-full max-w-xl border-slate-200 bg-white shadow-sm ring-1 ring-slate-200/50">
+            <CardContent className="flex items-center gap-4 px-6 py-6">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-600 ring-1 ring-sky-100">
+                <Sparkles className="h-5 w-5 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900">正在打开课堂内容</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  如果课件已经生成完成，我们会直接进入播放器。
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       );
     }
 

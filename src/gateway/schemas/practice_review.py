@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .learner_models import LearnerModelSnapshot, SkillJudgment
+
 
 PracticeQuestionType = Literal[
     "FillInTheBlank",
@@ -41,11 +43,29 @@ class PracticeReviewQuestion(BaseModel):
     test_cases: list[Any] = Field(default_factory=list, description="编程题测试样例。")
     audio_src: str | None = Field(default=None, description="听力题音频地址。")
     reference_image: str | None = Field(default=None, description="作图题参考图描述。")
+    skill_tags: list[str] = Field(
+        default_factory=list,
+        description="题目显式关联的技能标签，供后续学情建模使用。",
+    )
+    difficulty: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="题目难度估计，0-1。",
+    )
 
 
 class PracticeReviewRequest(BaseModel):
     """AI 批阅请求。"""
 
+    learner_id: str | None = Field(
+        default=None,
+        description="可选的学习者标识。提供后会自动写入长期学情模型。",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="可选的学习会话标识，用于把多次作答聚合到同一次学习中。",
+    )
     learning_goal: str | None = Field(
         default=None,
         description="当前学习目标，帮助 AI 把建议和目标对齐。",
@@ -64,6 +84,8 @@ class PracticeReviewRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "learning_goal": "理解二次函数图像与性质",
+                "learner_id": "stu_demo_001",
+                "session_id": "session_20260510_01",
                 "question": {
                     "id": "question_demo_001",
                     "question_type": "ShortAnswer",
@@ -71,6 +93,8 @@ class PracticeReviewRequest(BaseModel):
                     "analysis": "考查学生是否理解 a 的符号与开口方向关系。",
                     "need_ai_judge": True,
                     "reference_answer": "因为 a<0 时函数值随 |x| 增大而整体减小，所以图像向下张开。",
+                    "skill_tags": ["理解二次项系数与开口方向"],
+                    "difficulty": 0.45,
                 },
                 "student_answer": "因为负号会让抛物线朝下。",
                 "submission_context": {},
@@ -90,6 +114,18 @@ class PracticeReviewResponse(BaseModel):
     review_advice: list[str] = Field(default_factory=list, description="可直接展示给前端的审阅建议。")
     reference_points: list[str] = Field(default_factory=list, description="参考要点或下一步核对点。")
     limitations: list[str] = Field(default_factory=list, description="批阅局限或证据不足说明。")
+    skill_judgments: list[SkillJudgment] = Field(
+        default_factory=list,
+        description="本次作答映射到具体技能后的证据判断。",
+    )
+    learner_observations: list[str] = Field(
+        default_factory=list,
+        description="从本次作答提炼出的学习者观察。",
+    )
+    learner_snapshot: LearnerModelSnapshot | None = Field(
+        default=None,
+        description="若提供 learner_id，则返回更新后的长期学情摘要。",
+    )
     judged_at: str | None = Field(default=None, description="服务端完成批阅的时间。")
 
 

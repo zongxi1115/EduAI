@@ -62,6 +62,8 @@ export default function LoadingPage() {
   const [fileContent, setFileContent] = useState<string>('');
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [showArtifactPanel, setShowArtifactPanel] = useState(false);
+  const [isStartingClassroom, setIsStartingClassroom] = useState(false);
+  const [startClassroomError, setStartClassroomError] = useState<string | null>(null);
 
   const [isComplete, setIsComplete] = useState(false);
   const [showFocusMode, setShowFocusMode] = useState(false);
@@ -172,6 +174,9 @@ export default function LoadingPage() {
 
   const nodeHistory = Array.from(new Set(events.map(e => e.data.node).filter(n => n && n !== 'END' && n !== '__start__')));
   const currentNode = isComplete ? null : nodeHistory[nodeHistory.length - 1];
+  const sidePanelWidthClass = showFocusMode
+    ? (showArtifactPanel ? 'w-[320px] lg:w-[400px]' : 'w-[360px] lg:w-[420px]')
+    : (showArtifactPanel ? 'w-[320px] lg:w-[400px]' : 'w-[440px] lg:w-[560px]');
 
   // Auto-scroll node graph to right
   useEffect(() => {
@@ -305,6 +310,90 @@ export default function LoadingPage() {
     }
   };
 
+  const handleEnterClassroomPreparation = async () => {
+    if (!id || isStartingClassroom) {
+      return;
+    }
+
+    setStartClassroomError(null);
+    setIsStartingClassroom(true);
+
+    try {
+      const classroomLookupResponse = await fetch(
+        `/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`,
+        { headers: { Accept: "application/json" } }
+      );
+
+      if (classroomLookupResponse.ok) {
+        const existingPayload = (await classroomLookupResponse.json()) as { run_id?: string };
+        if (existingPayload.run_id) {
+          navigate(`/lesson/${encodeURIComponent(existingPayload.run_id)}`, {
+            state: { classroomLaunchMode: "existing" },
+          });
+          return;
+        }
+      } else if (classroomLookupResponse.status !== 404) {
+        let message = `检查已有课中任务失败（${classroomLookupResponse.status}）`;
+        try {
+          const payload = (await classroomLookupResponse.json()) as {
+            detail?: string | Array<{ msg?: string }>;
+          };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            const firstMessage = payload.detail[0]?.msg;
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage;
+            }
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
+      }
+
+      const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) {
+        let message = `准备课中失败（${response.status}）`;
+        try {
+          const payload = (await response.json()) as {
+            detail?: string | Array<{ msg?: string }>;
+          };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            const firstMessage = payload.detail[0]?.msg;
+            if (typeof firstMessage === "string" && firstMessage.trim()) {
+              message = firstMessage;
+            }
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as { run_id?: string };
+      if (!payload.run_id) {
+        throw new Error("后端未返回课中任务 ID，暂时无法进入课件文稿准备页。");
+      }
+
+      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`, {
+        state: { classroomLaunchMode: "new" },
+      });
+    } catch (error) {
+      setStartClassroomError(
+        error instanceof Error ? error.message : "进入课件文稿准备失败，请稍后重试。"
+      );
+    } finally {
+      setIsStartingClassroom(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-[#09f]/20 transition-colors duration-1000 relative">
 
@@ -312,103 +401,111 @@ export default function LoadingPage() {
       <div className="max-w-[1600px] w-full mx-auto px-6 py-10 md:py-12 flex gap-6 items-center justify-center min-h-screen">
 
 
-        {/* Left Section - Loading Animation */}
-        <AnimatePresence>
-          {!showFocusMode && (
-            <motion.div
-
-              exit={{ opacity: 0, width: 0, scale: 0.95, filter: "blur(20px)", margin: 0, padding: 0 }}
-              transition={{ duration: 0.6, ease: "easeInOut" }}
-              className={`shrink-0 flex flex-col items-center justify-center overflow-hidden transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-[320px] lg:w-[400px]' : 'w-[440px] lg:w-[560px]'}`}
-
-            >
-              {/* Lottie Animation */}
+        {/* Left Section - Shared transition slot */}
+        <motion.div
+          layout
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className={`relative shrink-0 overflow-hidden ${sidePanelWidthClass}`}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            {!showFocusMode ? (
               <motion.div
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8, ease: "easeOut" }}
-
-                className={`relative pointer-events-none z-10 mb-6 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-80 h-80 md:w-96 md:h-96' : 'w-[360px] h-[360px] md:w-[480px] md:h-[480px]'}`}
-
+                key="loading-panel"
+                initial={{ opacity: 0, x: 24, filter: "blur(8px)" }}
+                animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, x: -24, filter: "blur(12px)" }}
+                transition={{ duration: 0.55, ease: "easeInOut" }}
+                className="flex min-h-[520px] flex-col items-center justify-center"
               >
-                <div className="absolute inset-0 bg-[#09f]/5 blur-[80px] rounded-full mx-auto my-auto animate-pulse" />
-                <iframe
-                  src="https://lottie.host/embed/9aa38597-b306-46e0-9153-cc48b8edba2c/y1Nm3ZXwB8.lottie"
-                  className="w-full h-full border-none pointer-events-none relative z-10 mix-blend-multiply"
-                  title="AI Engine Loading"
-                />
-              </motion.div>
-
-              {/* Title & Status (blur + fade transition) */}
-              <div className="text-center h-24">
-                <AnimatePresence mode="wait">
-                  <motion.h1
-                    key={isComplete ? "complete" : "loading"}
-                    initial={{ opacity: 0, filter: "blur(12px)", y: 10 }}
-                    animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-                    exit={{ opacity: 0, filter: "blur(12px)", y: -10 }}
-                    transition={{ duration: 0.6 }}
-                    className={`font-semibold tracking-tight text-foreground mb-3 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl'}`}
-                  >
-                    {isComplete ? '教师备课完成' : '老师正在准备材料...'}
-                  </motion.h1>
-                </AnimatePresence>
-
+                {/* Lottie Animation */}
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.3 }}
-                  className="flex items-center justify-center gap-2 text-muted-foreground font-mono text-sm"
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                  className={`relative pointer-events-none z-10 mb-6 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'w-80 h-80 md:w-96 md:h-96' : 'w-[360px] h-[360px] md:w-[480px] md:h-[480px]'}`}
                 >
-                  {isComplete ? (
-                    <span className="flex items-center text-emerald-500"><CheckCircle2 className="w-5 h-5 mr-2" /> 系统调度已就绪</span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <span className="relative flex h-2.5 w-2.5 mt-[1px]">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#09f] opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#09f]"></span>
-                      </span>
-                      节点执行中
-                    </span>
-                  )}
+                  <div className="absolute inset-0 bg-[#09f]/5 blur-[80px] rounded-full mx-auto my-auto animate-pulse" />
+                  <iframe
+                    src="https://lottie.host/embed/9aa38597-b306-46e0-9153-cc48b8edba2c/y1Nm3ZXwB8.lottie"
+                    className="w-full h-full border-none pointer-events-none relative z-10 mix-blend-multiply"
+                    title="AI Engine Loading"
+                  />
                 </motion.div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
-        {/* The Action Area (Fades in after focus mode starts) */}
-        {showFocusMode && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, ease: "easeOut" }}
-
-            className="w-[320px] lg:w-[400px] shrink-0 flex flex-col items-center justify-center px-4"
-
-          >
-            <div className="w-20 h-20 mb-6 bg-emerald-50 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/10 border border-emerald-100/50">
-              <Check className="w-10 h-10 text-emerald-500" strokeWidth={2.5} />
-            </div>
-            <h2 className="text-3xl font-semibold tracking-tight text-foreground mb-2">
-              备课全部完成
-            </h2>
-            <p className="text-muted-foreground mb-8 max-w-sm text-center">
-              所有 AI 智能体子任务均已正确执行，先进入课前准备区检查素材，再继续准备课中播放。
-            </p>
-            <button
-              onClick={() => {
-                if (id) {
-                  navigate(`/study/${id}?tab=prep-classroom`);
-                }
-              }}
-              className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5"
-            >
-              <CheckCircle2 className="w-5 h-5" />
-              进入课前准备
-            </button>
-          </motion.div>
-        )}
+                <div className="text-center h-28 overflow-hidden">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={isComplete ? "complete" : "loading"}
+                      initial={{ y: "100%", opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={{ y: "-100%", opacity: 0 }}
+                      transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    >
+                      <h1
+                        className={`font-semibold tracking-tight text-foreground mb-3 transition-all duration-700 ease-in-out ${showArtifactPanel ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl'}`}
+                      >
+                        {isComplete ? '教师备课完成' : '老师正在准备材料...'}
+                      </h1>
+                      {isComplete && (
+                        <motion.span
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.3 }}
+                          className="flex items-center justify-center gap-2 text-emerald-500 text-sm"
+                        >
+                          <CheckCircle2 className="w-5 h-5 mr-1" /> 系统调度已就绪
+                        </motion.span>
+                      )}
+                      {!isComplete && (
+                        <span className="flex items-center justify-center gap-2 text-muted-foreground font-mono text-sm">
+                          <span className="relative flex h-2.5 w-2.5 mt-[1px]">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#09f] opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#09f]"></span>
+                          </span>
+                          节点执行中
+                        </span>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="focus-panel"
+                initial={{ opacity: 0, x: 24, filter: "blur(10px)" }}
+                animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, x: -24, filter: "blur(12px)" }}
+                transition={{ duration: 0.55, ease: "easeInOut" }}
+                className="flex min-h-[520px] flex-col items-center justify-center px-4 text-center"
+              >
+                <div className="w-20 h-20 mb-6 bg-emerald-50 dark:bg-emerald-500/10 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/10 border border-emerald-100/50 dark:border-emerald-400/20">
+                  <Check className="w-10 h-10 text-emerald-500" strokeWidth={2.5} />
+                </div>
+                <h2 className="text-3xl font-semibold tracking-tight text-foreground mb-2">
+                  备课全部完成
+                </h2>
+                <p className="text-muted-foreground mb-8 max-w-sm">
+                  所有 AI 智能体子任务均已正确执行，先进入课前准备区检查素材，再继续准备课中播放。
+                </p>
+                <button
+                  onClick={() => {
+                    void handleEnterClassroomPreparation();
+                  }}
+                  disabled={isStartingClassroom}
+                  className="px-8 py-3.5 rounded-full bg-[#09f] hover:bg-[#08e] disabled:bg-[#09f]/60 disabled:hover:bg-[#09f]/60 text-white font-medium flex items-center gap-2 shadow-[0_4px_25px_rgba(0,153,255,0.35)] transition-all hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed"
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  {isStartingClassroom ? "正在进入课件文稿准备..." : "进入课件文稿准备"}
+                </button>
+                {startClassroomError && (
+                  <p className="mt-4 max-w-sm text-sm text-rose-500">
+                    {startClassroomError}
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
 
 
         {/* Middle Section - SSE Event Stream */}
@@ -481,7 +578,7 @@ export default function LoadingPage() {
                   >
                     <button
                       onClick={() => setIsExpanded(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/50 border border-border text-xs text-muted-foreground font-medium hover:bg-accent hover:text-foreground transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/50 border border-border text-xs text-muted-foreground font-medium hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-white/10 dark:hover:text-white transition-colors"
                     >
                       <span>展开 {hiddenCount} 条较早的执行日志</span>
                     </button>
@@ -566,7 +663,7 @@ export default function LoadingPage() {
 
                   <button
                     onClick={() => setShowArtifactPanel(false)}
-                    className="absolute top-4 right-4 shrink-0 p-1.5 rounded-full hover:bg-accent hover:text-foreground text-muted-foreground transition-colors"
+                    className="absolute top-4 right-4 shrink-0 p-1.5 rounded-full text-muted-foreground hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-white/10 dark:hover:text-white transition-colors"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -589,7 +686,7 @@ export default function LoadingPage() {
                           onClick={() => handleOpenFile(file)}
                           className={`shrink-0 px-4 py-1.5 rounded-xl text-sm font-medium transition-all ${isSelected
                             ? 'bg-card text-card-foreground text-[#09f] shadow-sm ring-1 ring-slate-200/50'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                            : 'text-muted-foreground hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-white/10 dark:hover:text-white'
                             }`}
                         >
                           {file.split(/[\\/]/).pop()}
