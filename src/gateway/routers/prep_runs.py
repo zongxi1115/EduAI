@@ -31,9 +31,15 @@ from ..schemas.prep_runs import (
     RunStatus,
     RunStatusResponse,
 )
-from ..services.classroom import build_classroom_request_from_prep_view
+from ..services.classroom import (
+    build_classroom_request_from_prep_view,
+    build_question_classroom_request_from_prep_view,
+)
 from ..services.classroom_tasks import ClassroomTaskRegistry
-from ..services.classroom_tasks import find_existing_run_for_prep_run
+from ..services.classroom_tasks import (
+    find_existing_question_run_for_prep_run,
+    find_existing_run_for_prep_run,
+)
 from ..services.learner_models import LearnerModelService
 from ..services.prep_runs import (
     build_artifacts_response,
@@ -269,6 +275,77 @@ def get_existing_classroom_for_prep_run(
         raise HTTPException(
             status_code=404,
             detail="No classroom task is linked to this prep run yet.",
+        )
+    return _build_classroom_task_created_response(existing_view)
+
+
+@router.post(
+    "/{run_id}/practice-questions/{question_id}/classroom",
+    response_model=ClassroomTaskCreatedResponse,
+    summary="基于单道练习题创建一页幻灯讲解",
+    description=(
+        "读取指定课前准备任务中的 practice_questions.json，定位单道练习题，"
+        "并创建只包含一页幻灯片的 AI 课堂任务。"
+    ),
+    response_description="新创建或已存在的单题讲解任务信息与后续访问链接。",
+)
+def create_question_classroom_from_prep_run(
+    registry: RunRegistryDep,
+    classroom_registry: ClassroomTaskRegistryDep,
+    settings: SettingsDep,
+    run_id: str = ApiPath(description="课前准备任务的唯一标识符。"),
+    question_id: str = ApiPath(description="练习题唯一标识符。"),
+    slide_prompt_file: str = Query(
+        "slide.md",
+        min_length=1,
+        description="用于生成课堂 HTML 卡片的提示词文件名。",
+    ),
+) -> ClassroomTaskCreatedResponse:
+    existing_view = find_existing_question_run_for_prep_run(
+        classroom_registry,
+        run_id,
+        question_id,
+    )
+    if existing_view is not None:
+        return _build_classroom_task_created_response(existing_view)
+
+    prep_view = load_run_view(registry, settings, run_id)
+    classroom_request = build_question_classroom_request_from_prep_view(
+        prep_view,
+        question_id=question_id,
+        slide_prompt_file=slide_prompt_file,
+    )
+    session = classroom_registry.create_run(classroom_request)
+    return ClassroomTaskCreatedResponse(
+        run_id=session.run_id,
+        status=session.status,
+        created_at=session.created_at,
+        output_dir=str(session.output_dir),
+        links=_build_classroom_links(session.run_id),
+    )
+
+
+@router.get(
+    "/{run_id}/practice-questions/{question_id}/classroom",
+    response_model=ClassroomTaskCreatedResponse,
+    summary="查询单道练习题是否已有一页幻灯讲解",
+    description="如果该练习题已经创建过对应的一页 AI 课堂任务，则返回已有任务基础信息。",
+    response_description="已存在的单题讲解任务基础信息。",
+)
+def get_existing_question_classroom_for_prep_run(
+    classroom_registry: ClassroomTaskRegistryDep,
+    run_id: str = ApiPath(description="课前准备任务的唯一标识符。"),
+    question_id: str = ApiPath(description="练习题唯一标识符。"),
+) -> ClassroomTaskCreatedResponse:
+    existing_view = find_existing_question_run_for_prep_run(
+        classroom_registry,
+        run_id,
+        question_id,
+    )
+    if existing_view is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No question classroom task is linked to this practice question yet.",
         )
     return _build_classroom_task_created_response(existing_view)
 

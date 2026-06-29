@@ -23,7 +23,7 @@ from edu_multi_agent.llm import LLMClient
 
 from ..schemas.classroom import ClassroomGenerateRequest
 from ..schemas.prep_runs import RunStatus
-from .classroom import run_classroom_workflow
+from .classroom import run_classroom_workflow, run_question_slide_workflow
 from .classroom_voice import ClassroomVoiceService
 
 
@@ -148,7 +148,12 @@ class ClassroomTaskRegistry:
                 },
             )
             _copy_prep_media_to_classroom_dir(session)
-            result = run_classroom_workflow(
+            workflow_runner = (
+                run_question_slide_workflow
+                if session.request.source_mode == "practice_question"
+                else run_classroom_workflow
+            )
+            result = workflow_runner(
                 session.request,
                 self.llm_client,
                 self.outline_agent,
@@ -356,7 +361,10 @@ def find_existing_run_for_prep_run(
         session = registry.get_session(run_id)
         if session is None:
             continue
-        if session.request.source_prep_run_id == normalized_run_id:
+        if (
+            session.request.source_prep_run_id == normalized_run_id
+            and _is_full_lesson_request(session.request.model_dump(mode="json"))
+        ):
             return build_run_view_from_session(session)
 
     if not registry.output_root.is_dir():
@@ -370,6 +378,8 @@ def find_existing_run_for_prep_run(
         if not isinstance(request_payload, dict):
             continue
         if str(request_payload.get("source_prep_run_id") or "").strip() != normalized_run_id:
+            continue
+        if not _is_full_lesson_request(request_payload):
             continue
         try:
             candidate_views.append(build_run_view_from_disk(registry, run_dir.name))
@@ -387,6 +397,67 @@ def find_existing_run_for_prep_run(
         reverse=True,
     )
     return candidate_views[0]
+
+
+def find_existing_question_run_for_prep_run(
+    registry: ClassroomTaskRegistry,
+    source_prep_run_id: str,
+    source_question_id: str,
+) -> dict[str, Any] | None:
+    normalized_run_id = source_prep_run_id.strip()
+    normalized_question_id = source_question_id.strip()
+    if not normalized_run_id or not normalized_question_id:
+        return None
+
+    for run_id in registry.list_session_ids():
+        session = registry.get_session(run_id)
+        if session is None:
+            continue
+        if (
+            session.request.source_prep_run_id == normalized_run_id
+            and session.request.source_question_id == normalized_question_id
+            and session.request.source_mode == "practice_question"
+        ):
+            return build_run_view_from_session(session)
+
+    if not registry.output_root.is_dir():
+        return None
+
+    candidate_views: list[dict[str, Any]] = []
+    for run_dir in registry.output_root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        request_payload = load_json_file(run_dir / REQUEST_FILENAME)
+        if not isinstance(request_payload, dict):
+            continue
+        if str(request_payload.get("source_prep_run_id") or "").strip() != normalized_run_id:
+            continue
+        if str(request_payload.get("source_question_id") or "").strip() != normalized_question_id:
+            continue
+        if request_payload.get("source_mode") != "practice_question":
+            continue
+        try:
+            candidate_views.append(build_run_view_from_disk(registry, run_dir.name))
+        except HTTPException:
+            continue
+
+    if not candidate_views:
+        return None
+
+    candidate_views.sort(
+        key=lambda view: (
+            str(view.get("created_at") or ""),
+            str(view.get("run_id") or ""),
+        ),
+        reverse=True,
+    )
+    return candidate_views[0]
+
+
+def _is_full_lesson_request(request_payload: dict[str, Any]) -> bool:
+    source_mode = str(request_payload.get("source_mode") or "full_lesson").strip()
+    source_question_id = str(request_payload.get("source_question_id") or "").strip()
+    return source_mode == "full_lesson" and not source_question_id
 
 
 def load_stored_events(registry: ClassroomTaskRegistry, run_id: str) -> list[dict[str, Any]]:

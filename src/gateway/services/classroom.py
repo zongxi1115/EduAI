@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from classroom.graph import GraphEventCallback, build_graph
 from classroom.parser import ScriptParseError, parse_script
+from classroom.state import PageBlueprint
 
 from edu_multi_agent.models import ArtifactResult, GenerationRequest
 from edu_multi_agent.llm import LLMClient
@@ -68,6 +69,51 @@ def run_classroom_workflow(
     try:
         graph = build_graph(
             outline_agent=outline_node,
+            llm=llm_client.model,
+            slide_prompt_file=payload.slide_prompt_file,
+            event_callback=event_callback,
+        )
+        result = graph.invoke(
+            {
+                "topic": payload.topic,
+                "materials": payload.materials,
+                "media_resources": payload.media_resources,
+            }
+        )
+    except ScriptParseError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"生成的课堂讲稿不符合解析规则：{exc}",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return build_generate_response(
+        result,
+        topic=payload.topic,
+        materials=payload.materials,
+        outline_source=outline_source,
+    )
+
+
+def run_question_slide_workflow(
+    payload: ClassroomGenerateRequest,
+    llm_client: LLMClient,
+    outline_agent: Any | None = None,
+    *,
+    event_callback: GraphEventCallback | None = None,
+) -> ClassroomGenerateResponse:
+    """Run the classroom workflow with a deterministic one-page question plan."""
+
+    outline_node, outline_source = resolve_outline_node(
+        inline_outline=payload.outline,
+        outline_agent=outline_agent,
+    )
+
+    try:
+        graph = build_graph(
+            outline_agent=outline_node,
+            page_plan_agent=_question_slide_page_plan_node,
             llm=llm_client.model,
             slide_prompt_file=payload.slide_prompt_file,
             event_callback=event_callback,
@@ -254,6 +300,184 @@ def build_classroom_request_from_prep_view(
         )
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+def build_question_classroom_request_from_prep_view(
+    view: Mapping[str, Any],
+    *,
+    question_id: str,
+    slide_prompt_file: str = "slide.md",
+) -> ClassroomGenerateRequest:
+    """Build a one-slide classroom request for a single generated practice question."""
+
+    run_id = str(view.get("run_id") or "").strip()
+    if not run_id:
+        raise HTTPException(status_code=422, detail="Prep run view is missing run_id.")
+
+    status = view.get("status")
+    if status != RunStatus.succeeded:
+        raise HTTPException(
+            status_code=409,
+            detail="课前任务尚未完成，暂时不能生成单题讲解。",
+        )
+
+    request = _coerce_generation_request(view.get("request"))
+    if request is None:
+        raise HTTPException(
+            status_code=422,
+            detail="课前任务缺少原始请求，无法组装单题讲解参数。",
+        )
+
+    output_dir_raw = view.get("output_dir")
+    if not isinstance(output_dir_raw, str) or not output_dir_raw.strip():
+        raise HTTPException(status_code=422, detail="Prep run view is missing output_dir.")
+    output_dir = Path(output_dir_raw)
+
+    artifacts = _coerce_artifacts(view.get("artifacts"))
+    question, question_index = _find_practice_question(
+        artifacts=artifacts,
+        output_dir=output_dir,
+        question_id=question_id,
+    )
+    question_title = f"第 {question_index} 题讲解"
+    question_summary = _summarize_question_for_title(question)
+    outline = _build_question_slide_outline(
+        prep_run_id=run_id,
+        request=request,
+        question=question,
+        question_index=question_index,
+    )
+    materials = [
+        _format_request_material(request),
+        "[单题讲解任务]\n"
+        + json.dumps(
+            {
+                "question_index": question_index,
+                "question": question,
+                "teaching_goal": "用一页幻灯片完成读题、关键知识点、解题路径、答案解释和常见误区提醒。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+    ]
+
+    try:
+        return ClassroomGenerateRequest(
+            topic=f"{question_title}：{question_summary}",
+            materials=materials,
+            outline=outline,
+            media_resources=[],
+            source_prep_run_id=run_id,
+            source_mode="practice_question",
+            source_question_id=question_id,
+            slide_prompt_file=slide_prompt_file,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+def _question_slide_page_plan_node(state: Mapping[str, Any]) -> dict[str, list[PageBlueprint]]:
+    outline = state.get("outline") if isinstance(state.get("outline"), Mapping) else {}
+    question = outline.get("practice_question") if isinstance(outline, Mapping) else {}
+    question_index = int(outline.get("question_index") or 1) if isinstance(outline, Mapping) else 1
+    skill_tags = _clean_string_list(question.get("skill_tags")) if isinstance(question, Mapping) else []
+    question_text = str(question.get("question") or "").strip() if isinstance(question, Mapping) else ""
+    key_points = skill_tags[:3] or ["读懂题意", "定位关键知识点", "解释答案与常见误区"]
+    material_focus = [question_text[:220]] if question_text else ["当前练习题"]
+
+    return {
+        "page_blueprints": [
+            {
+                "idx": 0,
+                "theme": f"第 {question_index} 题讲解",
+                "objective": "读懂题意、定位关键知识点、解释正确思路和常见误区",
+                "key_points": key_points,
+                "target_reveal_count": 4,
+                "quiz_goal": None,
+                "source_storyboard_block_id": "practice-question",
+                "material_focus": material_focus,
+                "visual_plan": "题目卡 + 解题路径 + 误区对比 + 答案归纳",
+                "layout_style": "quiz-diagnostic",
+                "interaction_plan": "先读题圈出条件，再逐步揭示解题路径，最后对照答案和误区。",
+                "suggested_media_types": [],
+            }
+        ]
+    }
+
+
+def _build_question_slide_outline(
+    *,
+    prep_run_id: str,
+    request: GenerationRequest,
+    question: dict[str, Any],
+    question_index: int,
+) -> dict[str, Any]:
+    return {
+        "source_prep_run_id": prep_run_id,
+        "source_mode": "practice_question",
+        "learning_goal": request.learning_goal,
+        "subject": request.subject,
+        "grade_level": request.grade_level,
+        "learner_id": request.learner_id,
+        "learner_profile": request.learner_profile,
+        "notes": request.notes,
+        "language": request.language,
+        "graph_context": (
+            request.graph_context.model_dump(mode="json")
+            if request.graph_context is not None
+            else None
+        ),
+        "question_index": question_index,
+        "practice_question": question,
+        "lesson_storyboard_policy": {
+            "role": "单题讲解固定为一页幻灯片",
+            "adaptation_required": False,
+        },
+    }
+
+
+def _find_practice_question(
+    *,
+    artifacts: list[ArtifactResult],
+    output_dir: Path,
+    question_id: str,
+) -> tuple[dict[str, Any], int]:
+    normalized_question_id = question_id.strip()
+    if not normalized_question_id:
+        raise HTTPException(status_code=422, detail="question_id is required.")
+
+    for artifact in artifacts:
+        if artifact.agent_name != "practice":
+            continue
+        for raw_path in artifact.files:
+            path = Path(str(raw_path))
+            if path.name != "practice_questions.json":
+                continue
+            if not path.is_absolute():
+                path = output_dir / path
+            if not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail="练习题 JSON 无法读取。") from exc
+            if not isinstance(payload, list):
+                raise HTTPException(status_code=422, detail="练习题 JSON 结构无效。")
+
+            for index, item in enumerate(payload, start=1):
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("id") or item.get("question_id") or "").strip()
+                if item_id == normalized_question_id:
+                    return dict(item), index
+
+    raise HTTPException(status_code=404, detail="未找到指定练习题。")
+
+
+def _summarize_question_for_title(question: Mapping[str, Any]) -> str:
+    text = str(question.get("question") or question.get("prompt") or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text[:36] or str(question.get("question_type") or "练习题")
 
 
 def build_generate_response(

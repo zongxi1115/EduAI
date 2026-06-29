@@ -1,4 +1,5 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AlertCircle, ChevronDown, ChevronUp, ClipboardCheck, FileDown, LoaderCircle, Sparkles, Upload, CheckCircle2, XCircle, AlertTriangle, HelpCircle } from "lucide-react";
 import { marked } from "marked";
 import katex from "katex";
@@ -146,6 +147,16 @@ interface QuestionReviewState {
   answerPreview: string;
   review?: PracticeReviewResponse;
   error?: string;
+}
+
+type QuestionSlideState =
+  | { status: "idle" }
+  | { status: "creating" }
+  | { status: "error"; message: string };
+
+interface QuestionClassroomResponse {
+  run_id?: string;
+  status?: string;
 }
 
 interface PracticeReviewCapabilitiesResponse {
@@ -1896,7 +1907,9 @@ export function PracticeQuestionWorkspace({
   emptyHint = "当前还没有可展示的练习题，请等待题库生成完成。",
   onReviewStatesChange,
 }: PracticeQuestionWorkspaceProps) {
+  const navigate = useNavigate();
   const [reviewStates, setReviewStates] = useState<Record<string, QuestionReviewState>>({});
+  const [questionSlideStates, setQuestionSlideStates] = useState<Record<string, QuestionSlideState>>({});
   const [reviewCapabilities, setReviewCapabilities] =
     useState<PracticeReviewCapabilitiesResponse | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -1959,6 +1972,78 @@ export function PracticeQuestionWorkspace({
   useEffect(() => {
     void loadReviewCapabilities();
   }, []);
+
+  const handleOpenQuestionSlide = async (question: PracticeQuestionRecord) => {
+    const prepRunId = sessionId?.trim();
+    if (!prepRunId) {
+      setQuestionSlideStates((previous) => ({
+        ...previous,
+        [question.id]: {
+          status: "error",
+          message: "当前题目没有关联课前任务，暂时不能生成幻灯讲解。",
+        },
+      }));
+      return;
+    }
+
+    if (questionSlideStates[question.id]?.status === "creating") {
+      return;
+    }
+
+    setQuestionSlideStates((previous) => ({
+      ...previous,
+      [question.id]: { status: "creating" },
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/v1/prep-runs/${encodeURIComponent(prepRunId)}/practice-questions/${encodeURIComponent(question.id)}/classroom`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        let message = `幻灯讲解创建失败（${response.status}）`;
+        try {
+          const payload = (await response.json()) as { detail?: unknown };
+          if (typeof payload.detail === "string" && payload.detail.trim()) {
+            message = payload.detail;
+          }
+        } catch {
+          // Keep the fallback message when the response is not JSON.
+        }
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as QuestionClassroomResponse;
+      if (!payload.run_id) {
+        throw new Error("后端未返回课堂任务 ID，暂时无法打开幻灯讲解。");
+      }
+
+      navigate(`/lesson/${encodeURIComponent(payload.run_id)}`, {
+        state: {
+          classroomLaunchMode: payload.status === "succeeded" ? "existing" : "new",
+        },
+      });
+    } catch (error) {
+      setQuestionSlideStates((previous) => ({
+        ...previous,
+        [question.id]: {
+          status: "error",
+          message: error instanceof Error ? error.message : "幻灯讲解创建失败，请稍后重试。",
+        },
+      }));
+    }
+  };
+
+  const getQuestionSlideError = (questionId: string) => {
+    const slideState = questionSlideStates[questionId];
+    return slideState?.status === "error" ? slideState.message : null;
+  };
 
   const persistReviewedEvent = async (
     question: PracticeQuestionRecord,
@@ -2380,37 +2465,66 @@ export function PracticeQuestionWorkspace({
       ) : null}
 
       {!isLoading && !error && questions.length > 0
-        ? questions.map((question, index) => (
+        ? questions.map((question, index) => {
+          const questionSlideError = getQuestionSlideError(question.id);
+          const isCreatingQuestionSlide = questionSlideStates[question.id]?.status === "creating";
+
+          return (
           <section key={question.id} id={`question-${question.id}`} className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-full font-semibold text-white shadow-sm"
-                style={{ backgroundColor: PDF_TYPE_ACCENT[question.question_type] }}
-              >
-                {index + 1}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div
+                  className="flex h-8 w-8 items-center justify-center rounded-full font-semibold text-white shadow-sm"
+                  style={{ backgroundColor: PDF_TYPE_ACCENT[question.question_type] }}
+                >
+                  {index + 1}
+                </div>
+                <Badge
+                  variant="outline"
+                  className={`px-2.5 py-0.5 text-xs font-medium ${QUESTION_TYPE_BADGE_CLASS[question.question_type]}`}
+                >
+                  {QUESTION_TYPE_LABELS[question.question_type]}
+                </Badge>
+                {questionNeedsAIJudge(question) ? (
+                  <Badge variant="outline" className="border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600">
+                    <Sparkles className="mr-1 h-3 w-3" />
+                    AI批阅
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="border-gray-300 bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                    自动判题
+                  </Badge>
+                )}
               </div>
-              <Badge
+
+              <Button
+                type="button"
                 variant="outline"
-                className={`px-2.5 py-0.5 text-xs font-medium ${QUESTION_TYPE_BADGE_CLASS[question.question_type]}`}
+                size="sm"
+                className="border-indigo-200 bg-white text-indigo-600 hover:bg-indigo-50"
+                disabled={isCreatingQuestionSlide}
+                onClick={() => void handleOpenQuestionSlide(question)}
               >
-                {QUESTION_TYPE_LABELS[question.question_type]}
-              </Badge>
-              {questionNeedsAIJudge(question) ? (
-                <Badge variant="outline" className="border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600">
-                  <Sparkles className="mr-1 h-3 w-3" />
-                  AI批阅
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="border-gray-300 bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                  自动判题
-                </Badge>
-              )}
+                {isCreatingQuestionSlide ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {isCreatingQuestionSlide ? "正在生成" : "幻灯讲解"}
+              </Button>
             </div>
+
+            {questionSlideError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+                {questionSlideError}
+              </div>
+            ) : null}
 
             {renderQuestionCard(question, handleQuestionSubmit)}
             <QuestionReviewPanel state={reviewStates[question.id]} />
           </section>
-        ))
+          );
+        })
         : null}
     </div>
   );

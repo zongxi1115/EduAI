@@ -28,6 +28,14 @@ class ClassroomGenerateRequest(BaseModel):
         default=None,
         description="若该课堂由某个课前准备任务衍生而来，则记录对应的课前 run_id。",
     )
+    source_mode: Literal["full_lesson", "practice_question"] = Field(
+        default="full_lesson",
+        description="课堂来源模式：整节课讲解或单道练习题讲解。",
+    )
+    source_question_id: str | None = Field(
+        default=None,
+        description="若该课堂由单道练习题衍生而来，则记录题目唯一标识。",
+    )
     outline: Any | None = Field(
         default=None,
         description=(
