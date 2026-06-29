@@ -244,6 +244,7 @@ def list_run_views(
     settings: Settings,
     *,
     status: RunStatus | None = None,
+    learner_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all known runs from memory and disk, optionally filtered by status."""
     run_ids = set(registry.list_session_ids())
@@ -261,6 +262,10 @@ def list_run_views(
         except HTTPException:
             continue
         if status is not None and view.get("status") != status:
+            continue
+        request = view.get("request")
+        view_learner_id = request.learner_id if isinstance(request, GenerationRequest) else None
+        if learner_id is not None and view_learner_id != learner_id:
             continue
         views.append(view)
 

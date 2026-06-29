@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "motion/react"
 import { useState, useEffect, useLayoutEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock, Network } from "lucide-react"
+import { ChevronDown, ChevronUp, Sparkles, Send, BookOpen, GraduationCap, User2, Settings2, Lightbulb, Calculator, History, Beaker, Languages, LoaderCircle, Plus, PanelLeftClose, PanelLeft, Clock, Network, LogIn, LogOut } from "lucide-react"
 
 import { PromptInput, PromptInputTextarea, PromptInputActions, PromptInputAction } from "@/components/ui/prompt-input"
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion"
@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import homepageBackground from "@/assets/homepage.png"
+import { useAuth } from "@/lib/auth"
+import { getOrCreateGuestLearnerId } from "@/lib/learner"
 
 const SUGGESTIONS = [
   // Row 1
@@ -44,7 +46,6 @@ const PHRASES = [
 const INITIAL_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "政治", "地理"]
 const INITIAL_GRADES = ["幼教", "小学低段", "小学高段", "初中", "高中", "大学与成人"]
 const INITIAL_TEACHER_STYLES = ["幽默风趣", "严谨专业", "鼓励启发", "互动探究", "引经据典", "生活化", "高能硬核"]
-const LEARNER_ID_STORAGE_KEY = "edu-demo-learner-id"
 
 interface PrepRun {
   run_id: string;
@@ -65,24 +66,6 @@ interface PrepRunListResponse {
 
 function normalizeTaskGoal(goal: string) {
   return goal.trim().replace(/\s+/g, " ")
-}
-
-function getOrCreateLearnerId() {
-  if (typeof window === "undefined") {
-    return "browser-demo-learner"
-  }
-
-  const existing = window.localStorage.getItem(LEARNER_ID_STORAGE_KEY)?.trim()
-  if (existing) {
-    return existing
-  }
-
-  const nextId =
-    typeof window.crypto?.randomUUID === "function"
-      ? `browser_${window.crypto.randomUUID()}`
-      : `browser_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-  window.localStorage.setItem(LEARNER_ID_STORAGE_KEY, nextId)
-  return nextId
 }
 
 function CustomEditableTag({ onAdd }: { onAdd: (val: string) => void }) {
@@ -145,9 +128,12 @@ export default function HomePage() {
   const [customReq, setCustomReq] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [learnerId] = useState(() => getOrCreateLearnerId())
+  const [guestLearnerId] = useState(() => getOrCreateGuestLearnerId())
 
   const navigate = useNavigate()
+  const { user, isAuthLoading, logout } = useAuth()
+  const learnerId = user?.learner_id ?? guestLearnerId
+  const userLabel = user?.display_name || user?.username
 
   // Phasing Title setup
   const [phraseIndex, setPhraseIndex] = useState(0)
@@ -160,6 +146,7 @@ export default function HomePage() {
 
   useEffect(() => {
     let active = true
+    setIsLoadingHistory(true)
 
     async function fetchHistory() {
       try {
@@ -342,6 +329,40 @@ export default function HomePage() {
   return (
     <div className="min-h-screen w-full flex bg-[#fafafa] dark:bg-zinc-950 overflow-hidden">
       <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+        {user ? (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate(`/profile?learner_id=${encodeURIComponent(learnerId)}`)}
+              className="max-w-36 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm gap-1.5 h-9 px-3"
+              title={userLabel}
+            >
+              <User2 className="w-4 h-4" />
+              <span className="truncate text-sm font-medium">{userLabel}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => void logout()}
+              className="text-zinc-500 hover:text-red-500 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm"
+              title="退出登录"
+            >
+              <LogOut className="w-4 h-4" />
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/login")}
+            disabled={isAuthLoading}
+            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50 rounded-xl shadow-sm gap-1.5 h-9 px-3"
+          >
+            <LogIn className="w-4 h-4" />
+            <span className="text-sm font-medium">登录/注册</span>
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"

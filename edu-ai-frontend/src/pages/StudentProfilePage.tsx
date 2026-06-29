@@ -16,9 +16,9 @@ import {
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth";
+import { getOrCreateGuestLearnerId } from "@/lib/learner";
 import { cn } from "@/lib/utils";
-
-const LEARNER_ID_STORAGE_KEY = "edu-demo-learner-id";
 
 type AbilityBand =
   | "evidence_needed"
@@ -150,17 +150,6 @@ const RECOMMENDATION_LABELS: Record<RecommendationType, string> = {
   advance: "进阶",
   challenge: "挑战",
 };
-
-function getInitialLearnerId() {
-  if (typeof window === "undefined") {
-    return "browser-demo-learner";
-  }
-
-  return (
-    window.localStorage.getItem(LEARNER_ID_STORAGE_KEY)?.trim() ||
-    "browser-demo-learner"
-  );
-}
 
 function toPercent(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -675,16 +664,25 @@ function EmptyState({
 export default function StudentProfilePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user } = useAuth();
+  const [guestLearnerId] = useState(() => getOrCreateGuestLearnerId());
   const queryLearnerId = searchParams.get("learner_id")?.trim();
-  const initialLearnerId = queryLearnerId || getInitialLearnerId();
+  const defaultLearnerId = user?.learner_id ?? guestLearnerId;
+  const initialLearnerId = queryLearnerId || defaultLearnerId;
   const [submittedLearnerId, setSubmittedLearnerId] =
     useState(initialLearnerId);
   const [inputLearnerId, setInputLearnerId] = useState(initialLearnerId);
-  const activeLearnerId = (queryLearnerId || submittedLearnerId).trim();
+  const activeLearnerId = (queryLearnerId || submittedLearnerId || defaultLearnerId).trim();
   const [data, setData] = useState<LearnerModelData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    const nextLearnerId = queryLearnerId || defaultLearnerId;
+    setSubmittedLearnerId(nextLearnerId);
+    setInputLearnerId(nextLearnerId);
+  }, [defaultLearnerId, queryLearnerId]);
 
   useEffect(() => {
     if (!activeLearnerId) {

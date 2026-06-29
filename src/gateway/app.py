@@ -8,6 +8,7 @@ from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
 
 from .routers.assistant import router as assistant_router
+from .routers.auth import router as auth_router
 from .routers.classroom import router as classroom_router
 from .routers.code_execution import router as code_execution_router
 from .routers.health import router as health_router
@@ -18,12 +19,17 @@ from .routers.practice_review import router as practice_review_router
 from .services.classroom_tasks import ClassroomTaskRegistry
 from .services.learner_models import LearnerModelRepository, LearnerModelService
 from .services.run_registry import RunRegistry
+from .services.users import UserService
 
 
 OPENAPI_TAGS = [
     {
         "name": "系统",
         "description": "系统级接口，例如健康检查。",
+    },
+    {
+        "name": "用户认证",
+        "description": "本地轻量用户系统，用于注册、登录、退出和获取当前用户。",
     },
     {
         "name": "课前准备任务",
@@ -100,6 +106,7 @@ def create_app(
     registry = RunRegistry(resolved_settings)
     resolved_llm_client = llm_client or LLMClient(resolved_settings)
     learner_model_service = LearnerModelService(LearnerModelRepository(resolved_settings))
+    user_service = UserService(resolved_settings)
     classroom_task_registry = ClassroomTaskRegistry(
         resolved_settings,
         resolved_llm_client,
@@ -131,10 +138,12 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.llm_client = resolved_llm_client
     app.state.learner_model_service = learner_model_service
+    app.state.user_service = user_service
     app.state.classroom_outline_agent = classroom_outline_agent
     app.state.classroom_task_registry = classroom_task_registry
 
     app.include_router(assistant_router)
+    app.include_router(auth_router)
     app.include_router(classroom_router)
     app.include_router(code_execution_router)
     app.include_router(health_router)

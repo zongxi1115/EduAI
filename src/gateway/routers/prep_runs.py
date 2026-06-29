@@ -17,9 +17,11 @@ from edu_multi_agent.models import GenerationRequest
 from ..dependencies import (
     get_classroom_task_registry,
     get_learner_model_service,
+    get_optional_current_user,
     get_run_registry,
     get_settings,
 )
+from ..schemas.auth import AuthUser
 from ..schemas.classroom import (
     ClassroomTaskCreatedResponse,
     ClassroomTaskLinks,
@@ -61,6 +63,7 @@ RunRegistryDep = Annotated[RunRegistry, Depends(get_run_registry)]
 ClassroomTaskRegistryDep = Annotated[ClassroomTaskRegistry, Depends(get_classroom_task_registry)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 LearnerModelServiceDep = Annotated[LearnerModelService, Depends(get_learner_model_service)]
+CurrentUserDep = Annotated[AuthUser | None, Depends(get_optional_current_user)]
 
 RUN_EVENTS_SSE_EXAMPLE = """event: run_created
 id: 0
@@ -140,9 +143,15 @@ def create_prep_run(
     payload: GenerationRequest,
     registry: RunRegistryDep,
     learner_model_service: LearnerModelServiceDep,
+    current_user: CurrentUserDep,
 ) -> RunCreatedResponse:
     """创建新任务，并立即返回可跟踪该任务的元信息。"""
-    session = registry.create_run(learner_model_service.enrich_generation_request(payload))
+    scoped_payload = (
+        payload.model_copy(update={"learner_id": current_user.learner_id})
+        if current_user is not None
+        else payload
+    )
+    session = registry.create_run(learner_model_service.enrich_generation_request(scoped_payload))
     return RunCreatedResponse(
         run_id=session.run_id,
         status=session.status,

@@ -36,6 +36,12 @@ class Settings:
     )
     tts_max_workers: int = 4
     debug_disable_voice: bool = True
+    auth_secret: str = ""
+    zx_auth_issuer_url: str = ""
+    zx_auth_client_id: str = ""
+    zx_auth_client_secret: str = ""
+    zx_auth_redirect_uri: str = ""
+    zx_auth_scope: str = "openid profile email"
 
     @classmethod
     def from_env(cls, env_path: str | None = None) -> "Settings":
@@ -67,6 +73,12 @@ class Settings:
         )
         tts_max_workers = max(1, int(os.getenv("TTS_MAX_WORKERS", "4")))
         debug_disable_voice = _env_flag("DEBUG_DISABLE_VOICE", True)
+        auth_secret = os.getenv("AUTH_SECRET", "").strip() or api_key
+        zx_auth_issuer_url = _normalize_url(os.getenv("ZX_AUTH_ISSUER_URL", "").strip())
+        zx_auth_client_id = os.getenv("ZX_AUTH_CLIENT_ID", "").strip()
+        zx_auth_client_secret = os.getenv("ZX_AUTH_CLIENT_SECRET", "").strip()
+        zx_auth_redirect_uri = os.getenv("ZX_AUTH_REDIRECT_URI", "").strip()
+        zx_auth_scope = os.getenv("ZX_AUTH_SCOPE", "openid profile email").strip() or "openid profile email"
 
         missing = [
             name
@@ -98,4 +110,18 @@ class Settings:
             tts_style_prompt=tts_style_prompt,
             tts_max_workers=tts_max_workers,
             debug_disable_voice=debug_disable_voice,
+            auth_secret=auth_secret,
+            zx_auth_issuer_url=zx_auth_issuer_url,
+            zx_auth_client_id=zx_auth_client_id,
+            zx_auth_client_secret=zx_auth_client_secret,
+            zx_auth_redirect_uri=zx_auth_redirect_uri,
+            zx_auth_scope=zx_auth_scope,
         )
+
+
+def _normalize_url(value: str) -> str:
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://")):
+        return value.rstrip("/")
+    return f"https://{value.rstrip('/')}"

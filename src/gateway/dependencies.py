@@ -7,9 +7,11 @@ from fastapi import Request
 from edu_multi_agent.config import Settings
 from edu_multi_agent.llm import LLMClient
 
+from .schemas.auth import AuthUser
 from .services.learner_models import LearnerModelService
 from .services.classroom_tasks import ClassroomTaskRegistry
 from .services.run_registry import RunRegistry
+from .services.users import AUTH_COOKIE_NAME, UserService
 
 
 def get_settings(request: Request) -> Settings:
@@ -40,3 +42,14 @@ def get_classroom_outline_agent(request: Request) -> Any | None:
 def get_classroom_task_registry(request: Request) -> ClassroomTaskRegistry:
     """Return the classroom task registry stored on FastAPI state."""
     return cast(ClassroomTaskRegistry, request.app.state.classroom_task_registry)
+
+
+def get_user_service(request: Request) -> UserService:
+    """Return the local user service stored on FastAPI state."""
+    return cast(UserService, request.app.state.user_service)
+
+
+def get_optional_current_user(request: Request) -> AuthUser | None:
+    """Return the current cookie-authenticated user when present."""
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    return get_user_service(request).user_from_token(token)

@@ -10,6 +10,8 @@ import {
   Play,
   LoaderCircle,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth";
+import { getOrCreateGuestLearnerId } from "@/lib/learner";
 
 /* ───────── Types ───────── */
 
@@ -104,20 +106,6 @@ const EDGE_RELATION_COLORS: Record<string, string> = {
   supports: "#94a3b8",
 };
 
-const LEARNER_ID_KEY = "edu-demo-learner-id";
-
-function getOrCreateLearnerId(): string {
-  if (typeof window === "undefined") return "browser-demo-learner";
-  const existing = window.localStorage.getItem(LEARNER_ID_KEY)?.trim();
-  if (existing) return existing;
-  const next =
-    typeof window.crypto?.randomUUID === "function"
-      ? `browser_${window.crypto.randomUUID()}`
-      : `browser_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  window.localStorage.setItem(LEARNER_ID_KEY, next);
-  return next;
-}
-
 interface CreatePrepRunResponse {
   run_id?: string;
 }
@@ -139,7 +127,9 @@ export default function KnowledgeGraphPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [learningTaskId, setLearningTaskId] = useState<string | null>(null);
-  const [learnerId] = useState(() => getOrCreateLearnerId());
+  const [guestLearnerId] = useState(() => getOrCreateGuestLearnerId());
+  const { user } = useAuth();
+  const learnerId = user?.learner_id ?? guestLearnerId;
 
   /* ── Data loading ── */
 
