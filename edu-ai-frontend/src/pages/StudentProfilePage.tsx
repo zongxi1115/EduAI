@@ -144,11 +144,11 @@ const BAND_STYLES: Record<AbilityBand, string> = {
 };
 
 const RECOMMENDATION_LABELS: Record<RecommendationType, string> = {
-  diagnose: "诊断",
-  remediate: "补弱",
-  consolidate: "巩固",
-  advance: "进阶",
-  challenge: "挑战",
+  diagnose: "先确认卡点",
+  remediate: "补薄弱点",
+  consolidate: "巩固一下",
+  advance: "学下一步",
+  challenge: "挑战提升",
 };
 
 function toPercent(value: number | null | undefined) {
@@ -667,6 +667,11 @@ export default function StudentProfilePage() {
   const { user } = useAuth();
   const [guestLearnerId] = useState(() => getOrCreateGuestLearnerId());
   const queryLearnerId = searchParams.get("learner_id")?.trim();
+  const queryScope = searchParams.get("scope")?.trim() || "recent";
+  const queryDatasetId = searchParams.get("dataset_id")?.trim() || "";
+  const queryCourseId = searchParams.get("course_id")?.trim() || "";
+  const queryGraphNodeId = searchParams.get("graph_node_id")?.trim() || "";
+  const querySessionId = searchParams.get("session_id")?.trim() || "";
   const defaultLearnerId = user?.learner_id ?? guestLearnerId;
   const initialLearnerId = queryLearnerId || defaultLearnerId;
   const [submittedLearnerId, setSubmittedLearnerId] =
@@ -698,12 +703,18 @@ export default function StudentProfilePage() {
       }
     });
 
-    fetch(
-      `/api/v1/learner-models/${encodeURIComponent(activeLearnerId)}?event_limit=30`,
-      {
-        signal: controller.signal,
-      },
-    )
+    const profileParams = new URLSearchParams({
+      event_limit: "30",
+      scope: queryScope,
+    });
+    if (queryDatasetId) profileParams.set("dataset_id", queryDatasetId);
+    if (queryCourseId) profileParams.set("course_id", queryCourseId);
+    if (queryGraphNodeId) profileParams.set("graph_node_id", queryGraphNodeId);
+    if (querySessionId) profileParams.set("session_id", querySessionId);
+
+    fetch(`/api/v1/learner-models/${encodeURIComponent(activeLearnerId)}?${profileParams.toString()}`, {
+      signal: controller.signal,
+    })
       .then((response) => {
         if (!response.ok) {
           throw new Error(
@@ -739,7 +750,15 @@ export default function StudentProfilePage() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeLearnerId, reloadToken]);
+  }, [
+    activeLearnerId,
+    queryCourseId,
+    queryDatasetId,
+    queryGraphNodeId,
+    queryScope,
+    querySessionId,
+    reloadToken,
+  ]);
 
   const skills = useMemo(() => {
     return uniqueSkills(Object.values(data?.learner.skills ?? {}));
@@ -797,6 +816,13 @@ export default function StudentProfilePage() {
     data?.learner.recent_observations?.[0] ||
     data?.snapshot.evaluation_summary ||
     "完成更多练习后将形成更稳定的观察。";
+  const latestLearningGoal = recentEvents[0]?.learning_goal?.trim();
+  const scopeLabel =
+    queryScope === "recent"
+      ? latestLearningGoal || "最近学习主题"
+      : queryScope === "global"
+        ? "全局画像"
+        : "筛选画像";
 
   function handleLookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -878,10 +904,10 @@ export default function StudentProfilePage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="text-3xl font-black text-slate-950">
-                        李明
+                        学习者画像
                       </h2>
                       <span className="text-sm font-semibold text-slate-500">
-                        高一（1）班
+                        {scopeLabel}
                       </span>
                     </div>
                     <div
@@ -1175,6 +1201,11 @@ export default function StudentProfilePage() {
                             <p className="mt-1 text-xs leading-5 text-slate-600">
                               {item.suggested_action}
                             </p>
+                            {item.reason && item.reason !== item.suggested_action && (
+                              <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                为什么推荐：{item.reason}
+                              </p>
+                            )}
                           </div>
                           <Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
                         </div>

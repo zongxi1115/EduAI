@@ -45,6 +45,7 @@ GRAPH_SKILL_MATCH_MIN_SCORE = 0.68
 GRAPH_MATCH_TIE_MARGIN = 0.04
 GRAPH_SCORE_LINE_LIMIT = 4
 GRAPH_RELATED_TOPIC_LIMIT = 3
+RECENT_SCOPE_EVENT_SCAN_LIMIT = 100
 PRIOR_RELATION_KEYWORDS = (
     "prerequisite",
     "precondition",
@@ -61,6 +62,14 @@ PRIOR_RELATION_KEYWORDS = (
 DEFAULT_LEARNER_PROFILE = (
     "Mixed-ability class that needs clear guidance, visual explanation, "
     "and structured practice."
+)
+GENERIC_MISCONCEPTION_PATTERNS = (
+    "请逐一核对每个空",
+    "建议重新比对题干关键词",
+    "先定位题干中的关键限定词",
+    "再逐项排除",
+    "可以回放音频",
+    "缺少足够的结构化规则",
 )
 
 
@@ -698,7 +707,7 @@ def _build_fallback_skill_judgments(
 ) -> list[SkillJudgment]:
     provided_tags = [tag.strip() for tag in request.question.skill_tags if tag.strip()]
     score = _correctness_score(review)
-    misconception_tags = [item.strip() for item in review.issues if item.strip()][:2]
+    misconception_tags = _specific_misconception_tags(review.issues)[:2]
 
     if provided_tags:
         coverage = round(1.0 / len(provided_tags), 4)
@@ -747,11 +756,7 @@ def _sanitize_skill_judgments(
     for item in raw_items[:3]:
         skill_id = _normalize_skill_id(item.skill_id or item.display_name or request.question.question_type)
         display_name = item.display_name.strip() or _skill_display_name(skill_id)
-        misconception_tags = [
-            tag.strip()
-            for tag in item.misconception_tags
-            if isinstance(tag, str) and tag.strip()
-        ]
+        misconception_tags = _specific_misconception_tags(item.misconception_tags)
         sanitized.append(
             item.model_copy(
                 update={
@@ -767,6 +772,20 @@ def _sanitize_skill_judgments(
             )
         )
     return sanitized or _build_fallback_skill_judgments(request, review)
+
+
+def _specific_misconception_tags(items: list[str]) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        cleaned = str(item or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        if any(pattern in cleaned for pattern in GENERIC_MISCONCEPTION_PATTERNS):
+            continue
+        tags.append(cleaned)
+        seen.add(cleaned)
+    return tags
 
 
 def _refresh_record_freshness(record: LearnerModelRecord, *, current_timestamp: str) -> LearnerModelRecord:
@@ -814,14 +833,14 @@ def _build_recommendations(
 ) -> list[str]:
     recommendations: list[str] = []
     if overall_confidence < 0.35:
-        recommendations.append("当前高质量证据还不够，建议先补1到2组低门槛诊断题再决定整体难度。")
+        recommendations.append("先做几道基础核对题，确认学生到底卡在概念、步骤还是表达。")
     for state in weak_states[:2]:
         recommendations.append(
-            f"围绕“{state.display_name}”先做分步诊断与小步巩固，避免直接跳到综合迁移。"
+            f"先处理“{state.display_name}”这个薄弱点，再进入综合题。"
         )
     if misconception_pairs:
         tag, _count = misconception_pairs[0]
-        recommendations.append(f"下一轮讲解里显式对比并纠正“{tag}”这一类误区。")
+        recommendations.append(f"讲解时专门对比“{tag}”，避免学生继续沿用这个错误思路。")
     return _trim_recent_items(recommendations, limit=4)
 
 
@@ -859,14 +878,14 @@ def _skill_recommendation_type(state: SkillState) -> str:
 
 def _skill_recommendation_action(state: SkillState, recommendation_type: str) -> str:
     if recommendation_type == "diagnose":
-        return f"先给“{state.display_name}”安排1组低门槛诊断题，补足判断证据。"
+        return f"先做3到5道“{state.display_name}”基础题，确认是概念没懂、步骤不会，还是只是偶然失误。"
     if recommendation_type == "remediate":
-        return f"用例题拆解和即时反馈重讲“{state.display_name}”，每步只引入一个变化。"
+        return f"先看1个“{state.display_name}”例题拆解，再做2道同型题，做完立刻核对错在哪一步。"
     if recommendation_type == "consolidate":
-        return f"围绕“{state.display_name}”做2到3题同型变式，确认能稳定迁移。"
+        return f"继续做2到3道“{state.display_name}”变式题，确认换一种问法也能做对。"
     if recommendation_type == "challenge":
-        return f"给“{state.display_name}”增加综合题或开放题，验证高阶应用能力。"
-    return f"把“{state.display_name}”接到下一知识点，边学边穿插快速复盘。"
+        return f"可以给“{state.display_name}”安排综合题或开放题，看看能不能独立迁移。"
+    return f"把“{state.display_name}”接到下一知识点，开头用1道旧题快速复盘。"
 
 
 def _build_skill_recommendation(state: SkillState) -> LearningRecommendation | None:
@@ -874,16 +893,23 @@ def _build_skill_recommendation(state: SkillState) -> LearningRecommendation | N
     recommendation_type = _skill_recommendation_type(state)
     if score < 0.28 and recommendation_type != "challenge":
         return None
-    reason = (
-        f"掌握度 {state.mastery:.0%}，可信度 {state.confidence:.0%}，"
-        f"近期表现 {state.rolling_score:.0%}。"
-    )
-    if state.misconception_counts:
+    if recommendation_type == "diagnose":
+        reason = f"关于“{state.display_name}”的有效记录还少，系统还不能稳定判断真实水平。"
+    elif recommendation_type == "remediate":
+        reason = f"“{state.display_name}”近期多次表现偏低，优先补这个点比直接做综合题更合适。"
+    elif recommendation_type == "consolidate":
+        reason = f"“{state.display_name}”已有一些基础，但最近表现还不够稳定，需要用变式题巩固。"
+    elif recommendation_type == "challenge":
+        reason = f"“{state.display_name}”表现比较稳定，可以用更综合的任务验证迁移能力。"
+    else:
+        reason = f"“{state.display_name}”已经具备一定基础，可以衔接到相邻知识点。"
+    specific_misconceptions = _specific_misconception_tags(list(state.misconception_counts.keys()))
+    if specific_misconceptions:
         top_misconception = max(
-            state.misconception_counts.items(),
-            key=lambda item: (item[1], item[0]),
-        )[0]
-        reason += f" 高频误区：{top_misconception}。"
+            specific_misconceptions,
+            key=lambda item: (state.misconception_counts.get(item, 0), item),
+        )
+        reason += f" 最近常见卡点：{top_misconception}。"
     return LearningRecommendation(
         target_id=f"skill:{state.skill_id}",
         title=state.display_name,
@@ -1109,6 +1135,61 @@ def _build_snapshot(record: LearnerModelRecord) -> LearnerModelSnapshot:
     )
 
 
+def _event_matches_scope(
+    event: LearningEvidenceEvent,
+    *,
+    dataset_id: str,
+    course_id: str,
+    graph_node_id: str,
+    session_id: str,
+) -> bool:
+    if session_id and event.session_id != session_id:
+        return False
+
+    if not any((dataset_id, course_id, graph_node_id)):
+        return True
+
+    context = event.graph_context
+    if context is None:
+        return False
+    if dataset_id and context.dataset_id != dataset_id:
+        return False
+    if course_id and course_id not in {context.course_id, context.course_group_id, context.source_graph_id}:
+        return False
+    if graph_node_id and context.focus_node_id != graph_node_id:
+        return False
+    return True
+
+
+def _skill_matches_scope(
+    state: SkillState,
+    *,
+    dataset_id: str,
+    course_id: str,
+    graph_node_id: str,
+) -> bool:
+    if dataset_id and state.graph_dataset_id != dataset_id:
+        return False
+    if course_id and course_id not in {state.course_id, state.course_group_id, state.source_graph_id}:
+        return False
+    if graph_node_id and state.graph_node_id != graph_node_id:
+        return False
+    return True
+
+
+def _infer_recent_graph_scope(events: list[LearningEvidenceEvent]) -> dict[str, str]:
+    for event in events:
+        context = event.graph_context
+        if context is None or not context.dataset_id:
+            continue
+        return {
+            "dataset_id": context.dataset_id,
+            "course_id": context.course_id or context.course_group_id or context.source_graph_id or "",
+            "graph_node_id": context.focus_node_id or "",
+        }
+    return {}
+
+
 class LearnerModelRepository:
     """JSON-based persistence for learner models and their event logs."""
 
@@ -1171,14 +1252,92 @@ class LearnerModelService:
         self.graph_index = KnowledgeGraphIndex(graph_root=graph_root)
         self._lock = threading.Lock()
 
-    def get_model_response(self, learner_id: str, *, event_limit: int = 20) -> LearnerModelResponse:
+    def get_model_response(
+        self,
+        learner_id: str,
+        *,
+        event_limit: int = 20,
+        scope: str = "global",
+        dataset_id: str = "",
+        course_id: str = "",
+        graph_node_id: str = "",
+        session_id: str = "",
+    ) -> LearnerModelResponse:
         record = self.repository.load_model(learner_id)
         if record is None:
             raise FileNotFoundError(learner_id)
         refreshed = _refresh_record_freshness(record, current_timestamp=now_iso())
+        scan_limit = max(event_limit, RECENT_SCOPE_EVENT_SCAN_LIMIT)
+        recent_events = self.repository.list_events(learner_id, limit=scan_limit)
+
+        normalized_scope = (scope or "global").strip().lower()
+        active_dataset_id = dataset_id.strip()
+        active_course_id = course_id.strip()
+        active_graph_node_id = graph_node_id.strip()
+        active_session_id = session_id.strip()
+        if normalized_scope == "recent" and not any(
+            (active_dataset_id, active_course_id, active_graph_node_id, active_session_id)
+        ):
+            inferred_scope = _infer_recent_graph_scope(recent_events)
+            active_dataset_id = inferred_scope.get("dataset_id", "")
+            active_course_id = inferred_scope.get("course_id", "")
+            active_graph_node_id = inferred_scope.get("graph_node_id", "")
+
+        has_scope_filter = any(
+            (active_dataset_id, active_course_id, active_graph_node_id, active_session_id)
+        )
+        if has_scope_filter:
+            scoped_events = [
+                event
+                for event in recent_events
+                if _event_matches_scope(
+                    event,
+                    dataset_id=active_dataset_id,
+                    course_id=active_course_id,
+                    graph_node_id=active_graph_node_id,
+                    session_id=active_session_id,
+                )
+            ]
+            scoped_skills = {
+                skill_id: state
+                for skill_id, state in refreshed.skills.items()
+                if _skill_matches_scope(
+                    state,
+                    dataset_id=active_dataset_id,
+                    course_id=active_course_id,
+                    graph_node_id=active_graph_node_id,
+                )
+            }
+            scoped_record = refreshed.model_copy(
+                update={
+                    "skills": scoped_skills,
+                    "total_events": len(scoped_events),
+                    "total_sessions": len(
+                        {
+                            event.session_id
+                            for event in scoped_events
+                            if event.session_id
+                        }
+                    ),
+                    "recent_observations": _trim_recent_items(
+                        [
+                            observation
+                            for event in reversed(scoped_events)
+                            for observation in event.learner_observations
+                        ],
+                        limit=RECENT_OBSERVATION_WINDOW,
+                    ),
+                }
+            )
+            refreshed = scoped_record.model_copy(
+                update={"overall": _recompute_overall(scoped_record, current_timestamp=now_iso())}
+            )
+            recent_events = scoped_events[:event_limit]
+        else:
+            recent_events = recent_events[:event_limit]
+
         refreshed = self._attach_learning_recommendations(refreshed)
         snapshot = _build_snapshot(refreshed)
-        recent_events = self.repository.list_events(learner_id, limit=event_limit)
         return LearnerModelResponse(
             learner=refreshed,
             snapshot=snapshot,
@@ -1414,7 +1573,8 @@ class LearnerModelService:
                 scoped_items.append(ScopedSkillEvidence(judgment=judgment, context=context))
                 continue
 
-            scoped_skill_id = f"graph:{context.dataset.dataset_id}:{node.node_id}"
+            sub_skill_id = _normalize_skill_id(judgment.display_name or judgment.skill_id)
+            scoped_skill_id = f"graph:{context.dataset.dataset_id}:{node.node_id}:skill:{sub_skill_id}"
             scoped_items.append(
                 ScopedSkillEvidence(
                     judgment=judgment.model_copy(update={"skill_id": scoped_skill_id}),

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
 import logoMark from "@/assets/learning-login/logo-mark.svg"
 
+const zxCallbackExchangePromises = new Map<string, Promise<void>>()
+
 function decodeNextFromState(state: string) {
   const payloadPart = state.split(".")[0]
   if (!payloadPart) return "/"
@@ -45,8 +47,18 @@ export default function LoginCallbackPage() {
         return
       }
 
+      const exchangeKey = `${code}.${state}`
+      let exchangePromise = zxCallbackExchangePromises.get(exchangeKey)
+      if (!exchangePromise) {
+        exchangePromise = completeZxAuthCallback(code, state).catch((callbackError: unknown) => {
+          zxCallbackExchangePromises.delete(exchangeKey)
+          throw callbackError
+        })
+        zxCallbackExchangePromises.set(exchangeKey, exchangePromise)
+      }
+
       try {
-        await completeZxAuthCallback(code, state)
+        await exchangePromise
         if (!active) return
         setStatusText("登录成功，正在进入学习系统...")
         window.setTimeout(() => {

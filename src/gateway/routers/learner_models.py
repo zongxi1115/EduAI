@@ -35,9 +35,25 @@ def get_learner_model(
     learner_model_service: LearnerModelServiceDep,
     learner_id: str = ApiPath(description="学习者唯一标识。"),
     event_limit: int = Query(20, ge=1, le=100, description="附带返回的最近事件数量。"),
+    scope: str = Query(
+        "global",
+        description="画像切片范围。可用 global 或 recent；也可配合 dataset_id/course_id/graph_node_id/session_id。",
+    ),
+    dataset_id: str = Query("", description="只查看指定知识图谱数据集下的画像。"),
+    course_id: str = Query("", description="只查看指定课程或课程群下的画像。"),
+    graph_node_id: str = Query("", description="只查看指定图谱节点下的画像。"),
+    session_id: str = Query("", description="只查看指定学习会话下的画像。"),
 ) -> LearnerModelResponse:
     try:
-        return learner_model_service.get_model_response(learner_id, event_limit=event_limit)
+        return learner_model_service.get_model_response(
+            learner_id,
+            event_limit=event_limit,
+            scope=scope,
+            dataset_id=dataset_id,
+            course_id=course_id,
+            graph_node_id=graph_node_id,
+            session_id=session_id,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown learner_id: {learner_id}") from exc
 

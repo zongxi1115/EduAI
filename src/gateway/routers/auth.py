@@ -151,6 +151,31 @@ def _decode_unverified_jwt_payload(token: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _zx_oauth_error_detail(response: httpx.Response, action: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        text = response.text.strip()
+        return f"ZX Auth {action} failed ({response.status_code}): {text[:200] or 'empty response'}"
+    if not isinstance(payload, dict):
+        return f"ZX Auth {action} failed ({response.status_code})."
+
+    error = payload.get("error")
+    description = payload.get("error_description") or payload.get("message") or payload.get("detail")
+    parts = [
+        str(part).strip()
+        for part in (error, description)
+        if isinstance(part, str) and part.strip()
+    ]
+    suffix = " | ".join(parts) if parts else "no error detail"
+    return f"ZX Auth {action} failed ({response.status_code}): {suffix}"
+
+
+def _zx_has_subject(claims: dict[str, Any]) -> bool:
+    subject = claims.get("sub") or claims.get("id") or claims.get("user_id") or claims.get("openid")
+    return isinstance(subject, str) and bool(subject.strip())
+
+
 @router.post(
     "/register",
     response_model=AuthSessionResponse,
@@ -240,38 +265,46 @@ async def zx_auth_callback(
     if not isinstance(token_endpoint, str) or not token_endpoint:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="ZX Auth missing token endpoint.")
 
+    auth_methods = discovery.get("token_endpoint_auth_methods_supported")
+    use_basic_auth = not isinstance(auth_methods, list) or "client_secret_basic" in auth_methods
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": payload.code,
+        "redirect_uri": settings.zx_auth_redirect_uri,
+    }
+    token_auth: tuple[str, str] | None = None
+    if use_basic_auth:
+        token_auth = (settings.zx_auth_client_id, settings.zx_auth_client_secret)
+    else:
+        token_data["client_id"] = settings.zx_auth_client_id
+        token_data["client_secret"] = settings.zx_auth_client_secret
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             token_response = await client.post(
                 token_endpoint,
-                data={
-                    "grant_type": "authorization_code",
-                    "code": payload.code,
-                    "redirect_uri": settings.zx_auth_redirect_uri,
-                    "client_id": settings.zx_auth_client_id,
-                    "client_secret": settings.zx_auth_client_secret,
-                },
+                data=token_data,
                 headers={"Accept": "application/json"},
+                auth=token_auth,
             )
-            token_response.raise_for_status()
-            token_payload = token_response.json()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"ZX Auth token request failed: {exc.__class__.__name__}",
+        ) from exc
 
-            userinfo = None
-            userinfo_endpoint = discovery.get("userinfo_endpoint")
-            access_token = token_payload.get("access_token") if isinstance(token_payload, dict) else None
-            if isinstance(userinfo_endpoint, str) and isinstance(access_token, str) and access_token:
-                userinfo_response = await client.get(
-                    userinfo_endpoint,
-                    headers={
-                        "Accept": "application/json",
-                        "Authorization": f"Bearer {access_token}",
-                    },
-                )
-                userinfo_response.raise_for_status()
-                userinfo_payload = userinfo_response.json()
-                userinfo = userinfo_payload if isinstance(userinfo_payload, dict) else None
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="ZX Auth token exchange failed.") from exc
+    try:
+        token_response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_zx_oauth_error_detail(token_response, "token exchange"),
+        ) from exc
+
+    try:
+        token_payload = token_response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="ZX Auth returned invalid token JSON.") from exc
 
     if not isinstance(token_payload, dict):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="ZX Auth returned invalid token payload.")
@@ -280,6 +313,43 @@ async def zx_auth_callback(
         if isinstance(token_payload.get("id_token"), str)
         else {}
     )
+
+    userinfo = None
+    userinfo_endpoint = discovery.get("userinfo_endpoint")
+    access_token = token_payload.get("access_token")
+    if isinstance(userinfo_endpoint, str) and isinstance(access_token, str) and access_token:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                userinfo_response = await client.get(
+                    userinfo_endpoint,
+                    headers={
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {access_token}",
+                    },
+                )
+            userinfo_response.raise_for_status()
+            userinfo_payload = userinfo_response.json()
+        except httpx.HTTPStatusError as exc:
+            if not _zx_has_subject(id_token_payload):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=_zx_oauth_error_detail(userinfo_response, "userinfo request"),
+                ) from exc
+        except httpx.HTTPError as exc:
+            if not _zx_has_subject(id_token_payload):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"ZX Auth userinfo request failed: {exc.__class__.__name__}",
+                ) from exc
+        except ValueError as exc:
+            if not _zx_has_subject(id_token_payload):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="ZX Auth returned invalid userinfo JSON.",
+                ) from exc
+        else:
+            userinfo = userinfo_payload if isinstance(userinfo_payload, dict) else None
+
     claims = _extract_zx_claims(id_token_payload, userinfo)
     user = user_service.upsert_zx_auth_user(
         subject=str(claims["subject"]),
