@@ -10,6 +10,7 @@ import { DraftBoard } from "@/components/DraftBoard";
 import { X } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { Textarea } from "@/components/ui/textarea";
+import { apiUrl } from "@/lib/api";
 
 export interface ProgrammingQuestionProps {
   questionContent: string; // Markdown + LaTeX
@@ -48,7 +49,7 @@ const SUPPORTED_PYTHON_LANGUAGES = new Set(["python", "py", "python3"]);
 const RUNNER_PANEL_MIN_HEIGHT = 240;
 const RUNNER_PANEL_DEFAULT_HEIGHT = 320;
 const RUNNER_PANEL_MAX_HEIGHT = 520;
-const PYTHON_RUN_ENDPOINT = "/api/v1/code-execution/execute";
+const PYTHON_RUN_ENDPOINT = apiUrl("/api/v1/code-execution/execute");
 
 interface RemoteRunnerResponse {
   ok: boolean;

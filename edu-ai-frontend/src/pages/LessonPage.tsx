@@ -31,6 +31,7 @@ import { Markdown } from "@/components/ui/markdown";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { apiUrl } from "@/lib/api";
 
 interface ClassroomRunSnapshot {
   status: ClassroomRunStatus;
@@ -1316,7 +1317,7 @@ export default function LessonPage() {
       loadedResultRef.current = true;
 
       try {
-        const resultResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}/result`);
+        const resultResponse = await fetch(apiUrl(`/api/v1/classroom/${encodeURIComponent(id)}/result`));
         if (!resultResponse.ok) {
           loadedResultRef.current = false;
 
@@ -1390,7 +1391,7 @@ export default function LessonPage() {
 
     const connectEvents = () => {
       eventSource = new EventSource(
-        `/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=-1&heartbeat_seconds=5`,
+        apiUrl(`/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=-1&heartbeat_seconds=5`),
       );
 
       const handleStreamMessage = (messageEvent: MessageEvent<string>) => {
@@ -1434,7 +1435,7 @@ export default function LessonPage() {
 
     const loadSnapshot = async () => {
       try {
-        const statusResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}`);
+        const statusResponse = await fetch(apiUrl(`/api/v1/classroom/${encodeURIComponent(id)}`));
         if (!statusResponse.ok) {
           throw new Error(await readErrorMessage(statusResponse, "课堂任务状态查询失败。"));
         }

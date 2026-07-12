@@ -20,6 +20,7 @@ import {
   ChainOfThoughtTrigger,
   ChainOfThoughtContent
 } from "@/components/ui/chain-of-thought";
+import { apiUrl } from "@/lib/api";
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -92,7 +93,7 @@ export default function LoadingPage() {
       }
     }]);
 
-    const eventSource = new EventSource(`/api/v1/prep-runs/${id}/events`);
+    const eventSource = new EventSource(apiUrl(`/api/v1/prep-runs/${id}/events`));
 
     const handleMessage = (e: MessageEvent) => {
       try {
@@ -295,7 +296,7 @@ export default function LoadingPage() {
 
       setSelectedFileUrl(relativePath);
 
-      const res = await fetch(`/api/v1/prep-runs/${id}/files/${encodeURIComponent(relativePath)}`);
+      const res = await fetch(apiUrl(`/api/v1/prep-runs/${id}/files/${encodeURIComponent(relativePath)}`));
       if (!res.ok) {
         throw new Error(`Failed to fetch file: ${res.statusText}`);
       }
@@ -320,7 +321,7 @@ export default function LoadingPage() {
 
     try {
       const classroomLookupResponse = await fetch(
-        `/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`,
+        apiUrl(`/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`),
         { headers: { Accept: "application/json" } }
       );
 
@@ -352,7 +353,7 @@ export default function LoadingPage() {
         throw new Error(message);
       }
 
-      const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`, {
+      const response = await fetch(apiUrl(`/api/v1/prep-runs/${encodeURIComponent(id)}/classroom`), {
         method: "POST",
         headers: { Accept: "application/json" },
       });

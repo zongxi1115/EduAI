@@ -36,6 +36,7 @@ import type { PracticeQuestionRecord } from "@/components/PracticeQuestionWorksp
 import { FloatingAIInput } from "@/components/FloatingAIInput";
 import { Battery as CircularProgressWidget } from "@/components/ui/battery";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { apiUrl } from "@/lib/api";
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
 type MaterialOpenMode = "markdown" | "link" | "download";
@@ -914,8 +915,8 @@ export default function StudyArea() {
 
       try {
         const [statusResponse, artifactsResponse] = await Promise.all([
-          fetch(`/api/v1/prep-runs/${runId}`, { signal: controller.signal }),
-          fetch(`/api/v1/prep-runs/${runId}/artifacts`, { signal: controller.signal }),
+          fetch(apiUrl(`/api/v1/prep-runs/${runId}`), { signal: controller.signal }),
+          fetch(apiUrl(`/api/v1/prep-runs/${runId}/artifacts`), { signal: controller.signal }),
         ]);
 
         if (!statusResponse.ok) {
@@ -1003,7 +1004,7 @@ export default function StudyArea() {
     const controller = new AbortController();
     let cancelled = false;
     setIsLoadingLearnerModel(true);
-    fetch(`/api/v1/learner-models/${encodeURIComponent(workspaceData.learnerId)}`, {
+    fetch(apiUrl(`/api/v1/learner-models/${encodeURIComponent(workspaceData.learnerId)}`), {
       signal: controller.signal,
     })
       .then((res) => {
@@ -1176,7 +1177,7 @@ export default function StudyArea() {
 
     try {
       const classroomLookupResponse = await fetch(
-        `/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`,
+        apiUrl(`/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`),
         {
           headers: { Accept: "application/json" },
         }
@@ -1210,7 +1211,7 @@ export default function StudyArea() {
         throw new Error(message);
       }
 
-      const response = await fetch(`/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`, {
+      const response = await fetch(apiUrl(`/api/v1/prep-runs/${encodeURIComponent(runId)}/classroom`), {
         method: "POST",
         headers: { Accept: "application/json" },
       });
