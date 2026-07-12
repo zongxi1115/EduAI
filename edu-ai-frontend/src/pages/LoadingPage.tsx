@@ -26,6 +26,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import 'katex/dist/katex.min.css';
 import { KATEX_RENDER_OPTIONS } from '@/lib/math';
+import { apiUrl } from '@/lib/api';
 
 type PrepRunStatus = "queued" | "running" | "succeeded" | "failed" | "unknown";
 
@@ -208,7 +209,7 @@ export default function LoadingPage() {
       }
     }]);
 
-    const eventSource = new EventSource(`/api/v1/prep-runs/${id}/events`);
+    const eventSource = new EventSource(apiUrl(`/api/v1/prep-runs/${id}/events`));
 
     const handleMessage = (e: MessageEvent) => {
       try {
@@ -411,7 +412,7 @@ export default function LoadingPage() {
 
       setSelectedFileUrl(relativePath);
 
-      const res = await fetch(`/api/v1/prep-runs/${id}/files/${encodeURIComponent(relativePath)}`);
+      const res = await fetch(apiUrl(`/api/v1/prep-runs/${id}/files/${encodeURIComponent(relativePath)}`));
       if (!res.ok) {
         throw new Error(`文件读取失败：${res.statusText}`);
       }

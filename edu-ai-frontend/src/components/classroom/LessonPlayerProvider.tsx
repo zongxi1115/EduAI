@@ -10,6 +10,7 @@ import {
 } from "react";
 import katex from "katex";
 import katexCssUrl from "katex/dist/katex.min.css?url";
+import { apiUrl } from "@/lib/api";
 
 export interface LessonReveal {
   narration: string;
@@ -194,10 +195,10 @@ function buildClassroomFileUrl(runId: string, relativePath: string | null | unde
   if (!relativePath) {
     return null;
   }
-  return `/api/v1/classroom/${encodeURIComponent(runId)}/files/${relativePath
+  return apiUrl(`/api/v1/classroom/${encodeURIComponent(runId)}/files/${relativePath
     .split("/")
     .map((segment) => encodeURIComponent(segment))
-    .join("/")}`;
+    .join("/")}`);
 }
 
 function hasMathSyntax(text: string) {
@@ -295,7 +296,7 @@ function renderMathInHtml(html: string) {
 }
 
 function rewritePrepMediaPaths(html: string, runId: string): string {
-  const prefix = `/api/v1/classroom/${encodeURIComponent(runId)}/files/`;
+  const prefix = apiUrl(`/api/v1/classroom/${encodeURIComponent(runId)}/files/`);
   return html.replace(
     /((?:src|href)\s*=\s*["'])prep_media\//g,
     `$1${prefix}prep_media/`

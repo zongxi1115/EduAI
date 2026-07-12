@@ -12,6 +12,7 @@ import { Code2, Copy, Eye, FileCode2, LoaderCircle, SendHorizontal, Sparkles, X 
 import { Message, MessageAvatar, MessageContent, MessageActions, MessageAction } from "@/components/ui/message";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { apiUrl } from "@/lib/api";
 
 type ChatMessage = {
   id: string;
@@ -37,7 +38,7 @@ type HtmlArtifact = {
 type ArtifactView = "preview" | "code";
 type SheetDisplayMode = "half" | "fullscreen" | "collapsed";
 
-const STREAM_ENDPOINT = "/api/v1/assistant/selection-qa/stream";
+const STREAM_ENDPOINT = apiUrl("/api/v1/assistant/selection-qa/stream");
 const SHEET_SPRING = { type: "spring", stiffness: 260, damping: 30, mass: 0.9 } as const;
 const ARTIFACT_OPEN_PATTERN = /<edu-html-artifact\b([^>]*)>/i;
 const ARTIFACT_CLOSE_PATTERN = /<\/edu-html-artifact>/i;

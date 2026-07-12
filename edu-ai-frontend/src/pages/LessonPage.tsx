@@ -37,6 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { MorphSurface } from "@/components/smoothui/ai-input";
 import { cn } from "@/lib/utils";
+import { apiUrl } from "@/lib/api";
 
 interface ClassroomRunSnapshot {
   status: ClassroomRunStatus;
@@ -2029,7 +2030,7 @@ export default function LessonPage() {
       resultRequestStarted = true;
 
       try {
-        const resultResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}/result`);
+        const resultResponse = await fetch(apiUrl(`/api/v1/classroom/${encodeURIComponent(id)}/result`));
         if (disposed) {
           return;
         }
@@ -2116,7 +2117,7 @@ export default function LessonPage() {
       }
 
       eventSource = new EventSource(
-        `/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=${lastEventIndex}&heartbeat_seconds=5`,
+        apiUrl(`/api/v1/classroom/${encodeURIComponent(id)}/events?after_id=${lastEventIndex}&heartbeat_seconds=5`),
       );
 
       const handleStreamMessage = (messageEvent: MessageEvent<string>) => {
@@ -2179,7 +2180,7 @@ export default function LessonPage() {
 
     const loadSnapshot = async () => {
       try {
-        const statusResponse = await fetch(`/api/v1/classroom/${encodeURIComponent(id)}`);
+        const statusResponse = await fetch(apiUrl(`/api/v1/classroom/${encodeURIComponent(id)}`));
         if (!statusResponse.ok) {
           throw new Error(await readErrorMessage(statusResponse, "课堂任务状态查询失败。"));
         }

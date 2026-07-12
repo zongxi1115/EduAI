@@ -11,6 +11,7 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 import homepageBackground from "@/assets/homepage.png"
 import { useAuth } from "@/lib/auth"
 import { getOrCreateGuestLearnerId } from "@/lib/learner"
+import { apiUrl } from "@/lib/api"
 
 const SUGGESTIONS = [
   // Row 1
@@ -150,7 +151,7 @@ export default function HomePage() {
 
     async function fetchHistory() {
       try {
-        const res = await fetch("/api/v1/prep-runs")
+        const res = await fetch(apiUrl("/api/v1/prep-runs"))
         if (res.ok && active) {
           const data = await res.json()
           setHistoryRuns(data.items || [])
@@ -251,7 +252,7 @@ export default function HomePage() {
         return
       }
 
-      const response = await fetch("/api/v1/prep-runs", {
+      const response = await fetch(apiUrl("/api/v1/prep-runs"), {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -313,7 +314,7 @@ export default function HomePage() {
     const snapshot = historyRuns
     setHistoryRuns(prev => prev.filter(r => r.run_id !== runId))
     try {
-      const response = await fetch(`/api/v1/prep-runs/${runId}`, { method: "DELETE" })
+      const response = await fetch(apiUrl(`/api/v1/prep-runs/${runId}`), { method: "DELETE" })
       if (!response.ok) {
         setHistoryRuns(snapshot) // rollback
       }
