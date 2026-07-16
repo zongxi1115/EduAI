@@ -5,6 +5,7 @@ import { Copy, LoaderCircle, SendHorizontal, Sparkles, X } from "lucide-react";
 import { Message, MessageAvatar, MessageContent, MessageActions, MessageAction } from "@/components/ui/message";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { apiUrl } from "@/lib/api";
 
 type ChatMessage = {
   id: string;
@@ -19,7 +20,7 @@ type SelectionQuestionHistoryItem = {
   content: string;
 };
 
-const STREAM_ENDPOINT = "/api/v1/assistant/selection-qa/stream";
+const STREAM_ENDPOINT = apiUrl("/api/v1/assistant/selection-qa/stream");
 const SHEET_SPRING = { type: "spring", stiffness: 260, damping: 30, mass: 0.9 } as const;
 
 function withQuotedSelection(text: string) {

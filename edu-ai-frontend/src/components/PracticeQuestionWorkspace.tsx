@@ -13,6 +13,7 @@ import { ProgrammingQuestion } from "@/components/ProgrammingQuestion";
 import { FillInTheBlanksQuestion } from "@/components/FillInTheBlanksQuestion";
 import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
 import { DrawingQuestion } from "@/components/DrawingQuestion";
+import { apiUrl } from "@/lib/api";
 
 export type PracticeQuestionType =
   | "FillInTheBlank"
@@ -1642,7 +1643,7 @@ export function PracticeQuestionWorkspace({
 
   const loadReviewCapabilities = async () => {
     try {
-      const response = await fetch("/api/v1/practice-review/capabilities", {
+      const response = await fetch(apiUrl("/api/v1/practice-review/capabilities"), {
         headers: {
           Accept: "application/json",
         },
@@ -1674,7 +1675,7 @@ export function PracticeQuestionWorkspace({
     }
 
     try {
-      await fetch("/api/v1/learner-models/ingest-review", {
+      await fetch(apiUrl("/api/v1/learner-models/ingest-review"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1769,7 +1770,7 @@ export function PracticeQuestionWorkspace({
     }
 
     try {
-      const response = await fetch("/api/v1/practice-review/judge", {
+      const response = await fetch(apiUrl("/api/v1/practice-review/judge"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

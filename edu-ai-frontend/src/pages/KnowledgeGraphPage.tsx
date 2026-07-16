@@ -10,6 +10,7 @@ import {
   Play,
   LoaderCircle,
 } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 /* ───────── Types ───────── */
 
@@ -140,7 +141,7 @@ export default function KnowledgeGraphPage() {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch("/api/knowledge-graphs", {
+        const response = await fetch(apiUrl("/api/knowledge-graphs"), {
           headers: { Accept: "application/json" },
         });
         if (!response.ok)
@@ -373,7 +374,7 @@ export default function KnowledgeGraphPage() {
 
     setLearningTaskId(knowledgePoint);
     try {
-      const response = await fetch("/api/v1/prep-runs", {
+      const response = await fetch(apiUrl("/api/v1/prep-runs"), {
         method: "POST",
         headers: {
           Accept: "application/json",
