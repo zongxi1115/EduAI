@@ -43,6 +43,7 @@ from ..services.classroom_tasks import (
     find_existing_run_for_prep_run,
 )
 from ..services.learner_models import LearnerModelService
+from ..services.knowledge_base import attach_school_course_knowledge_base_context
 from ..services.prep_runs import (
     build_artifacts_response,
     build_links,
@@ -151,7 +152,10 @@ def create_prep_run(
         if current_user is not None
         else payload
     )
-    session = registry.create_run(learner_model_service.enrich_generation_request(scoped_payload))
+    scoped_payload = scoped_payload.model_copy(update={"knowledge_base_context": None})
+    enriched_payload = learner_model_service.enrich_generation_request(scoped_payload)
+    payload_with_knowledge_base = attach_school_course_knowledge_base_context(enriched_payload)
+    session = registry.create_run(payload_with_knowledge_base)
     return RunCreatedResponse(
         run_id=session.run_id,
         status=session.status,

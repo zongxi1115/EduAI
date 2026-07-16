@@ -45,6 +45,53 @@ class LearningGraphContext(BaseModel):
     )
 
 
+class KnowledgeBaseRetrievalHit(BaseModel):
+    """One retrieved chunk from a course knowledge base."""
+
+    source_id: str = Field(description="知识库来源标识，例如课程图谱 dataset id。")
+    node_id: str = Field(description="命中的知识节点标识。")
+    title: str = Field(description="命中的知识节点标题。")
+    path: list[str] = Field(
+        default_factory=list,
+        description="从课程/模块到该节点的标题路径。",
+    )
+    summary: str = Field(default="", description="节点摘要。")
+    content: list[str] = Field(
+        default_factory=list,
+        description="节点正文、关键内容、应用或先修要求的短片段。",
+    )
+    score: float = Field(
+        default=0.0,
+        ge=0,
+        le=1,
+        description="检索相关度分数，范围 0-1。",
+    )
+
+
+class KnowledgeBaseContext(BaseModel):
+    """RAG retrieval context attached to a generation request."""
+
+    tool_name: str = Field(
+        default="knowledge_base_rag_search",
+        description="生成教学素材时可参考的知识库 RAG 检索工具名称。",
+    )
+    source_id: str = Field(description="知识库来源标识。")
+    source_title: str = Field(description="知识库来源名称。")
+    query: str = Field(description="本轮检索使用的查询文本。")
+    hits: list[KnowledgeBaseRetrievalHit] = Field(
+        default_factory=list,
+        description="检索返回的知识库片段。",
+    )
+    usage_policy: list[str] = Field(
+        default_factory=lambda: [
+            "优先依据知识库片段确定校本课程的术语、先修关系、内容边界和案例方向。",
+            "知识库没有覆盖的内容可以用通用学科知识补充，但不要把未检索到的内容伪装成校本资料。",
+            "生成学案、练习、动画和互动网页时，应尽量复用命中节点标题、路径和摘要。",
+        ],
+        description="给生成 Agent 的 RAG 使用约束。",
+    )
+
+
 class GenerationRequest(BaseModel):
     """用于启动课前准备工作流的请求体。"""
 
@@ -79,6 +126,10 @@ class GenerationRequest(BaseModel):
     graph_context: LearningGraphContext | None = Field(
         default=None,
         description="从知识图谱发起学习时携带的显式图谱上下文。",
+    )
+    knowledge_base_context: KnowledgeBaseContext | None = Field(
+        default=None,
+        description="当校本课程关联知识库时，由后端注入的 RAG 检索上下文。",
     )
     language: str = Field(
         default="zh-CN",
