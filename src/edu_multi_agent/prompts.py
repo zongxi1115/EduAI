@@ -6,6 +6,7 @@ from pathlib import Path
 from .models import (
     ArtifactResult,
     GenerationRequest,
+    KnowledgeBaseContext,
     PracticeBlueprint,
     PreparationPlan,
 )
@@ -25,6 +26,36 @@ def _artifact_json(artifacts: list[ArtifactResult]) -> str:
 
 def _practice_blueprint_json(blueprint: PracticeBlueprint) -> str:
     return json.dumps(blueprint.model_dump(), ensure_ascii=False, indent=2)
+
+
+def _knowledge_base_prompt(context: KnowledgeBaseContext | None) -> str:
+    if context is None or not context.hits:
+        return "Knowledge base RAG tool: not available for this request."
+
+    return "\n".join(
+        [
+            "Knowledge base RAG tool:",
+            f"- Tool name: {context.tool_name}",
+            f"- Source: {context.source_title} ({context.source_id})",
+            f"- Query: {context.query}",
+            "- Tool result: the retrieved snippets below are the knowledge-base search output for this request.",
+            "- Usage policy:",
+            *[f"  - {item}" for item in context.usage_policy],
+            "- Retrieved snippets:",
+            *[
+                "\n".join(
+                    [
+                        f"  {index}. {hit.title} (score={hit.score:.2f})",
+                        f"     Path: {' > '.join(hit.path) if hit.path else hit.title}",
+                        f"     Summary: {hit.summary or '无'}",
+                        "     Content: "
+                        + ("；".join(hit.content[:5]) if hit.content else "无"),
+                    ]
+                )
+                for index, hit in enumerate(context.hits, start=1)
+            ],
+        ]
+    )
 
 
 def _load_question_type_reference() -> str:
@@ -66,6 +97,8 @@ Request context:
 - Learner profile: {request.learner_profile}
 - Notes: {request.notes}
 - Output language: {request.language}
+
+{_knowledge_base_prompt(request.knowledge_base_context)}
 
 Return one JSON object with exactly this shape:
 {{
@@ -131,6 +164,8 @@ Context:
 - Learner profile: {request.learner_profile}
 - Notes: {request.notes}
 
+{_knowledge_base_prompt(request.knowledge_base_context)}
+
 Supervisor plan:
 {_plan_json(plan)}
 
@@ -177,6 +212,8 @@ Context:
 - Grade level: {request.grade_level}
 - Learner profile: {request.learner_profile}
 - Notes: {request.notes}
+
+{_knowledge_base_prompt(request.knowledge_base_context)}
 
 Supervisor plan:
 {_plan_json(plan)}
@@ -251,6 +288,8 @@ Context:
 - Grade level: {request.grade_level}
 - Learner profile: {request.learner_profile}
 - Notes: {request.notes}
+
+{_knowledge_base_prompt(request.knowledge_base_context)}
 
 Supervisor plan:
 {_plan_json(plan)}
@@ -360,6 +399,8 @@ Context:
 - Learner profile: {request.learner_profile}
 - Notes: {request.notes}
 
+{_knowledge_base_prompt(request.knowledge_base_context)}
+
 Supervisor plan:
 {_plan_json(plan)}
 
@@ -413,6 +454,8 @@ Context:
 - Learner profile: {request.learner_profile}
 - Notes: {request.notes}
 
+{_knowledge_base_prompt(request.knowledge_base_context)}
+
 Supervisor plan:
 {_plan_json(plan)}
 
@@ -461,6 +504,8 @@ Context:
 - Grade level: {request.grade_level}
 - Learner profile: {request.learner_profile}
 - Output directory: {output_dir}
+
+{_knowledge_base_prompt(request.knowledge_base_context)}
 
 Preparation plan:
 {_plan_json(plan)}
