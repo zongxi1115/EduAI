@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -26,6 +27,10 @@ from .run_registry import RunRegistry, RunSession
 
 TERMINAL_EVENTS = {"workflow_completed", "workflow_failed"}
 AGENT_ORDER = {spec.agent_name: index for index, spec in enumerate(AGENT_SPECS)}
+
+# Run directories are created with the naming scheme YYYYMMDD_HHMMSS_<slug>.
+# Only directories matching this pattern should be listed as prep-run history.
+_RUN_ID_RE = re.compile(r"^\d{8}_\d{6}_.+")
 
 
 def load_json_file(path: Path) -> dict[str, Any] | None:
@@ -243,7 +248,11 @@ def list_run_views(
     """List all known runs from memory and disk, optionally filtered by status."""
     run_ids = set(registry.list_session_ids())
     if settings.output_root.is_dir():
-        run_ids.update(path.name for path in settings.output_root.iterdir() if path.is_dir())
+        run_ids.update(
+            path.name
+            for path in settings.output_root.iterdir()
+            if path.is_dir() and _RUN_ID_RE.match(path.name)
+        )
 
     views: list[dict[str, Any]] = []
     for run_id in run_ids:
